@@ -3,6 +3,8 @@ name = "prometheus-platform"
 version = "0.1.0"
 description = "Plataforma de trading multiestrategia de PrometheusQuant: datos, investigación, backtesting, paper y ejecución en vivo."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "David Quintela", email = "david.a.quintela@gmail.com" }]
 dependencies = [
