@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+
+# Secretos: nunca se versionan
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Datos y artefactos (se versionan con el lakehouse, no con git)
+data/
+mlruns/
+*.parquet
+*.duckdb
+*.ducklake
+
+# Editores y SO
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*:Zone.Identifier

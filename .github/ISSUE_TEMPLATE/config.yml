@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Backlog en Jira (proyecto PQ)
+    url: https://prometheusquant.atlassian.net/jira/software/projects/PQ/boards
+    about: El trabajo se planifica en Jira. Usa GitHub Issues solo para reportes externos.

@@ -1,0 +1,5 @@
+# Cada PR requiere revisión de un responsable. Ajustar al sumar miembros.
+*                     @dq-datasci @boris1098581
+/src/prometheus_platform/domain/          @dq-datasci
+/src/prometheus_platform/portfolio_risk/  @dq-datasci
+/.github/             @dq-datasci

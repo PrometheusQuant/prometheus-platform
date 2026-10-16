@@ -1,0 +1,111 @@
+[project]
+name = "prometheus-platform"
+version = "0.1.0"
+description = "Plataforma de trading multiestrategia de PrometheusQuant: datos, investigación, backtesting, paper y ejecución en vivo."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "David Quintela", email = "david.a.quintela@gmail.com" }]
+dependencies = [
+    "pydantic>=2.14",
+    "pydantic-settings>=2.16",
+    "structlog>=26.1",
+]
+
+[dependency-groups]
+dev = [
+    "commitizen>=4.19",
+    "hypothesis>=6.170",
+    "import-linter>=2.15",
+    "mypy>=2.4",
+    "pre-commit>=4.7",
+    "pytest>=9.1",
+    "pytest-cov>=7.0",
+    "ruff>=0.17",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prometheus_platform"]
+
+# --- Calidad -----------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",   # pycodestyle + pyflakes
+    "I",             # isort
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "SIM",           # simplify
+    "N",             # pep8-naming
+    "RUF",
+    "S",             # bandit (seguridad)
+    "DTZ",           # datetimes sin zona horaria: críticos en series temporales
+    "PL",            # pylint
+    "PT",            # pytest-style
+]
+ignore = ["PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --cov=prometheus_platform --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.report]
+fail_under = 80
+exclude_also = ["if TYPE_CHECKING:", "\\.\\.\\."]
+
+# --- Arquitectura hexagonal: límites verificados en CI ---------------------------
+
+[tool.importlinter]
+root_package = "prometheus_platform"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Capas: entrada/infra -> aplicación -> dominio"
+type = "layers"
+layers = [
+    "prometheus_platform.api | prometheus_platform.ops",
+    "prometheus_platform.adapters",
+    "prometheus_platform.strategies | prometheus_platform.portfolio_risk | prometheus_platform.execution | prometheus_platform.data_platform | prometheus_platform.research",
+    "prometheus_platform.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "El dominio no depende de librerías de infraestructura"
+type = "forbidden"
+source_modules = ["prometheus_platform.domain"]
+forbidden_modules = ["structlog", "pydantic_settings"]
+
+[[tool.importlinter.contracts]]
+name = "Las estrategias no conocen la ejecución ni el riesgo"
+type = "independence"
+modules = [
+    "prometheus_platform.strategies",
+    "prometheus_platform.execution",
+    "prometheus_platform.portfolio_risk",
+]
+
+# --- Commits -------------------------------------------------------------------
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_provider = "pep621"
+update_changelog_on_bump = true
