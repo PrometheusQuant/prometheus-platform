@@ -22,7 +22,8 @@ htmlcov/
 secrets/
 
 # Datos y artefactos (se versionan con el lakehouse, no con git)
-data/
+data/*
+!data/README.md
 mlruns/
 *.parquet
 *.duckdb
