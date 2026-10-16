@@ -35,3 +35,6 @@ mlruns/
 .idea/
 .DS_Store
 *:Zone.Identifier
+
+# Jupyter
+.ipynb_checkpoints/
