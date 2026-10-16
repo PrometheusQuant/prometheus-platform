@@ -29,9 +29,10 @@ El fundamento de cada decisión está en la investigación:
 journal append-only para auditoría. Ver [ADR-0001](docs/adr/0001-monolito-modular-hexagonal.md).
 
 ```text
-api / ops                       ← puntos de entrada, observabilidad
+api                             ← puntos de entrada (CLI, servicios de lectura)
 adapters                        ← Binance, paper, persistencia (implementan los puertos)
 strategies | portfolio_risk | execution | data_platform | research
+ops                             ← configuración, logging y métricas (transversal)
 domain                          ← value objects, eventos y puertos; solo librería estándar
 ```
 
