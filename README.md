@@ -60,3 +60,8 @@ make check     # lint, tipos, arquitectura y tests (lo mismo que corre CI)
 ## Seguridad
 
 Nunca se suben claves al repositorio. Ver [SECURITY.md](SECURITY.md).
+
+## Licencia
+
+[Apache-2.0](LICENSE). Permite el uso, la modificación y la distribución, incluido el uso
+comercial, conservando el aviso de copyright y el archivo [NOTICE](NOTICE).
