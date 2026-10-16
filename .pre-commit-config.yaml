@@ -27,6 +27,11 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.9.1
+    hooks:
+      - id: nbstripout
+
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.19.2
     hooks:
