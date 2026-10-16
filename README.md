@@ -38,6 +38,21 @@ domain                          ← value objects, eventos y puertos; solo libre
 
 Los límites entre capas se verifican en CI con `import-linter` (contratos en `pyproject.toml`).
 
+## Estructura del repositorio
+
+| Carpeta | Para qué |
+|---|---|
+| `src/prometheus_platform/` | El producto: dominio, estrategias, riesgo, ejecución, datos, investigación |
+| `tests/` | Espejo de `src/`: `unit/<paquete>/` e `integration/` |
+| `config/` | Configuración versionada no secreta (entornos, universos, límites de riesgo) |
+| `data/` | Lakehouse local bronze/silver/gold; **fuera de git** |
+| `notebooks/` | Exploración e investigación, sin salidas |
+| `deploy/` | Infraestructura como código por fases de presupuesto |
+| `scripts/` | Utilidades de desarrollo |
+| `docs/` | ADRs, arquitectura, metodología, estrategias, compliance, runbooks y académico |
+
+Detalle y reglas: [docs/arquitectura/estructura-de-directorios.md](docs/arquitectura/estructura-de-directorios.md).
+
 ## Metodología
 
 - **Ciclo de vida:** CRISP-ML(Q), con un protocolo financiero de control de calidad (registro de
