@@ -23,6 +23,14 @@ Backlog → To Do → Plan de implementación → In Progress → Code Review �
 | `spike/PQ-<n>-<descripcion>` | Investigación con time-box | — |
 | `hotfix/PQ-<n>-<descripcion>` | Corrección urgente sobre `main` | — |
 
+### Cómo se fusiona cada PR
+
+| PR | Método | Por qué |
+|---|---|---|
+| `feature/`, `fix/`, `spike/` → `develop` | **Squash** | Un commit por ticket en `develop` |
+| Release `develop` → `main` y back-merge `main` → `develop` | **Merge commit** (nunca squash) | Con squash, `main` y `develop` dejan de compartir historial y cada release choca con el anterior |
+| `hotfix/` → `main` | Merge commit, y después back-merge a `develop` | Ídem |
+
 Las ramas nacen de `develop` (los `hotfix/` de `main`). La clave `PQ-<n>` en el nombre de la rama
 hace que la app **GitHub for Jira** muestre la rama, los commits y el PR dentro del ticket.
 
