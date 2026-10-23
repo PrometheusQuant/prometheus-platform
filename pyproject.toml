@@ -8,10 +8,15 @@ license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "David Quintela", email = "david.a.quintela@gmail.com" }]
 dependencies = [
+    "httpx>=0.28",
+    "pyarrow>=26",
     "pydantic>=2.14",
     "pydantic-settings>=2.16",
     "structlog>=26.1",
 ]
+
+[project.scripts]
+pq = "prometheus_platform.api.cli:main"
 
 [dependency-groups]
 dev = [
@@ -20,6 +25,7 @@ dev = [
     "import-linter>=2.15",
     "mypy>=2.4",
     "pre-commit>=4.7",
+    "pyarrow-stubs>=20.0.0.20260819",
     "pytest>=9.1",
     "pytest-cov>=7.0",
     "ruff>=0.17",
@@ -94,7 +100,7 @@ layers = [
 name = "El dominio no depende de librerías de infraestructura"
 type = "forbidden"
 source_modules = ["prometheus_platform.domain"]
-forbidden_modules = ["structlog", "pydantic_settings"]
+forbidden_modules = ["structlog", "pydantic_settings", "httpx", "pyarrow"]
 
 [[tool.importlinter.contracts]]
 name = "Las estrategias no conocen la ejecución ni el riesgo"
