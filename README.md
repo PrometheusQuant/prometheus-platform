@@ -5,6 +5,9 @@ investigación, backtesting con controles contra el sobreajuste, paper trading y
 Es también el Proyecto Integrador de la carrera (Ciencias de Datos / Ingeniería Industrial), pero
 está diseñada para seguir creciendo después del semestre.
 
+📖 **Documentación:** <https://prometheusquant.github.io/prometheus-platform/> (arquitectura y
+diagramas C4, ADR, metodología e investigación).
+
 > **Aviso.** Este repositorio es material de investigación y desarrollo. No es asesoramiento
 > financiero ni promete rentabilidad. Operar con apalancamiento puede causar pérdidas mayores al
 > capital invertido.
@@ -71,6 +74,7 @@ git clone git@github.com:PrometheusQuant/prometheus-platform.git
 cd prometheus-platform
 make setup     # entorno + hooks de pre-commit
 make check     # lint, tipos, arquitectura y tests (lo mismo que corre CI)
+make docs      # documentación en http://127.0.0.1:8000 con recarga en vivo
 ```
 
 ## Seguridad

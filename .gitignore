@@ -38,3 +38,4 @@ mlruns/
 
 # Jupyter
 .ipynb_checkpoints/
+site/
