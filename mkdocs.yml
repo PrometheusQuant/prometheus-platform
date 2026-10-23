@@ -46,9 +46,11 @@ markdown_extensions:
   - pymdownx.tasklist:
       custom_checkbox: true
 
+# Un documento que no está en `nav` se publica igual (se llega por enlaces) y solo genera un
+# aviso informativo; así un PR de docs no rompe el build por no tocar este archivo.
 validation:
   nav:
-    omitted_files: warn
+    omitted_files: info
     not_found: warn
   links:
     not_found: warn
