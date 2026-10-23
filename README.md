@@ -29,13 +29,29 @@ El fundamento de cada decisión está en la investigación:
 journal append-only para auditoría. Ver [ADR-0001](docs/adr/0001-monolito-modular-hexagonal.md).
 
 ```text
-api / ops                       ← puntos de entrada, observabilidad
+api                             ← puntos de entrada (CLI, servicios de lectura)
 adapters                        ← Binance, paper, persistencia (implementan los puertos)
 strategies | portfolio_risk | execution | data_platform | research
+ops                             ← configuración, logging y métricas (transversal)
 domain                          ← value objects, eventos y puertos; solo librería estándar
 ```
 
 Los límites entre capas se verifican en CI con `import-linter` (contratos en `pyproject.toml`).
+
+## Estructura del repositorio
+
+| Carpeta | Para qué |
+|---|---|
+| `src/prometheus_platform/` | El producto: dominio, estrategias, riesgo, ejecución, datos, investigación |
+| `tests/` | Espejo de `src/`: `unit/<paquete>/` e `integration/` |
+| `config/` | Configuración versionada no secreta (entornos, universos, límites de riesgo) |
+| `data/` | Lakehouse local bronze/silver/gold; **fuera de git** |
+| `notebooks/` | Exploración e investigación, sin salidas |
+| `deploy/` | Infraestructura como código por fases de presupuesto |
+| `scripts/` | Utilidades de desarrollo |
+| `docs/` | ADRs, arquitectura, metodología, estrategias, compliance, runbooks y académico |
+
+Detalle y reglas: [docs/arquitectura/estructura-de-directorios.md](docs/arquitectura/estructura-de-directorios.md).
 
 ## Metodología
 

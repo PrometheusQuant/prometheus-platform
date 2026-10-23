@@ -66,7 +66,7 @@ files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-markers --cov=prometheus_platform --cov-report=term-missing"
+addopts = "-ra --strict-markers --import-mode=importlib --cov=prometheus_platform --cov-report=term-missing"
 testpaths = ["tests"]
 
 [tool.coverage.report]
@@ -80,12 +80,13 @@ root_package = "prometheus_platform"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Capas: entrada/infra -> aplicación -> dominio"
+name = "Capas: entrada -> infraestructura -> aplicación -> transversal -> dominio"
 type = "layers"
 layers = [
-    "prometheus_platform.api | prometheus_platform.ops",
+    "prometheus_platform.api",
     "prometheus_platform.adapters",
     "prometheus_platform.strategies | prometheus_platform.portfolio_risk | prometheus_platform.execution | prometheus_platform.data_platform | prometheus_platform.research",
+    "prometheus_platform.ops",
     "prometheus_platform.domain",
 ]
 
