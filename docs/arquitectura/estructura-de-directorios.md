@@ -54,7 +54,7 @@ disco o bases de datos van en `tests/integration/` y no corren contra servicios 
 
 ## Qué nunca entra al repositorio
 
-- Secretos (`.env`, claves, tokens): ver [SECURITY.md](../../SECURITY.md).
+- Secretos (`.env`, claves, tokens): ver [SECURITY.md](https://github.com/PrometheusQuant/prometheus-platform/blob/develop/SECURITY.md).
 - Datos (`data/`, Parquet, DuckDB, CSV) y artefactos de MLflow.
 - Material con copyright (libros y papers en PDF): se cita en APA 7 con enlace.
 - Salidas de notebooks.
