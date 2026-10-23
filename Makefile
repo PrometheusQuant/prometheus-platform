@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check
+.PHONY: help setup lint format typecheck arch test check docs docs-build
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -26,3 +26,9 @@ test: ## Tests con cobertura
 	uv run pytest
 
 check: lint typecheck arch test ## Todo lo que corre CI
+
+docs: ## Sirve la documentación en http://127.0.0.1:8000 con recarga en vivo
+	uv run mkdocs serve
+
+docs-build: ## Construye el sitio en site/ (falla ante cualquier advertencia)
+	uv run mkdocs build --strict
