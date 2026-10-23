@@ -56,7 +56,7 @@ select = [
 ignore = ["PLR2004"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR2004"]
+"tests/**" = ["S101", "S105", "S106", "PLR2004"]  # S105/S106: secretos falsos en tests
 
 [tool.mypy]
 python_version = "3.12"
