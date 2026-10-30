@@ -18,4 +18,4 @@ El commit del `pre-registro.md` es la evidencia fechada de que la hipótesis no 
 
 | Estrategia | Pre-registro | Evaluación | Holdout | Decisión |
 |---|---|---|---|---|
-| 1 · Carry de funding con entrada por umbral | [2026-10-23](01-carry/pre-registro.md) (PQ-18) | — | — | — |
+| 1 · Carry de funding con entrada por umbral | [2026-10-23](01-carry/pre-registro.md) (PQ-18), enmiendas 1 y 2 | [2026-10-30](01-carry/evaluacion.md) | Pendiente (PQ-17) | [H1 descartada, H2 a holdout](01-carry/decision.md) |

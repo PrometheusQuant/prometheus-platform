@@ -78,7 +78,11 @@ nav:
   - Metodología:
       - metodologia/README.md
       - Definición de Listo y Terminado: metodologia/definicion-de-listo-y-terminado.md
-  - Estrategias: estrategias/README.md
+  - Estrategias:
+      - estrategias/README.md
+      - "Carry · pre-registro": estrategias/01-carry/pre-registro.md
+      - "Carry · evaluación": estrategias/01-carry/evaluacion.md
+      - "Carry · decisión": estrategias/01-carry/decision.md
   - Compliance:
       - compliance/README.md
       - Binance: compliance/binance.md
@@ -87,6 +91,7 @@ nav:
       - investigacion/README.md
       - "2026-10-16 Plataforma multiestrategia": investigacion/2026-10-16-plataforma-multiestrategia.md
       - "2026-10-23 Auditoría de Data Vision": investigacion/2026-10-23-auditoria-binance-data-vision.md
+      - "2026-10-30 EDA del funding": investigacion/2026-10-30-eda-features-funding.md
       - Notas:
           - investigacion/notas/README.md
           - Acceso y regulación en Bolivia: investigacion/notas/acceso_regulacion_bolivia.md

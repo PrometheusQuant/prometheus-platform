@@ -52,7 +52,7 @@ def write_outputs(evaluation: HypothesisEvaluation, out_dir: Path) -> Path:
 def plot_equity(evaluation: HypothesisEvaluation, path: Path, benchmark: np.ndarray) -> Path:
     """Curvas de capital de las 9 configuraciones, la elegida resaltada, y B1."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    dates = np.array(evaluation.dates, dtype="datetime64[D]")
+    dates = np.array([d[:10] for d in evaluation.dates], dtype="datetime64[D]")
     fig, ax = plt.subplots(figsize=(9, 4.5), dpi=150)
     for name, returns in sorted(evaluation.returns.items()):
         selected = name == evaluation.selected
