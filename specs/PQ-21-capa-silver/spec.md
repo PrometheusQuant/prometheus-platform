@@ -65,7 +65,15 @@ pago cuando el exchange cambia de 8 h a 2 h.
   volumen ≥ 0, timestamps alineados al intervalo y `knowledge_time ≥ event_time`.
 - **FR-007**: informe de calidad en JSON por tabla: filas, duplicados eliminados, huecos (número,
   mayor, lista) y resultado de cada check.
-- **FR-008**: CLI `pq silver build --symbol S` idempotente: reconstruye desde bronze.
+- **FR-008**: los outliers reales (p. ej. un flash crash) **no se eliminan**: se marcan con
+  `is_outlier` cuando el retorno logarítmico de 1 h supera 10 desviaciones típicas móviles
+  (ventana de 30 días).
+- **FR-009**: esquemas declarativos con **pandera** para velas y funding (tipos, rangos, UTC).
+- **FR-010**: join *as-of* sobre `knowledge_time`, con un test que falla si una fila de la
+  derecha posterior a t llega a la izquierda.
+- **FR-011**: el informe de calidad incluye estadística descriptiva por variable (cap. 4.2):
+  n, media, desviación típica, mínimo, p25, mediana, p75 y máximo.
+- **FR-012**: CLI `pq silver build --symbol S` idempotente: reconstruye desde bronze.
 
 ### Entidades clave
 
