@@ -704,6 +704,7 @@ wheels = [
 name = "prometheus-platform"
 version = "0.1.0"
 source = { editable = "." }
+default-groups = ["dev", "docs"]
 dependencies = [
     { name = "httpx" },
     { name = "pyarrow" },
