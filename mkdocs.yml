@@ -78,11 +78,14 @@ nav:
       - metodologia/README.md
       - Definición de Listo y Terminado: metodologia/definicion-de-listo-y-terminado.md
   - Estrategias: estrategias/README.md
-  - Compliance: compliance/README.md
+  - Compliance:
+      - compliance/README.md
+      - Binance: compliance/binance.md
   - Runbooks: runbooks/README.md
   - Investigación:
       - investigacion/README.md
       - "2026-10-16 Plataforma multiestrategia": investigacion/2026-10-16-plataforma-multiestrategia.md
+      - "2026-10-23 Auditoría de Data Vision": investigacion/2026-10-23-auditoria-binance-data-vision.md
       - Notas:
           - investigacion/notas/README.md
           - Acceso y regulación en Bolivia: investigacion/notas/acceso_regulacion_bolivia.md
