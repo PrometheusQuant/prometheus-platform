@@ -36,8 +36,8 @@ Las dependencias solo apuntan hacia el dominio; `import-linter` lo verifica en C
 | `strategies/` | Aplicación | Datos → señales (`Signal`). No conoce órdenes ni riesgo | `domain`, `ops` |
 | `portfolio_risk/` | Aplicación | Dimensionado, límites pre-trade, kill-switch | `domain`, `ops` |
 | `execution/` | Aplicación | Objetivos de cartera → órdenes vía `OrderGateway` | `domain`, `ops` |
-| `data_platform/` | Aplicación | Ingesta y transformaciones del lakehouse | `domain`, `ops` |
-| `research/` | Aplicación | Backtests, validación purgada, registro de experimentos | `domain`, `ops` |
+| `data_platform/` | Aplicación (base) | Ingesta y transformaciones del lakehouse. Está una capa por debajo del resto de la aplicación: research lee sus tablas, pero no al revés | `domain`, `ops` |
+| `research/` | Aplicación | Backtests, validación purgada, registro de experimentos | `domain`, `ops`, `data_platform` |
 | `adapters/` | Infraestructura | Implementaciones de los puertos: Binance, paper, persistencia | Aplicación, `ops`, `domain` |
 | `api/` | Entrada | CLI `pq` y servicios de lectura para dashboards | Todos los anteriores |
 
