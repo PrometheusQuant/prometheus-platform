@@ -13,3 +13,9 @@ Cada carpeta sigue el ciclo PDCA y los gates de CRISP-ML(Q):
 | `decision.md` | Al cerrar el ciclo | Pasa a paper trading, se itera o se descarta, y por qué |
 
 El commit del `pre-registro.md` es la evidencia fechada de que la hipótesis no se ajustó a los resultados.
+
+## Estado
+
+| Estrategia | Pre-registro | Evaluación | Holdout | Decisión |
+|---|---|---|---|---|
+| 1 · Carry de funding con entrada por umbral | [2026-10-23](01-carry/pre-registro.md) (PQ-18) | — | — | — |
