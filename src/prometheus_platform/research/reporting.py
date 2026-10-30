@@ -15,6 +15,7 @@ import numpy as np
 import polars as pl
 
 from prometheus_platform.research.carry_evaluation import HypothesisEvaluation
+from prometheus_platform.research.funding_model import ModelStudy
 
 
 def summary(evaluation: HypothesisEvaluation) -> dict[str, Any]:
@@ -72,6 +73,36 @@ def plot_equity(evaluation: HypothesisEvaluation, path: Path, benchmark: np.ndar
     ax.set_ylabel("Capital (inicio = 1)")
     ax.grid(alpha=0.3)
     ax.legend(loc="upper left", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+    return path
+
+
+def write_model_study(study: ModelStudy, out_dir: Path) -> Path:
+    """Resumen JSON del estudio predictivo del funding (PQ-32)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = asdict(study)
+    payload.pop("roc_points")
+    path = out_dir / "summary.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    return path
+
+
+def plot_roc(study: ModelStudy, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(5.5, 5), dpi=150)
+    auc = {f"{c.name}{':tuned' if c.tuned else ':default' if c.name != 'regla_s9' else ''}": c.auc
+           for c in study.classification}  # fmt: skip
+    for key, (fpr, tpr) in study.roc_points.items():
+        if key.endswith(":default"):
+            continue
+        ax.plot(fpr, tpr, linewidth=1.4, label=f"{key} (AUC {auc.get(key, float('nan')):.3f})")
+    ax.plot([0, 1], [0, 1], color="#94a3b8", linestyle=":", linewidth=1)
+    ax.set_xlabel("Tasa de falsos positivos")
+    ax.set_ylabel("Tasa de verdaderos positivos")
+    ax.set_title("¿La próxima tasa superará el 20 %? (walk-forward)")
+    ax.legend(fontsize=7, loc="lower right")
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
