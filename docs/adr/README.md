@@ -13,3 +13,4 @@ Cada decisión difícil de revertir se registra como un ADR en formato
 | [0005](0005-orden-de-estrategias.md) | Orden de implementación de las estrategias | Aceptada |
 | [0006](0006-nautilustrader-para-ejecucion.md) | NautilusTrader para backtest event-driven, paper y vivo | Propuesta |
 | [0007](0007-mkdocs-material-para-la-documentacion.md) | MkDocs Material para el sitio de documentación | Aceptada |
+| [0008](0008-spec-kit-solo-para-historias-grandes.md) | Plantillas de Spec Kit solo para historias de ≥ 5 puntos | Aceptada |

@@ -73,6 +73,7 @@ nav:
       - "0005 Orden de estrategias": adr/0005-orden-de-estrategias.md
       - "0006 NautilusTrader para ejecución": adr/0006-nautilustrader-para-ejecucion.md
       - "0007 MkDocs Material para la documentación": adr/0007-mkdocs-material-para-la-documentacion.md
+      - "0008 Spec Kit solo para historias grandes": adr/0008-spec-kit-solo-para-historias-grandes.md
       - Plantilla: adr/0000-plantilla.md
   - Metodología:
       - metodologia/README.md
