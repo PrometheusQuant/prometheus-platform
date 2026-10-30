@@ -6,6 +6,7 @@ Ejemplos::
     pq ingest klines --market spot --symbol ETHUSDT --interval 1d --start 2020-01 --end 2024-12
     pq ingest funding --symbol BTCUSDT --start 2020-01
     pq silver build --symbol BTCUSDT --interval 1h
+    pq research carry --hypothesis H1 --figures docs/estrategias/01-carry/img
 
 Sin ``--end`` se ingiere hasta el último mes completo, porque Data Vision publica los archivos
 mensuales una vez cerrado el mes.
@@ -84,6 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
     build = silver_actions.add_parser("build", help="Reconstruye silver desde bronze")
     build.add_argument("--symbol", required=True, type=str.upper)
     build.add_argument("--interval", default="1h", help="intervalo de las velas (por defecto 1h)")
+
+    research = commands.add_parser("research", help="Evaluaciones pre-registradas")
+    studies = research.add_subparsers(dest="study", required=True)
+    carry = studies.add_parser("carry", help="Carry de funding: periodo de desarrollo")
+    carry.add_argument("--hypothesis", choices=["H1", "H2"], required=True)
+    carry.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
     return parser
 
 
@@ -120,12 +127,35 @@ def _silver_build(data_dir: Path, symbol: str, interval: str) -> int:
     return 0
 
 
+def _research_carry(data_dir: Path, hypothesis: str, figures: Path | None) -> int:
+    # Importación diferida: MLflow, Optuna y matplotlib solo se cargan para investigar.
+    from prometheus_platform.adapters.mlflow_registry import MlflowRegistry  # noqa: PLC0415
+    from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
+    from prometheus_platform.research.reporting import plot_equity, write_outputs  # noqa: PLC0415
+
+    data = [ce.load_symbol(data_dir / "silver", s) for s in ce.HYPOTHESES[hypothesis]]
+    registry = MlflowRegistry(data_dir / "mlflow" / "mlflow.db", "carry-funding")
+    evaluation = ce.evaluate_hypothesis(hypothesis, data, registry)
+    path = write_outputs(evaluation, data_dir / "research" / "carry" / hypothesis)
+    if figures is not None:
+        plot_equity(
+            evaluation, figures / f"{hypothesis.lower()}-curvas.png", evaluation.benchmark_returns
+        )
+    verdict = "PASA" if evaluation.passed else "NO PASA"
+    print(f"{hypothesis}: elegida={evaluation.selected} gates={verdict} resumen={path}")
+    for gate in evaluation.gates:
+        print(f"  {gate.name} {'OK ' if gate.passed else 'NO '} {gate.criterion}: {gate.value:.4f}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = load_settings()
     configure_logging(settings)
     if args.command == "silver":
         return _silver_build(settings.data_dir, args.symbol, args.interval)
+    if args.command == "research":
+        return _research_carry(settings.data_dir, args.hypothesis, args.figures)
 
     clock = SystemClock()
     end = args.end or last_complete_month(clock.now().date())
