@@ -184,3 +184,44 @@ Antes de este registro el equipo vio **estadísticos descriptivos** de la fuente
 liquidaciones de funding negativas y los extremos por símbolo (auditoría PQ-19), y comentarios de
 mercado sobre la compresión del funding en 2025 (informe de investigación del 2026-10-16). **No se
 calculó ningún retorno de estrategia** ni de los benchmarks B1 y B3 en ningún periodo.
+
+## 12. Enmienda 1 (2026-10-30, antes del primer backtest)
+
+**Motivo:** al implementar el backtest (PQ-23) aparecieron detalles que el texto original no fijaba.
+Se deciden aquí, **antes de ejecutar ningún backtest**, para que no puedan elegirse mirando
+resultados. No cambia la hipótesis, la rejilla de ensayos, los costes ni las fechas.
+
+**Ejecución y contabilidad**
+
+1. **Precio de cada pata.** Spot: velas spot de 1 h. Perpetuo: velas USDⓈ-M de 1 h. Las órdenes se
+   ejecutan al `open` de la vela que **abre en t + 1 h**. Si esa vela falta (hueco), se usa la
+   siguiente vela disponible de la misma pata.
+2. **Pago de funding.** En cada liquidación *s* con la posición abierta (abierta antes de *s*), el
+   short cobra `tasa(s) × nocional`, con el nocional valorado al `close` del perpetuo de la vela que
+   **cierra en s** (aproximación del mark price, que no se ingiere).
+3. **Valoración diaria.** El capital se valora a las 00:00 UTC con los `close` de spot y perp. El
+   retorno diario se calcula sobre el capital total C.
+4. **Rebalanceo.** Se comprueba en cada decisión t con los `close` de la vela que cierra en t, y se
+   ejecuta como una entrada (vela que abre en t + 1 h) con sus costes.
+5. **H2.** Cada símbolo empieza en su fecha de la sección 3. Antes de esa fecha, su parte del
+   capital queda en efectivo.
+6. **B1 (siempre activo).** Abre en la primera decisión disponible de cada símbolo y nunca cierra;
+   usa el mismo rebalanceo y los mismos costes.
+
+**Validación**
+
+7. **CPCV** sobre los retornos diarios del periodo de desarrollo. En cada una de las 15 particiones
+   se calcula el Sharpe de prueba de las 9 configuraciones. **La configuración elegida es la de
+   mayor Sharpe medio de prueba en las 15 particiones.**
+8. **PBO** con CSCV de 16 bloques sobre la matriz de retornos diarios (días × 9 configuraciones).
+9. **Deflated Sharpe:** el Sharpe diario (sin anualizar) de la configuración elegida en todo el
+   periodo de desarrollo, con su asimetría y curtosis, T = número de días, N = ensayos registrados y
+   V[SR] = varianza del Sharpe diario entre todos los ensayos registrados.
+10. **t-estadístico:** media diaria / (desviación / √T) de la configuración elegida en todo el
+    periodo de desarrollo.
+
+**Condición adicional para abrir el holdout**
+
+11. El holdout **no se abre** hasta que PQ-17 verifique las comisiones reales desde la cuenta. Si
+    son más altas que las del escenario principal, se repite la evaluación de desarrollo con las
+    verificadas. La repetición **cuenta como 9 ensayos más por hipótesis** en N.
