@@ -184,3 +184,22 @@ Antes de este registro el equipo vio **estadísticos descriptivos** de la fuente
 liquidaciones de funding negativas y los extremos por símbolo (auditoría PQ-19), y comentarios de
 mercado sobre la compresión del funding en 2025 (informe de investigación del 2026-10-16). **No se
 calculó ningún retorno de estrategia** ni de los benchmarks B1 y B3 en ningún periodo.
+
+## 13. Enmienda 2 (2026-10-30, tras una prueba de humo y antes de la evaluación)
+
+**Qué pasó.** Al probar el código del backtest con una configuración (k = 9, θ = 20 %) y con B1 sobre
+BTCUSDT en el periodo de desarrollo, se vio que la regla literal de rebalanceo de la sección 4
+(igualar la pata perp a la pata spot) **no mantiene el apalancamiento 1x** que la misma sección
+declara. Si el precio sube, el nocional de las dos patas crece con él, mientras el capital (cubierto)
+no lo hace. En BTC 2020–2024 el nocional llegaba a ~4 veces el capital y el margen de la pata corta
+se volvía negativo, lo que en la realidad es una **liquidación**. El resultado (un funding cobrado
+irreal) delató el error.
+
+**Corrección.** Se aplica la restricción ya declarada de 1x: en cada decisión con la posición
+abierta, si una pata se desvía más de un 10 % de capital/2, **ambas** se llevan a capital/2, con los
+costes de las dos patas. No cambian la señal, los umbrales, la rejilla, los costes ni las fechas.
+
+**Transparencia en el conteo de ensayos.** Las 2 ejecuciones de la prueba de humo (k9-θ20 y B1, con
+el error) se registran como ensayos adicionales: **N = 18 + 2 = 20** en el Deflated Sharpe. No se
+miraron métricas de Sharpe, drawdown ni CPCV de ninguna configuración: solo el capital final y el
+funding cobrado de esas dos ejecuciones.
