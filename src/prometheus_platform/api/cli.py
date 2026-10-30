@@ -94,6 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
     carry.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
     eda = studies.add_parser("eda", help="Estadística descriptiva y correlaciones de las features")
     eda.add_argument("--figures", type=Path, required=True)
+    model = studies.add_parser("funding-model", help="Modelo predictivo del funding (cap. 5)")
+    model.add_argument("--figures", type=Path, required=True)
+    model.add_argument("--target-mode", choices=["level", "residual"], default="residual")
     return parser
 
 
@@ -151,17 +154,12 @@ def _research_carry(data_dir: Path, hypothesis: str, figures: Path | None) -> in
     return 0
 
 
-def _research_eda(data_dir: Path, figures: Path) -> int:
+def _development_panel(data_dir: Path) -> pl.DataFrame:
     from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
-    from prometheus_platform.research.eda import (  # noqa: PLC0415
-        correlation_matrix,
-        describe_table,
-        plot_correlation,
-    )
     from prometheus_platform.research.panel import development_only  # noqa: PLC0415
 
     symbols = [s for group in ce.HYPOTHESES.values() for s in group]
-    panel = pl.concat(
+    return pl.concat(
         [
             development_only(ce.load_symbol(data_dir / "silver", s).settlements).with_columns(
                 pl.lit(s).alias("symbol")
@@ -170,6 +168,53 @@ def _research_eda(data_dir: Path, figures: Path) -> int:
         ],
         how="diagonal_relaxed",
     )
+
+
+def _research_model(data_dir: Path, figures: Path, target_mode: str) -> int:
+    from prometheus_platform.adapters.mlflow_registry import MlflowRegistry  # noqa: PLC0415
+    from prometheus_platform.research.carry_evaluation import TrialRecord  # noqa: PLC0415
+    from prometheus_platform.research.funding_model import run_study  # noqa: PLC0415
+    from prometheus_platform.research.reporting import plot_roc, write_model_study  # noqa: PLC0415
+
+    study = run_study(_development_panel(data_dir), target_mode=target_mode)
+    tags = {"target_mode": target_mode, "period": "desarrollo"}
+    registry = MlflowRegistry(data_dir / "mlflow" / "mlflow.db", "funding-model")
+    for r in study.regression:
+        registry.log_trial(
+            TrialRecord(
+                "regresion",
+                f"{r.name}:{'tuned' if r.tuned else 'default'}",
+                {k: str(v) for k, v in r.best_params.items()},
+                {"rmse": r.rmse, "mae": r.mae, "r2": r.r2},
+                tags,
+            )
+        )
+    for c in study.classification:
+        registry.log_trial(
+            TrialRecord(
+                "clasificacion",
+                f"{c.name}:{'tuned' if c.tuned else 'default'}",
+                {k: str(v) for k, v in c.best_params.items()},
+                {"auc": c.auc, "f1": c.f1},
+                tags,
+            )
+        )
+    path = write_model_study(study, data_dir / "research" / "funding_model" / target_mode)
+    plot_roc(study, figures / "roc-funding.png")
+    best = study.regression[0]
+    print(f"filas={study.rows} mejor_regresion={best.name} rmse={best.rmse:.4f} resumen={path}")
+    print(f"diebold_mariano={study.diebold_mariano}")
+    return 0
+
+
+def _research_eda(data_dir: Path, figures: Path) -> int:
+    from prometheus_platform.research.eda import (  # noqa: PLC0415
+        correlation_matrix,
+        describe_table,
+        plot_correlation,
+    )
+
+    panel = _development_panel(data_dir)
     out = data_dir / "research" / "eda"
     out.mkdir(parents=True, exist_ok=True)
     table = describe_table(panel)
@@ -177,7 +222,7 @@ def _research_eda(data_dir: Path, figures: Path) -> int:
     corr = correlation_matrix(panel)
     corr.write_csv(out / "correlation.csv")
     plot_correlation(corr, figures / "correlacion-features.png")
-    print(f"filas={panel.height} simbolos={len(symbols)} salida={out}")
+    print(f"filas={panel.height} salida={out}")
     return 0
 
 
@@ -189,6 +234,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _silver_build(settings.data_dir, args.symbol, args.interval)
     if args.command == "research" and args.study == "eda":
         return _research_eda(settings.data_dir, args.figures)
+    if args.command == "research" and args.study == "funding-model":
+        return _research_model(settings.data_dir, args.figures, args.target_mode)
     if args.command == "research":
         return _research_carry(settings.data_dir, args.hypothesis, args.figures)
 

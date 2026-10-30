@@ -92,6 +92,7 @@ nav:
       - "2026-10-16 Plataforma multiestrategia": investigacion/2026-10-16-plataforma-multiestrategia.md
       - "2026-10-23 Auditoría de Data Vision": investigacion/2026-10-23-auditoria-binance-data-vision.md
       - "2026-10-30 EDA del funding": investigacion/2026-10-30-eda-features-funding.md
+      - "2026-10-30 Modelo predictivo del funding": investigacion/2026-10-30-modelo-predictivo-funding.md
       - Notas:
           - investigacion/notas/README.md
           - Acceso y regulación en Bolivia: investigacion/notas/acceso_regulacion_bolivia.md
