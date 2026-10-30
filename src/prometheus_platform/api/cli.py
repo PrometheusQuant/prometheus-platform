@@ -5,6 +5,7 @@ Ejemplos::
     pq ingest klines --market um --symbol BTCUSDT --interval 1h --start 2020-01
     pq ingest klines --market spot --symbol ETHUSDT --interval 1d --start 2020-01 --end 2024-12
     pq ingest funding --symbol BTCUSDT --start 2020-01
+    pq silver build --symbol BTCUSDT --interval 1h
 
 Sin ``--end`` se ingiere hasta el último mes completo, porque Data Vision publica los archivos
 mensuales una vez cerrado el mes.
@@ -16,6 +17,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import httpx
 
@@ -28,7 +30,16 @@ from prometheus_platform.data_platform.ingest import (
     monthly_funding,
     monthly_klines,
 )
-from prometheus_platform.domain.datasets import Market
+from prometheus_platform.data_platform.silver import (
+    SilverValidationError,
+    bronze_files,
+    build_funding,
+    build_klines,
+    read_bronze,
+    silver_path,
+    write_silver,
+)
+from prometheus_platform.domain.datasets import DatasetKind, Market
 from prometheus_platform.ops.logging import configure_logging
 from prometheus_platform.ops.settings import load_settings
 
@@ -67,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     funding = datasets.add_parser("funding", help="Funding rate de perpetuos USDⓈ-M")
     add_range(funding)
+
+    silver_cmd = commands.add_parser("silver", help="Capa silver: datos tipados y validados")
+    silver_actions = silver_cmd.add_subparsers(dest="action", required=True)
+    build = silver_actions.add_parser("build", help="Reconstruye silver desde bronze")
+    build.add_argument("--symbol", required=True, type=str.upper)
+    build.add_argument("--interval", default="1h", help="intervalo de las velas (por defecto 1h)")
     return parser
 
 
@@ -82,10 +99,33 @@ def _print_report(report: IngestReport) -> None:
     )
 
 
+def _silver_build(data_dir: Path, symbol: str, interval: str) -> int:
+    bronze, silver = data_dir / "bronze", data_dir / "silver"
+    quality = silver / "_quality"
+    try:
+        for market in (Market.SPOT, Market.USDM):
+            files = bronze_files(bronze, DatasetKind.KLINES, market, symbol, interval)
+            frame, report = build_klines(read_bronze(files), market, symbol, interval)
+            path = silver_path(silver, DatasetKind.KLINES, symbol, market, interval)
+            write_silver(frame, report, path, quality)
+            print(f"{report.table}: filas={report.rows} huecos={report.gaps}", end=" ")
+            print(f"outliers={report.outliers}")
+        files = bronze_files(bronze, DatasetKind.FUNDING_RATE, Market.USDM, symbol, None)
+        frame, report = build_funding(read_bronze(files), symbol)
+        write_silver(frame, report, silver_path(silver, DatasetKind.FUNDING_RATE, symbol), quality)
+        print(f"{report.table}: filas={report.rows} huecos={report.gaps}")
+    except SilverValidationError as exc:
+        print(f"ERROR {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = load_settings()
     configure_logging(settings)
+    if args.command == "silver":
+        return _silver_build(settings.data_dir, args.symbol, args.interval)
 
     clock = SystemClock()
     end = args.end or last_complete_month(clock.now().date())
