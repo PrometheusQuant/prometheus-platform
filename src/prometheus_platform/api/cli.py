@@ -21,6 +21,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import httpx
+import polars as pl
 
 from prometheus_platform.adapters.binance_data_vision import BinanceDataVisionSource
 from prometheus_platform.adapters.clock import SystemClock
@@ -91,6 +92,8 @@ def build_parser() -> argparse.ArgumentParser:
     carry = studies.add_parser("carry", help="Carry de funding: periodo de desarrollo")
     carry.add_argument("--hypothesis", choices=["H1", "H2"], required=True)
     carry.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    eda = studies.add_parser("eda", help="Estadística descriptiva y correlaciones de las features")
+    eda.add_argument("--figures", type=Path, required=True)
     return parser
 
 
@@ -148,12 +151,44 @@ def _research_carry(data_dir: Path, hypothesis: str, figures: Path | None) -> in
     return 0
 
 
+def _research_eda(data_dir: Path, figures: Path) -> int:
+    from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
+    from prometheus_platform.research.eda import (  # noqa: PLC0415
+        correlation_matrix,
+        describe_table,
+        plot_correlation,
+    )
+    from prometheus_platform.research.panel import development_only  # noqa: PLC0415
+
+    symbols = [s for group in ce.HYPOTHESES.values() for s in group]
+    panel = pl.concat(
+        [
+            development_only(ce.load_symbol(data_dir / "silver", s).settlements).with_columns(
+                pl.lit(s).alias("symbol")
+            )
+            for s in symbols
+        ],
+        how="diagonal_relaxed",
+    )
+    out = data_dir / "research" / "eda"
+    out.mkdir(parents=True, exist_ok=True)
+    table = describe_table(panel)
+    table.write_csv(out / "describe.csv")
+    corr = correlation_matrix(panel)
+    corr.write_csv(out / "correlation.csv")
+    plot_correlation(corr, figures / "correlacion-features.png")
+    print(f"filas={panel.height} simbolos={len(symbols)} salida={out}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = load_settings()
     configure_logging(settings)
     if args.command == "silver":
         return _silver_build(settings.data_dir, args.symbol, args.interval)
+    if args.command == "research" and args.study == "eda":
+        return _research_eda(settings.data_dir, args.figures)
     if args.command == "research":
         return _research_carry(settings.data_dir, args.hypothesis, args.figures)
 
