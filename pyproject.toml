@@ -9,6 +9,8 @@ requires-python = ">=3.12,<3.13"
 authors = [{ name = "David Quintela", email = "david.a.quintela@gmail.com" }]
 dependencies = [
     "httpx>=0.28",
+    "pandera[polars]>=0.35.0",
+    "polars>=1",
     "pyarrow>=26",
     "pydantic>=2.14",
     "pydantic-settings>=2.16",
