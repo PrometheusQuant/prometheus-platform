@@ -38,3 +38,13 @@ carpeta a partir de esa evidencia.
 ## Qué no va aquí
 
 Material con copyright (libros, papers en PDF) ni datos personales: se citan en APA 7 con enlace.
+
+## Evidencia entregada en el Sprint 2 (2026-10-30)
+
+| Capítulo | Evidencia |
+|---|---|
+| 1.5 Auditoría de fuentes | [Auditoría de Data Vision](../investigacion/2026-10-23-auditoria-binance-data-vision.md): 2.903 archivos y ≈1,1 M filas |
+| 2.1–2.3 Marco de referencia | [Marco de referencia](marco-de-referencia.md): estado del arte en APA 7, PESTEL aplicado y marco normativo y ético |
+| 4.1–4.2 Extracción y limpieza | Ingesta bronze (`pq ingest`) y capa silver con checks (`pq silver build`, `specs/PQ-21-capa-silver/`) |
+| 4.3 Feature engineering | [EDA de las features](../investigacion/2026-10-30-eda-features-funding.md) |
+| 5.1–5.3 Modelado | [Modelo predictivo del funding](../investigacion/2026-10-30-modelo-predictivo-funding.md) y [evaluación del carry](../estrategias/01-carry/evaluacion.md) |

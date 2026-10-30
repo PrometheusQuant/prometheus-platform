@@ -86,6 +86,7 @@ nav:
   - Compliance:
       - compliance/README.md
       - Binance: compliance/binance.md
+      - Polymarket: compliance/polymarket.md
   - Runbooks: runbooks/README.md
   - Investigación:
       - investigacion/README.md
@@ -99,4 +100,6 @@ nav:
           - Edges cripto cuantitativos: investigacion/notas/edges_cripto_cuantitativos.md
           - Edges alternativos y contradicciones: investigacion/notas/edges_alternativos_y_contradicciones.md
           - Metodología y Jira: investigacion/notas/metodologia_y_jira.md
-  - Académico: academico/README.md
+  - Académico:
+      - academico/README.md
+      - Marco de referencia (cap. 2): academico/marco-de-referencia.md
