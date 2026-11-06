@@ -78,6 +78,7 @@ nav:
       - "0007 MkDocs Material para la documentación": adr/0007-mkdocs-material-para-la-documentacion.md
       - "0008 Spec Kit solo para historias grandes": adr/0008-spec-kit-solo-para-historias-grandes.md
       - "0009 Streamlit y Docker para el dashboard": adr/0009-streamlit-y-docker-para-el-dashboard.md
+      - "0010 Dagster para orquestar el lakehouse": adr/0010-dagster-para-orquestar-el-lakehouse.md
       - Plantilla: adr/0000-plantilla.md
   - Metodología:
       - metodologia/README.md
@@ -98,6 +99,7 @@ nav:
       - Incidentes: runbooks/incidentes.md
       - Alertas a Telegram: runbooks/alertas.md
       - Dashboard: runbooks/dashboard.md
+      - Orquestación (Dagster): runbooks/orquestacion.md
       - Análisis de impacto (BIA): runbooks/analisis-de-impacto.md
   - Investigación:
       - investigacion/README.md
