@@ -8,9 +8,10 @@ carpeta a partir de esa evidencia.
 | Ítem | Contenido exigido | Evidencia | Épica |
 |---|---|---|---|
 | 0.1–0.3 | Título, equipo, línea temática, resumen ejecutivo | `README.md`, este documento, `informe/` | PQ-10 |
-| 1.1–1.2 | Antecedentes, causas y solución actual | [`investigacion/`](../investigacion/README.md) | PQ-2 |
-| 1.3 | Pregunta de investigación y objetivos | `estrategias/*/pre-registro.md` | PQ-2 |
-| 1.4 | Alcance, limitaciones y supuestos | ADR-0005, [`compliance/`](../compliance/README.md) | PQ-2 |
+| 1.1 | Antecedentes y contexto | [`investigacion/`](../investigacion/README.md) | PQ-2 |
+| 1.2 | Causas (Ishikawa, 5 porqués) y solución actual | [Planteamiento del problema](planteamiento-del-problema.md) | PQ-2 (PQ-45) |
+| 1.3 | Pregunta de investigación y objetivos (matriz de consistencia) | [Planteamiento del problema](planteamiento-del-problema.md), `estrategias/*/pre-registro.md` | PQ-2 (PQ-45) |
+| 1.4 | Alcance, limitaciones y supuestos; matriz de riesgos | [Planteamiento del problema](planteamiento-del-problema.md), ADR-0005, [`compliance/`](../compliance/README.md) | PQ-2 (PQ-45) |
 | 1.5 | Auditoría de fuentes (≥ 5.000 registros) | Spike de Data Vision | PQ-2 (PQ-19) |
 | 2.1 | Estado del arte (APA 7) | `academico/marco-de-referencia.md` | PQ-2 (PQ-28) |
 | 2.2–2.3 | PESTEL; marco normativo y ético | `academico/marco-de-referencia.md`, `compliance/` | PQ-2 (PQ-28) |
@@ -43,6 +44,7 @@ Material con copyright (libros, papers en PDF) ni datos personales: se citan en 
 
 | Capítulo | Evidencia |
 |---|---|
+| 1.2–1.4 Planteamiento del problema | [Planteamiento del problema](planteamiento-del-problema.md) (PQ-45, 2026-11-06): Ishikawa con 5 porqués, matriz de consistencia, registro de supuestos y matriz de riesgos |
 | 1.5 Auditoría de fuentes | [Auditoría de Data Vision](../investigacion/2026-10-23-auditoria-binance-data-vision.md): 2.903 archivos y ≈1,1 M filas |
 | 2.1–2.3 Marco de referencia | [Marco de referencia](marco-de-referencia.md): estado del arte en APA 7, PESTEL aplicado y marco normativo y ético |
 | 4.1–4.2 Extracción y limpieza | Ingesta bronze (`pq ingest`) y capa silver con checks (`pq silver build`, `specs/PQ-21-capa-silver/`) |
