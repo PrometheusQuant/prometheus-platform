@@ -87,6 +87,7 @@ nav:
       - "Carry · pre-registro": estrategias/01-carry/pre-registro.md
       - "Carry · evaluación": estrategias/01-carry/evaluacion.md
       - "Carry · decisión": estrategias/01-carry/decision.md
+      - "Tendencia · pre-registro": estrategias/02-tendencia/pre-registro.md
   - Compliance:
       - compliance/README.md
       - Binance: compliance/binance.md
