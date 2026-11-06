@@ -64,6 +64,7 @@ nav:
       - arquitectura/README.md
       - Diagramas C4: arquitectura/c4.md
       - Estructura de directorios: arquitectura/estructura-de-directorios.md
+      - Capa gold (modelo en estrella): arquitectura/modelo-gold.md
       - Patrones de diseño y SOLID: arquitectura/patrones-de-diseno.md
       - Funcionalidades diferidas: arquitectura/funcionalidades-diferidas.md
   - Decisiones (ADR):

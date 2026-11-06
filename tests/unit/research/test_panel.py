@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 import polars as pl
 import pytest
 
+from prometheus_platform.domain.protocol import DEV_END
 from prometheus_platform.research.panel import (
-    DEV_END,
     development_only,
     hourly_prices,
     settlement_features,

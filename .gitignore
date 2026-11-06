@@ -45,3 +45,6 @@ site/
 
 # Exportaciones de sesiones para NotebookLM (scripts/export_sessions.py)
 notebooklm/
+
+# Worktrees temporales de los agentes de Claude Code
+.claude/worktrees/

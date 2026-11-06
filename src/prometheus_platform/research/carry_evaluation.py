@@ -25,6 +25,7 @@ import numpy as np
 import optuna
 import polars as pl
 
+from prometheus_platform.domain.protocol import HOLDOUT_START
 from prometheus_platform.research.backtest import (
     ALT_COSTS,
     MAIN_COSTS,
@@ -36,7 +37,6 @@ from prometheus_platform.research.backtest import (
     simulate_symbol,
 )
 from prometheus_platform.research.panel import (
-    HOLDOUT_START,
     hourly_prices,
     load_silver,
     settlement_features,

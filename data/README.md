@@ -34,6 +34,17 @@ bronze/_rejections.jsonl   # archivos rechazados (checksum inválido, CSV malfor
 - Linaje en cada fila: `_source_file`, `_source_sha256`, `_source_row`, `_ingested_at`.
 - Consulta rápida: `duckdb -c "select * from read_parquet('data/bronze/**/*.parquet', hive_partitioning=true) limit 5"`.
 
+## Gold
+
+Modelo en estrella para BI (PQ-46): 4 dimensiones y 9 hechos, construidos desde silver y los
+resultados de `research/`. Ningún hecho con fecha llega al holdout (desde el 2024-07-01).
+
+```bash
+uv run pq gold build   # gold/*.parquet, gold/gold.duckdb y gold/export/*.csv + DICCIONARIO.md
+```
+
+Detalle de cada tabla y su linaje: [`docs/arquitectura/modelo-gold.md`](../docs/arquitectura/modelo-gold.md).
+
 ## Reglas
 
 - Los datos se **regeneran** con el pipeline (`data_platform`), nunca se editan a mano.

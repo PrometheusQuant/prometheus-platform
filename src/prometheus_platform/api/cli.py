@@ -27,6 +27,7 @@ from prometheus_platform.adapters.binance_data_vision import BinanceDataVisionSo
 from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.notifiers import notifier_from_settings
 from prometheus_platform.adapters.parquet_bronze import ParquetBronzeStore
+from prometheus_platform.data_platform.gold import GoldValidationError, build_gold, render_docs_page
 from prometheus_platform.data_platform.ingest import (
     IngestReport,
     ingest,
@@ -49,6 +50,9 @@ from prometheus_platform.ops.logging import configure_logging
 from prometheus_platform.ops.settings import load_settings
 
 SOURCE_NAME = "binance_data_vision"
+
+
+GOLD_DOCS = Path("docs/arquitectura/modelo-gold.md")
 
 
 def _month(value: str) -> date:
@@ -89,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
     build = silver_actions.add_parser("build", help="Reconstruye silver desde bronze")
     build.add_argument("--symbol", required=True, type=str.upper)
     build.add_argument("--interval", default="1h", help="intervalo de las velas (por defecto 1h)")
+
+    gold_cmd = commands.add_parser("gold", help="Capa gold: modelo en estrella para BI (PQ-46)")
+    gold_actions = gold_cmd.add_subparsers(dest="action", required=True)
+    gold_actions.add_parser("build", help="Reconstruye gold desde silver y los resultados")
+    gold_docs = gold_actions.add_parser("docs", help="Genera la página del modelo gold")
+    gold_docs.add_argument("--out", type=Path, default=GOLD_DOCS)
 
     research = commands.add_parser("research", help="Evaluaciones pre-registradas")
     studies = research.add_subparsers(dest="study", required=True)
@@ -149,6 +159,24 @@ def _silver_build(data_dir: Path, symbol: str, interval: str) -> int:
     except SilverValidationError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _gold(action: str, data_dir: Path, out: Path) -> int:
+    if action == "docs":
+        out.write_text(render_docs_page(), encoding="utf-8")
+        print(f"documentación del modelo gold en {out}")
+        return 0
+    try:
+        report = build_gold(data_dir)
+    except GoldValidationError as exc:
+        print(f"ERROR {exc}", file=sys.stderr)
+        return 1
+    for name, rows in report.rows.items():
+        print(f"{name}: filas={rows}")
+    for missing in report.missing:
+        print(f"aviso: falta {missing}; sus tablas quedan vacías")
+    print(f"capa gold en {data_dir / 'gold'} (CSV para Power BI en {data_dir / 'gold' / 'export'})")
     return 0
 
 
@@ -315,6 +343,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _alert_test(notifier, settings.environment.value)
     if args.command == "report":
         return _report_inputs(settings.data_dir, args.out)
+    if args.command == "gold":
+        return _gold(args.action, settings.data_dir, getattr(args, "out", GOLD_DOCS))
     if args.command == "silver":
         return _silver_build(settings.data_dir, args.symbol, args.interval)
     if args.command == "research":

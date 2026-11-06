@@ -10,3 +10,5 @@ Una carpeta por historia de **5 puntos o más**: `PQ-<n>-<nombre>/spec.md` (qué
 | Historia | Especificación |
 |---|---|
 | PQ-21 Capa silver | [spec](PQ-21-capa-silver/spec.md) · [plan](PQ-21-capa-silver/plan.md) |
+| PQ-34 Dashboard | [spec](PQ-34-dashboard/spec.md) · [plan](PQ-34-dashboard/plan.md) |
+| PQ-46 Capa gold | [spec](PQ-46-capa-gold/spec.md) · [plan](PQ-46-capa-gold/plan.md) |
