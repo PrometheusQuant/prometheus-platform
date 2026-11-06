@@ -64,6 +64,8 @@ nav:
       - arquitectura/README.md
       - Diagramas C4: arquitectura/c4.md
       - Estructura de directorios: arquitectura/estructura-de-directorios.md
+      - Patrones de diseño y SOLID: arquitectura/patrones-de-diseno.md
+      - Funcionalidades diferidas: arquitectura/funcionalidades-diferidas.md
   - Decisiones (ADR):
       - adr/README.md
       - "0001 Monolito modular hexagonal": adr/0001-monolito-modular-hexagonal.md
@@ -87,7 +89,11 @@ nav:
       - compliance/README.md
       - Binance: compliance/binance.md
       - Polymarket: compliance/polymarket.md
-  - Runbooks: runbooks/README.md
+  - Runbooks:
+      - runbooks/README.md
+      - Errores conocidos: runbooks/errores-conocidos.md
+      - Incidentes: runbooks/incidentes.md
+      - Análisis de impacto (BIA): runbooks/analisis-de-impacto.md
   - Investigación:
       - investigacion/README.md
       - "2026-10-16 Plataforma multiestrategia": investigacion/2026-10-16-plataforma-multiestrategia.md
@@ -102,6 +108,7 @@ nav:
           - Edges cripto cuantitativos: investigacion/notas/edges_cripto_cuantitativos.md
           - Edges alternativos y contradicciones: investigacion/notas/edges_alternativos_y_contradicciones.md
           - Metodología y Jira: investigacion/notas/metodologia_y_jira.md
+  - Glosario: glosario.md
   - Académico:
       - academico/README.md
       - Marco de referencia (cap. 2): academico/marco-de-referencia.md
