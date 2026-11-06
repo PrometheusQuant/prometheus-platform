@@ -42,3 +42,6 @@ site/
 
 # pip-audit
 .audit-requirements.txt
+
+# Exportaciones de sesiones para NotebookLM (scripts/export_sessions.py)
+notebooklm/

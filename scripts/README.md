@@ -13,3 +13,10 @@ generar un informe ad hoc o automatizar algo del repositorio.
   `bash scripts/<script>.sh`.
 - Idempotentes cuando sea posible: ejecutarlos dos veces no debe romper nada.
 - Sin secretos ni rutas absolutas de una máquina concreta.
+
+## Scripts disponibles
+
+| Script | Qué hace |
+|---|---|
+| `audit_data_vision.py` | Auditoría de las fuentes de Binance Data Vision (spike PQ-19) |
+| `export_sessions.py` | Exporta las sesiones de Claude Code a Markdown para NotebookLM, con secretos enmascarados; la salida (`notebooklm/`) queda fuera de git (PQ-40) |

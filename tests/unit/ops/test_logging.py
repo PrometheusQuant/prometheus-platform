@@ -7,7 +7,7 @@ import pytest
 import structlog
 from pydantic import SecretStr
 
-from prometheus_platform.ops.logging import REDACTED, configure_logging, get_logger
+from prometheus_platform.ops.logging import REDACTED, configure_logging, get_logger, redact_text
 from prometheus_platform.ops.settings import Environment, Settings
 
 
@@ -98,3 +98,31 @@ def test_context_variables_are_merged() -> None:
     [record] = json_lines(stream)
     assert record["run_id"] == "abc"
     assert record["environment"] == "live"
+
+
+# Credenciales falsas armadas por partes para que gitleaks y los hooks no las tomen por reales.
+_PEM = "-----{} RSA PRIVATE KEY-----"
+
+
+@pytest.mark.parametrize(
+    ("text", "leak"),
+    [
+        ("PQ_TELEGRAM_BOT_TOKEN=123456789:" + "AAH4kq9" + "x" * 28, "AAH4kq9"),
+        ("export ANTHROPIC_API_KEY=" + "sk-" + "ant-api03-" + "z" * 26, "api03"),
+        ("Authorization: token " + "gh" + "p_" + "q" * 36, "qqqq"),
+        ('{"api_secret": "hunter2"}', "hunter2"),
+        ("password: s3cr3t", "s3cr3t"),
+        ("key " + "vmPUZE" + "6mv9SD5VNHk4HlW" * 3 + "abcdefghijk" + "Z" * 2, "vmPUZE"),
+        (_PEM.format("BEGIN") + "\nMIIabc\n" + _PEM.format("END"), "MIIabc"),
+    ],
+)
+def test_redact_text_masks_secrets_in_free_text(text: str, leak: str) -> None:
+    redacted = redact_text(text)
+    assert leak not in redacted
+    assert REDACTED in redacted
+
+
+def test_redact_text_keeps_hashes_and_plain_prose() -> None:
+    digest = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    assert redact_text(f"sha256 {digest}") == f"sha256 {digest}"
+    assert redact_text("El carry rinde 5 % anual.") == "El carry rinde 5 % anual."
