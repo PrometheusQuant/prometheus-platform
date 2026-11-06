@@ -12,7 +12,7 @@ con menos de 1.000 USD.
 | **Ingesta histórica** (`pq ingest`) | Bajo: el histórico no cambia y se puede reintentar | 7 días | 1 día | Idempotente; reintentos con backoff; checksum | Ingesta diaria orquestada (PQ-22) |
 | **Silver, research y simulación** | Bajo: se regenera desde bronze | 7 días | 1 día | Reconstrucción determinista (`pq silver build`); semillas fijas | Respaldo de bronze fuera de la laptop |
 | **Proceso live con posición abierta** | Medio: el carry está cubierto, pero el short puede liquidarse en una subida brusca sin rebalanceo | 4 h | 1 h | — | Heartbeat, kill-switch y rebalanceo automático (PQ-7) |
-| **Alertas** | Alto mientras haya posición: sin alertas, nadie se entera de lo anterior | 1 h | 30 min | Logs JSON | Telegram (PQ-38) y heartbeat del propio canal |
+| **Alertas** | Alto mientras haya posición: sin alertas, nadie se entera de lo anterior | 1 h | 30 min | Logs JSON; alertas a Telegram ([alertas](alertas.md)) | Heartbeat del propio canal |
 | **Claves de API** | Crítico si se filtran | 0 (prevenir) | 15 min para revocar | Sin permiso de retiro; `SecretStr`; gitleaks | Lista blanca de IP al tener servidor fijo |
 | **Custodia en el exchange** | Crítico: quiebra o congelamiento de retiros | No aplica (no se recupera) | No aplica | — | Límite de capital por exchange calibrado con la [simulación](../investigacion/2026-11-05-simulacion-carry.md) (probabilidad de quiebra de equilibrio: 0,40 % anual) |
 | **Dashboard** (PQ-34) | Bajo: es de consulta | 7 días | 1 día | — | Imagen Docker reproducible |

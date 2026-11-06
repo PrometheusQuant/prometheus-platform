@@ -4,6 +4,9 @@ Cada evento lleva ``timestamp`` (UTC, ISO-8601), ``level``, ``event`` y ``enviro
 ``paper`` y ``live`` se emite JSON, una línea por evento, listo para auditoría y para cargarlo
 en el stack de observabilidad; en ``dev`` se emite en formato legible.
 
+Si se pasa un ``Notifier``, los eventos ERROR y CRITICAL se reenvían también como alerta
+(``ops/alerting.py``), ya con los secretos enmascarados.
+
 Los secretos se enmascaran antes de renderizar: cualquier ``SecretStr`` y cualquier campo cuyo
 nombre sugiera un secreto. Es una segunda barrera; la primera es no loguear secretos.
 """
@@ -19,6 +22,8 @@ import structlog
 from pydantic import SecretStr
 from structlog.typing import EventDict, FilteringBoundLogger, Processor, WrappedLogger
 
+from prometheus_platform.domain.ports import Notifier
+from prometheus_platform.ops.alerting import AlertForwarder
 from prometheus_platform.ops.settings import Environment, Settings
 
 REDACTED = "**********"
@@ -56,7 +61,9 @@ def _add_environment(environment: Environment) -> Processor:
     return processor
 
 
-def configure_logging(settings: Settings, stream: TextIO | None = None) -> None:
+def configure_logging(
+    settings: Settings, stream: TextIO | None = None, notifier: Notifier | None = None
+) -> None:
     """Configura structlog para todo el proceso. Llamar una vez, al arrancar."""
     output = stream if stream is not None else sys.stderr
     renderer: Processor
@@ -65,16 +72,18 @@ def configure_logging(settings: Settings, stream: TextIO | None = None) -> None:
     else:
         renderer = structlog.processors.JSONRenderer(sort_keys=True)
 
+    processors: list[Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        _add_environment(settings.environment),
+        structlog.processors.format_exc_info,
+        redact_secrets,
+    ]
+    if notifier is not None:
+        processors.append(AlertForwarder(notifier))
     structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
-            _add_environment(settings.environment),
-            structlog.processors.format_exc_info,
-            redact_secrets,
-            renderer,
-        ],
+        processors=[*processors, renderer],
         wrapper_class=structlog.make_filtering_bound_logger(
             logging.getLevelNamesMapping()[settings.log_level]
         ),

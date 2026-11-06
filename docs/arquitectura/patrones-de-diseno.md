@@ -24,7 +24,7 @@ no lo usamos.
 | **Value Object** | `domain/model.py` (`Bar`, `FundingRate`, `Signal`, `InstrumentId`); `domain/datasets.py` (`ArchiveRef`, `RawArchive`) | Objetos inmutables (`frozen=True`) que validan sus invariantes al crearse: un `Bar` con `high < low` no puede existir |
 | **Data Contract** | `data_platform/silver.py` (`KlineSchema`, `FundingSchema` con pandera) | Esquema y rangos declarativos entre bronze y silver |
 | **Inyección de dependencias** | `ingest(refs, source, store)`; `ParquetBronzeStore(clock=…)`; `BinanceDataVisionSource(sleep=…)` | Probar sin red ni reloj real: los tests inyectan `httpx.MockTransport`, `FixedClock` y un `sleep` falso |
-| **Observer** | *Planeado (PQ-38)* | Enrutar logs ERROR a notificadores (consola, Telegram) |
+| **Observer** | `ops/alerting.py` (`AlertForwarder`), puerto `Notifier` en `domain/ports.py`, `adapters/notifiers.py` | El log no sabe quién escucha: los eventos ERROR/CRITICAL se reenvían a consola, Telegram o memoria (tests) |
 
 **Un patrón que evitamos a propósito: Singleton.** OmniVoC usaba Singletons para la base de datos y
 el logger. Aquí se inyectan las dependencias: un Singleton es estado global y complica los tests. La
