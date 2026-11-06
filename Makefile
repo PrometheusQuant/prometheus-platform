@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report
+.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report e2e screenshots
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -27,6 +27,15 @@ test: ## Tests con cobertura
 
 dashboard: ## Abre el dashboard de investigación en http://localhost:8501 (solo lectura)
 	uv run streamlit run src/prometheus_platform/api/dashboard/app.py
+
+e2e: ## Pruebas en navegador real contra el dashboard en Docker (Playwright)
+	docker compose up -d --build --wait
+	uv run --group e2e playwright install chromium
+	uv run --group e2e pytest tests/e2e --no-cov --base-url http://127.0.0.1:8501
+
+screenshots: ## Captura cada pestaña del dashboard en reports/storytelling/_img/dashboard/
+	docker compose up -d --build --wait
+	uv run --group e2e python scripts/capture_dashboard.py
 
 report: ## Genera el informe ejecutivo en PDF desde los resultados (Quarto + Typst)
 	@command -v quarto >/dev/null || { echo "Falta Quarto: https://quarto.org/docs/get-started/"; exit 1; }
