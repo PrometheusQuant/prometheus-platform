@@ -15,6 +15,8 @@ TABS = {
     "¿Funciona? Carry y gates": "Carry de funding: periodo de desarrollo",
     "¿Qué predice? Modelo": "Modelo predictivo del funding (cap. 5)",
     "¿Qué riesgo hay? Simulación": "Simulación de Markov y Monte Carlo (cap. 6)",
+    "¿Y si invierto? Simula tu inversión": "Simula tu inversión en el carry (H2)",
+    "¿Qué predice hoy? Funding en vivo": "¿Habrá funding alto en la próxima liquidación?",
 }
 TIMEOUT_MS = 30_000
 
@@ -38,6 +40,8 @@ def test_each_tab_shows_data_or_how_to_generate_it(dashboard: Page, tab: str, he
     dashboard.get_by_role("tab", name=tab).click()
     panel = dashboard.get_by_role("tabpanel")
     expect(panel.get_by_role("heading", name=heading)).to_be_visible()
-    content = panel.locator('[data-testid="stDataFrame"], [data-testid="stAlert"]')
+    content = panel.locator(
+        '[data-testid="stDataFrame"], [data-testid="stAlert"], [data-testid="stMetric"]'
+    )
     expect(content.first).to_be_visible()
     expect(dashboard.locator('[data-testid="stException"]')).to_have_count(0)

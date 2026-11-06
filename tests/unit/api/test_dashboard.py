@@ -143,6 +143,8 @@ def app_labels() -> list[str]:
         "¿Funciona? Carry y gates",
         "¿Qué predice? Modelo",
         "¿Qué riesgo hay? Simulación",
+        "¿Y si invierto? Simula tu inversión",
+        "¿Qué predice hoy? Funding en vivo",
     ]
 
 
@@ -169,7 +171,7 @@ def test_app_degrades_gracefully_without_artifacts(
 ) -> None:
     at = run_app(tmp_path / "vacio", monkeypatch)
     assert not at.exception
-    assert len(at.info) == 5
+    assert len(at.info) == 7  # 5 artefactos faltantes + simulador y predicción sin silver
     assert not at.dataframe
 
 
