@@ -18,6 +18,7 @@ make e2e          # dashboard en Docker + pruebas en navegador (Playwright)
 make screenshots  # una captura PNG por pestaña del dashboard
 uv run pytest tests/unit/<ruta>::<test> -x --no-cov   # una prueba concreta
 uv run pq --help  # CLI de la plataforma
+uv run pq paper kill --reason "..."   # kill-switch (docs/runbooks/kill-switch.md)
 ```
 
 - Dependencias: `uv add <paquete>` (o `--group dev|docs|dashboard|e2e`). Nunca editar `uv.lock` a mano.

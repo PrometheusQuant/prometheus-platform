@@ -45,3 +45,18 @@ class OrderFilled(DomainEvent):
 class RiskLimitBreached(DomainEvent):
     rule: str
     detail: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class KillSwitchTripped(DomainEvent):
+    """Se detuvo la operación. ``source``: ``automatico``, ``cli`` o ``archivo``."""
+
+    reason: str
+    source: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class KillSwitchReset(DomainEvent):
+    """Se rearmó la operación, siempre a mano y con autor."""
+
+    by: str

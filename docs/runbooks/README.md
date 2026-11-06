@@ -11,13 +11,13 @@ Cada runbook indica: cuándo aplica, pasos exactos, cómo verificar que funcion�
 - [Orquestación (Dagster)](orquestacion.md): actualizar el lakehouse, ver linaje y checks, activar el schedule diario.
 - [Alertas a Telegram](alertas.md): configurar el bot y probar el canal.
 - [Análisis de impacto (BIA)](analisis-de-impacto.md): MTPD y RTO por proceso, riesgos y mitigación.
+- [Kill-switch](kill-switch.md): detener toda la operación, verificar, rearmar y el simulacro.
 
 ## Runbooks pendientes
 
 Previstos con la épica de riesgo y ejecución (PQ-7) y la de monitoreo (PQ-8):
 
 - Arrancar y detener el proceso de paper trading / live.
-- Activar el kill-switch y verificar que no quedan órdenes abiertas.
 - Rotar una clave de API comprometida.
 - Responder a una desconexión del exchange o a datos desactualizados.
 - Restaurar desde backup.

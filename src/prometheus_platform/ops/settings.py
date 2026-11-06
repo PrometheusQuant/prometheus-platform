@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +23,7 @@ class Environment(StrEnum):
 
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+MAX_LEVERAGE_CAP = 2.0  # ningún entorno puede configurar más apalancamiento que esto
 
 
 class Settings(BaseSettings):
@@ -48,6 +49,15 @@ class Settings(BaseSettings):
     telegram_chat_id: str | None = None
     # Zona horaria IANA en la que se muestran las alertas a las personas (los logs siguen en UTC).
     alert_timezone: str = "America/La_Paz"
+
+    # Límites de riesgo (PQ-53). Valores conservadores para paper trading con < 1.000 USD.
+    risk_max_notional_symbol_usd: float = Field(default=500.0, gt=0, allow_inf_nan=False)
+    risk_max_notional_total_usd: float = Field(default=1_000.0, gt=0, allow_inf_nan=False)
+    risk_max_leverage: float = Field(default=1.0, gt=0, le=MAX_LEVERAGE_CAP, allow_inf_nan=False)
+    risk_hard_leverage: float = Field(default=1.5, gt=0, le=MAX_LEVERAGE_CAP, allow_inf_nan=False)
+    risk_max_daily_loss: float = Field(default=0.02, gt=0, lt=1, allow_inf_nan=False)
+    risk_max_hedge_imbalance: float = Field(default=0.15, gt=0, lt=1, allow_inf_nan=False)
+    risk_imbalance_grace_seconds: int = Field(default=300, ge=0)
 
     @field_validator("alert_timezone")
     @classmethod
@@ -76,6 +86,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "El entorno live no puede usar la testnet: PQ_BINANCE_TESTNET=false"
                 )
+        if self.risk_hard_leverage < self.risk_max_leverage:
+            raise ValueError("PQ_RISK_HARD_LEVERAGE debe ser >= PQ_RISK_MAX_LEVERAGE")
+        if self.risk_max_notional_symbol_usd > self.risk_max_notional_total_usd:
+            raise ValueError("El nocional por símbolo no puede superar al nocional total")
         if self.environment is Environment.PAPER and not self.binance_testnet:
             raise ValueError("El paper trading solo opera en testnet: PQ_BINANCE_TESTNET=true")
         return self

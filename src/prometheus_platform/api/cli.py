@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 import polars as pl
@@ -28,6 +29,7 @@ from prometheus_platform.adapters.binance_data_vision import BinanceDataVisionSo
 from prometheus_platform.adapters.binance_rest import SOURCE_NAME as API_SOURCE_NAME
 from prometheus_platform.adapters.binance_rest import BinanceRestSource, day_refs
 from prometheus_platform.adapters.clock import SystemClock
+from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.notifiers import notifier_from_settings
 from prometheus_platform.adapters.parquet_bronze import ParquetBronzeStore
 from prometheus_platform.data_platform.gold import GoldValidationError, build_gold, render_docs_page
@@ -43,11 +45,15 @@ from prometheus_platform.domain.datasets import ArchiveRef, DatasetKind, Granula
 from prometheus_platform.domain.ports import Notifier
 from prometheus_platform.ops.logging import configure_logging
 from prometheus_platform.ops.settings import load_settings
+from prometheus_platform.portfolio_risk.kill_switch import KillSwitch
 
 SOURCE_NAME = "binance_data_vision"
 
 
 GOLD_DOCS = Path("docs/arquitectura/modelo-gold.md")
+PAPER_DIR = "paper"
+KILL_SWITCH_FLAG = "KILL_SWITCH"
+JOURNAL_FILE = "diario.jsonl"
 
 
 def _month(value: str) -> date:
@@ -71,7 +77,17 @@ def last_complete_month(today: date) -> date:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pq", description="Plataforma PrometheusQuant")
     commands = parser.add_subparsers(dest="command", required=True)
+    _add_ingest(commands)
+    _add_layers(commands)
+    _add_research(commands)
+    _add_operations(commands)
+    return parser
 
+
+Commands = Any  # argparse._SubParsersAction no es público
+
+
+def _add_ingest(commands: Commands) -> None:
     ingest_cmd = commands.add_parser("ingest", help="Ingesta bronze desde Binance")
     ingest_cmd.add_argument(
         "--source",
@@ -99,6 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
     funding = datasets.add_parser("funding", help="Funding rate de perpetuos USDⓈ-M")
     add_range(funding)
 
+
+def _add_layers(commands: Commands) -> None:
     silver_cmd = commands.add_parser("silver", help="Capa silver: datos tipados y validados")
     silver_actions = silver_cmd.add_subparsers(dest="action", required=True)
     build = silver_actions.add_parser("build", help="Reconstruye silver desde bronze")
@@ -111,6 +129,8 @@ def build_parser() -> argparse.ArgumentParser:
     gold_docs = gold_actions.add_parser("docs", help="Genera la página del modelo gold")
     gold_docs.add_argument("--out", type=Path, default=GOLD_DOCS)
 
+
+def _add_research(commands: Commands) -> None:
     research = commands.add_parser("research", help="Evaluaciones pre-registradas")
     studies = research.add_subparsers(dest="study", required=True)
     carry = studies.add_parser("carry", help="Carry de funding: periodo de desarrollo")
@@ -136,6 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--update-doc", type=Path, help="reescribe el bloque PQ-49 de este documento Markdown"
     )
 
+
+def _add_operations(commands: Commands) -> None:
     report = commands.add_parser("report", help="Informe ejecutivo en Quarto (PQ-39)")
     report_actions = report.add_subparsers(dest="action", required=True)
     inputs = report_actions.add_parser(
@@ -143,10 +165,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inputs.add_argument("--out", type=Path, default=Path("reports/storytelling"))
 
+    paper = commands.add_parser("paper", help="Paper trading: kill-switch y estado (PQ-53)")
+    paper_actions = paper.add_subparsers(dest="action", required=True)
+    kill = paper_actions.add_parser("kill", help="Activa (o rearma) el kill-switch")
+    kill.add_argument("--reason", default="activado a mano por CLI")
+    kill.add_argument("--reset", action="store_true", help="rearmar la operación")
+    kill.add_argument("--confirm", action="store_true", help="obligatorio con --reset")
+    kill.add_argument("--by", default="", help="quién rearma (obligatorio con --reset)")
+    paper_actions.add_parser("status", help="Estado del kill-switch")
+
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
     alert_actions.add_parser("test", help="Envía una alerta de prueba por el canal configurado")
-    return parser
 
 
 def http_client() -> httpx.Client:
@@ -432,6 +462,34 @@ def _report_inputs(data_dir: Path, out: Path) -> int:
     return 0
 
 
+def _paper(args: argparse.Namespace, data_dir: Path) -> int:
+    paper_dir = data_dir / PAPER_DIR
+    switch = KillSwitch(
+        paper_dir / KILL_SWITCH_FLAG, SystemClock(), JsonlEventJournal(paper_dir / JOURNAL_FILE)
+    )
+    if args.action == "status":
+        state = switch.state()
+        print(
+            "kill-switch: ARMADO (operación permitida)"
+            if state is None
+            else f"kill-switch: ACTIVADO {state}"
+        )
+        print(f"bandera: {switch.flag_path.resolve()}")
+        return 0
+    if not args.reset:
+        tripped = switch.trip(args.reason, source="cli")
+        print("kill-switch ACTIVADO" if tripped else "el kill-switch ya estaba activado")
+        print(f"bandera: {switch.flag_path.resolve()}")
+        print("el runner cancela las órdenes y cierra las posiciones en su próximo ciclo;")
+        print("verifica con `pq paper status` y en Binance (órdenes abiertas)")
+        return 0
+    if not (args.confirm and args.by.strip()):
+        print("para rearmar hacen falta --confirm y --by <nombre>", file=sys.stderr)
+        return 2
+    print("kill-switch rearmado" if switch.reset(args.by) else "el kill-switch no estaba activado")
+    return 0
+
+
 def _alert_test(notifier: Notifier | None, environment: str) -> int:
     if notifier is None:
         print("sin canal de alertas: configura PQ_TELEGRAM_BOT_TOKEN y PQ_TELEGRAM_CHAT_ID")
@@ -473,18 +531,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     settings = load_settings()
     notifier = notifier_from_settings(settings)
     configure_logging(settings, notifier=notifier)
-    if args.command == "alert":
-        return _alert_test(notifier, settings.environment.value)
-    if args.command == "report":
-        return _report_inputs(settings.data_dir, args.out)
-    if args.command == "gold":
-        return _gold(args.action, settings.data_dir, getattr(args, "out", GOLD_DOCS))
-    if args.command == "silver":
-        return _silver_build(settings.data_dir, args.symbol, args.interval)
-    if args.command == "research":
-        return _research(args, settings.data_dir)
-
-    return _ingest(args, settings.data_dir / "bronze")
+    data_dir = settings.data_dir
+    handlers: dict[str, Callable[[], int]] = {
+        "ingest": lambda: _ingest(args, data_dir / "bronze"),
+        "silver": lambda: _silver_build(data_dir, args.symbol, args.interval),
+        "gold": lambda: _gold(args.action, data_dir, getattr(args, "out", GOLD_DOCS)),
+        "research": lambda: _research(args, data_dir),
+        "report": lambda: _report_inputs(data_dir, args.out),
+        "paper": lambda: _paper(args, data_dir),
+        "alert": lambda: _alert_test(notifier, settings.environment.value),
+    }
+    return handlers[args.command]()
 
 
 if __name__ == "__main__":  # pragma: no cover
