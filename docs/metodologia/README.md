@@ -5,3 +5,5 @@
 - [Definición de Listo y de Terminado](definicion-de-listo-y-terminado.md), con los gates de
   calidad por fase.
 - Flujo de trabajo, ramas y commits: [CONTRIBUTING](https://github.com/PrometheusQuant/prometheus-platform/blob/develop/CONTRIBUTING.md).
+- [Trabajo en dos carriles con agentes de IA](trabajo-con-agentes.md): cómo arrancar, cómo trabajar
+  un ticket con Claude Code o Codex, y la revisión cruzada.
