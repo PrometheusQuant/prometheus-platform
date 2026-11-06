@@ -115,6 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     simulate.add_argument("--figures", type=Path, required=True)
     simulate.add_argument("--paths", type=int, default=10_000)
+    studies.add_parser(
+        "stats", help="Validación estadística de la optimización: t, ANOVA, Friedman (cap. 7.4)"
+    )
 
     report = commands.add_parser("report", help="Informe ejecutivo en Quarto (PQ-39)")
     report_actions = report.add_subparsers(dest="action", required=True)
@@ -298,7 +301,33 @@ def _research_eda(data_dir: Path, figures: Path) -> int:
     return 0
 
 
+def _research_stats(data_dir: Path) -> int:
+    from prometheus_platform.research.hypothesis_tests import (  # noqa: PLC0415
+        run_validation,
+        verdict,
+        write_validation,
+    )
+
+    result = run_validation(data_dir)
+    path = write_validation(result, data_dir / "research" / "stats")
+    for test in (result.he1, result.he2):
+        low, high = test.ci95_annualized
+        print(
+            f"{test.hypothesis}: p_HAC={test.p_hac:.4f} IC95=[{low:+.2%}, {high:+.2%}] anual"
+            f" → {verdict(test.reject_h0, 'media')}"
+        )
+    he3 = result.he3
+    print(
+        f"HE3: Friedman p={he3.friedman_p:.2e} W={he3.kendall_w:.3f}; ANOVA p={he3.anova_p:.3f}"
+        f" → {verdict(he3.reject_h0, 'grupo')}"
+    )
+    print(f"resultados en {path}")
+    return 0
+
+
 def _research(args: argparse.Namespace, data_dir: Path) -> int:
+    if args.study == "stats":
+        return _research_stats(data_dir)
     if args.study == "eda":
         return _research_eda(data_dir, args.figures)
     if args.study == "simulate":
