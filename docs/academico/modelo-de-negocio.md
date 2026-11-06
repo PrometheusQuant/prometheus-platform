@@ -5,6 +5,7 @@
 **Estado:** plan aprobado en Jira; documento presentado para revisión de código.
 
 **Fecha:** 2026-11-06.
+
 **Épica relacionada:** PQ-10. **Ticket:** PQ-44 (asignado a Boris Igor Miranda Prieto).
 
 ## 1. Resumen ejecutivo
