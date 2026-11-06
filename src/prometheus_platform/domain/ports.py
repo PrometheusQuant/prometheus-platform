@@ -12,6 +12,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
 
+from prometheus_platform.domain.alerts import Alert
 from prometheus_platform.domain.datasets import ArchiveRef, RawArchive
 from prometheus_platform.domain.events import DomainEvent
 from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId, Side
@@ -75,3 +76,13 @@ class BronzeStore(Protocol):
     def record_rejection(self, ref: ArchiveRef, reason: str) -> None:
         """Deja constancia de un archivo rechazado, sin guardarlo."""
         ...
+
+
+class Notifier(Protocol):
+    """Canal de alertas (consola, Telegram…). Patrón Observer: el logging no sabe quién escucha.
+
+    Nunca lanza: devuelve ``False`` si no pudo entregar la alerta. Un canal caído no puede
+    tumbar el proceso que está intentando avisar de otro fallo.
+    """
+
+    def notify(self, alert: Alert) -> bool: ...

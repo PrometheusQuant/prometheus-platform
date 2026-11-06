@@ -22,7 +22,7 @@ Qué hacer cuando algo falla. La meta es restaurar rápido (incidente) y despué
 | Rechazos de ingesta en `data/bronze/_rejections.jsonl` | Existe |
 | Informe de calidad de silver (`data/silver/_quality/`) | Existe |
 | CI: lint, tipos, tests, gitleaks, CodeQL y `pip-audit` | Existe |
-| Alertas ERROR/CRITICAL a Telegram (PQ-38) | Planeado |
+| Alertas ERROR/CRITICAL a Telegram, con enfriamiento de 5 min por evento ([alertas](alertas.md)) | Existe |
 | Heartbeat del proceso live y alerta si se calla | Planeado (PQ-7/PQ-8) |
 
 ## Respuesta por severidad

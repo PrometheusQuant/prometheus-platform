@@ -93,6 +93,7 @@ nav:
       - runbooks/README.md
       - Errores conocidos: runbooks/errores-conocidos.md
       - Incidentes: runbooks/incidentes.md
+      - Alertas a Telegram: runbooks/alertas.md
       - Análisis de impacto (BIA): runbooks/analisis-de-impacto.md
   - Investigación:
       - investigacion/README.md

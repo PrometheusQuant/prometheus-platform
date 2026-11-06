@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import datetime
 
+from prometheus_platform.domain.alerts import Alert
 from prometheus_platform.domain.events import DomainEvent
 
 
@@ -39,3 +40,15 @@ class FixedClock:
         if instant < self._now:
             raise ValueError("El reloj simulado no puede retroceder")
         self._now = instant
+
+
+class RecordingNotifier:
+    """Guarda las alertas en memoria. Cumple el puerto ``Notifier``; útil en tests."""
+
+    def __init__(self, *, deliver: bool = True) -> None:
+        self.alerts: list[Alert] = []
+        self._deliver = deliver
+
+    def notify(self, alert: Alert) -> bool:
+        self.alerts.append(alert)
+        return self._deliver
