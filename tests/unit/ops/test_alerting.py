@@ -2,6 +2,7 @@ import io
 import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 import structlog
@@ -106,6 +107,13 @@ def test_render_is_plain_text_and_truncates_long_details() -> None:
     assert lines[0] == "[CRITICAL] t"
     assert lines[2] == "a: 1"
     assert len(lines[3]) == len("b: ") + 300
+
+
+def test_render_shows_local_time_first_and_utc_as_reference() -> None:
+    alert = Alert(severity=AlertSeverity.WARNING, title="t", occurred_at=T0, environment="dev")
+    assert alert.render().splitlines()[1] == "entorno=dev hora=2026-11-05T12:00:00+00:00"
+    local = alert.render(ZoneInfo("America/La_Paz")).splitlines()[1]
+    assert local == "entorno=dev hora=2026-11-05 08:00:00 -04 (12:00:00 UTC)"
 
 
 def test_cli_alert_test_reports_missing_channel_and_delivery(

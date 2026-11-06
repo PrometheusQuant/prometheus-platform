@@ -20,6 +20,7 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-010 | El modo automático bloquea el force-push | Workaround |
 | KE-011 | La tabla oficial de comisiones de futuros no se lee sin sesión | Abierto |
 | KE-012 | Dependencias de desarrollo con CVE (`filelock`, `virtualenv`) | Resuelto |
+| KE-013 | Los tests leían el `.env` real de quien los ejecuta | Resuelto |
 
 ---
 
@@ -101,3 +102,14 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
   por `pre-commit`.
 - **Solución:** `uv lock --upgrade-package filelock --upgrade-package virtualenv`. La CI audita cada PR
   desde entonces (PQ-37). **Resuelto.**
+
+### KE-013: los tests leían el `.env` real de quien los ejecuta
+
+- **Síntoma:** al crear un `.env` con el bot de Telegram, `test_notifier_selection_by_settings` falló:
+  en `dev` esperaba «sin canal» y obtuvo un `TelegramNotifier` con el token real.
+- **Causa:** `Settings()` lee `.env` del directorio actual y las variables `PQ_*`. Solo los tests de
+  `settings` se aislaban; los demás dependían de que no existiera `.env`. Ningún test llegó a enviar
+  nada, pero uno mal escrito podría haber usado el token o las claves reales.
+- **Solución:** fixture `autouse` en `tests/conftest.py` que desactiva el `.env` y borra las `PQ_*`
+  en todos los tests; el test que prueba la lectura del `.env` lo reactiva sobre `tmp_path`.
+  **Resuelto** (PQ-38).
