@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard
+.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -27,6 +27,13 @@ test: ## Tests con cobertura
 
 dashboard: ## Abre el dashboard de investigación en http://localhost:8501 (solo lectura)
 	uv run streamlit run src/prometheus_platform/api/dashboard/app.py
+
+report: ## Genera el informe ejecutivo en PDF desde los resultados (Quarto + Typst)
+	@command -v quarto >/dev/null || { echo "Falta Quarto: https://quarto.org/docs/get-started/"; exit 1; }
+	uv run pq report inputs --out reports/storytelling
+	cd reports/storytelling && quarto render informe.qmd --to typst
+	cp reports/storytelling/informe.pdf docs/academico/informe-ejecutivo.pdf
+	@echo "Informe en docs/academico/informe-ejecutivo.pdf"
 
 audit: ## Busca vulnerabilidades conocidas en las dependencias del uv.lock (pip-audit)
 	uv export --frozen --no-emit-project --format requirements-txt -o .audit-requirements.txt

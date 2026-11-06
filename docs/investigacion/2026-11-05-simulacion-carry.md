@@ -132,8 +132,9 @@ esperado con **CVaR 95 % ≤ 5 %**, en el escenario de quiebra del 2 % anual:
 | 100 % | 2,15 % | 44,1 % | no |
 
 **Probabilidad de quiebra de equilibrio: 0,40 % anual.** Por encima de ese riesgo, el carry H2 rinde
-en promedio menos que la stablecoin. Con un riesgo anual del 2 %, **ninguna asignación al carry cumple el
-límite de CVaR**: la óptima es 0 %.
+en promedio menos que la stablecoin. Con un riesgo anual del 2 %, solo las asignaciones de **hasta el 15 %**
+cumplen el límite de CVaR (la tabla muestra pasos del 20 %; la grilla completa, de 5 en 5 puntos, está en
+`data/research/simulation/summary.json`), y todas rinden menos que no invertir: **la óptima es 0 %**.
 
 *Límite del análisis:* la stablecoin también tiene riesgo de contraparte y de *depeg*, que aquí no se
 modela. Si estuviera en el mismo exchange, el riesgo de quiebra afectaría a las dos.

@@ -22,8 +22,8 @@ carpeta a partir de esa evidencia.
 | 6.1–6.2 | Pseudoaleatorios con bondad de ajuste; simulación y optimización | `research/`, `academico/simulacion.md` | PQ-9 |
 | 6.3 | Rediseño del proceso con PDCA | `metodologia/`, ciclo de `estrategias/` | PQ-9 |
 | 7.1 | Modelado de datos y ETL | Lakehouse gold, modelo tabular de BI | PQ-3, PQ-10 |
-| 7.2 | Dashboard interactivo y KPIs | Power BI (archivo fuera de git), Grafana | PQ-10 |
-| 7.3 | Despliegue (TRL 5) | Paper trading en testnet, app de demostración | PQ-7 |
+| 7.2 | Dashboard interactivo y KPIs | [Dashboard en Streamlit](../runbooks/dashboard.md) (PQ-34); Grafana para la operación | PQ-10 |
+| 7.3 | Despliegue (TRL 5) | Imagen Docker del dashboard; paper trading en testnet | PQ-7 |
 | 7.4 | Validación estadística | Deflated Sharpe, PBO, pruebas de hipótesis | PQ-4 |
 | 8.1–8.4 | Competencia, Canvas, costes cloud, ROI | `academico/modelo-de-negocio.md`, [`deploy/`](https://github.com/PrometheusQuant/prometheus-platform/tree/develop/deploy) | PQ-10 |
 | 9.1–9.4 | Conclusiones, pitch, code review, evaluación 360 | `academico/informe/`, historial de PRs | PQ-10 |
@@ -49,3 +49,5 @@ Material con copyright (libros, papers en PDF) ni datos personales: se citan en 
 | 4.3 Feature engineering | [EDA de las features](../investigacion/2026-10-30-eda-features-funding.md) |
 | 5.1–5.3 Modelado | [Modelo predictivo del funding](../investigacion/2026-10-30-modelo-predictivo-funding.md) y [evaluación del carry](../estrategias/01-carry/evaluacion.md) |
 | 6.1–6.3 Simulación y optimización | [Simulación del carry](../investigacion/2026-11-05-simulacion-carry.md): Markov estimada, KS/χ², Monte Carlo validado, optimización con CVaR y PDCA |
+| 7.2–7.3 Dashboard y despliegue | [Dashboard en Streamlit + Docker](../runbooks/dashboard.md) ([ADR-0009](../adr/0009-streamlit-y-docker-para-el-dashboard.md)) |
+| 9.2 Pitch | [Informe ejecutivo en PDF](informe-ejecutivo.pdf), generado con `make report` (Quarto) desde los JSON de resultados |

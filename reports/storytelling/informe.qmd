@@ -1,0 +1,152 @@
+---
+title: "Cobrar el funding sin apostar al precio"
+subtitle: "Informe ejecutivo de PrometheusQuant · Sprint 2"
+author: "PrometheusQuant"
+date: today
+date-format: "D [de] MMMM [de] YYYY"
+lang: es
+metadata-files: [_resultados.yml]
+language:
+  crossref-fig-title: "Figura"
+  crossref-tbl-title: "Tabla"
+format:
+  typst:
+    toc: true
+    toc-title: "Contenido"
+    section-numbering: "1."
+    papersize: a4
+    margin:
+      x: 2.2cm
+      y: 2.2cm
+    fontsize: 10.5pt
+---
+
+::: {.callout-note}
+## Cómo se hizo este informe
+Ninguna cifra está escrita a mano. `make report` lee los resultados guardados en `data/research/`
+y vuelve a armar el documento. Si mañana cambia un resultado, el informe cambia con él.
+:::
+
+# La pregunta
+
+En los mercados de futuros perpetuos de criptomonedas, quien está en largo le paga cada ocho horas
+a quien está en corto. Ese pago se llama *funding*. Si uno compra la moneda al contado y, al mismo
+tiempo, la vende en el perpetuo, el precio deja de importar: lo que se gana en una pata se pierde en
+la otra. Lo que queda es el funding.
+
+La pregunta del proyecto es sencilla: **¿ese cobro rinde más que dejar el dinero en una stablecoin
+al 4 % anual, y con un riesgo que podamos aceptar?**
+
+# ¿Qué pasó? Los datos
+
+Usamos datos públicos de Binance desde {{< meta r.datos.desde >}}: velas de una hora del contado y
+del perpetuo, y el historial completo del funding, para cinco monedas. Son
+{{< meta r.datos.tablas >}} tablas y {{< meta r.datos.filas >}} filas, cada archivo verificado con
+su checksum.
+
+{{< meta r.datos.con_huecos >}} tablas tienen algún hueco. No los rellenamos: inventar precios
+haría que el backtest se viera mejor de lo que es. Los huecos quedan registrados y la simulación
+ejecuta en la siguiente hora disponible.
+
+{{< include _tablas/calidad.md >}}
+
+# ¿Funciona? El carry en el periodo de desarrollo
+
+Antes de mirar un solo resultado, dejamos por escrito qué íbamos a probar y qué umbrales tenía que
+pasar la estrategia (el *pre-registro*). Probamos 9 configuraciones por grupo y contamos **todos**
+los intentos, porque con suficientes intentos cualquier estrategia termina pareciendo buena por
+azar. Los datos desde julio de 2024 no se tocaron: son el examen final (*holdout*) y siguen cerrados.
+
+Una estrategia pasa si cumple los cuatro *gates*:
+
+- **G1**: el Sharpe sigue siendo bueno después de descontar el número de intentos (Deflated Sharpe).
+- **G2**: la probabilidad de haber elegido por suerte (PBO) es menor al 50 %.
+- **G3**: el resultado es estadísticamente fuerte (t > 3).
+- **G4**: le gana a simplemente estar siempre invertido y rinde más que el 4 %.
+
+## Monedas grandes (H1: {{< meta r.h1.simbolos >}}): **{{< meta r.h1.veredicto >}}**
+
+La mejor configuración rindió {{< meta r.h1.cagr >}} anual con una caída máxima de
+{{< meta r.h1.max_dd >}}. El problema es que quedarse siempre invertido rindió más
+({{< meta r.h1.b1_cagr >}}). En BTC y ETH, el funding casi siempre es positivo, así que entrar y
+salir solo agrega costos.
+
+{{< include _tablas/gates-h1.md >}}
+
+## Monedas medianas (H2: {{< meta r.h2.simbolos >}}): **{{< meta r.h2.veredicto >}}**
+
+Acá la estrategia sí se gana su lugar: {{< meta r.h2.cagr >}} anual contra
+{{< meta r.h2.b1_cagr >}} de estar siempre invertido, con una caída máxima de solo
+{{< meta r.h2.max_dd >}} y una probabilidad de sobreajuste de {{< meta r.h2.pbo >}}. En estas
+monedas el funding se vuelve negativo con frecuencia, y saber cuándo salir es lo que agrega valor.
+
+{{< include _tablas/gates-h2.md >}}
+
+{{< include _figuras/h2-curvas.md >}}
+
+# ¿Qué predice? El modelo del funding
+
+Probamos modelos de *machine learning* para anticipar la próxima tasa. La conclusión honesta es que
+la tasa de hoy ya dice casi todo sobre la de mañana. El mejor modelo explica
+{{< meta r.modelo.r2_mejor >}} de la variación, contra {{< meta r.modelo.r2_persistencia >}} de
+simplemente repetir el último valor. La mejora es real (Diebold-Mariano = {{< meta r.modelo.dm >}},
+p = {{< meta r.modelo.dm_p >}}), pero chica.
+
+Donde los modelos sí sirven es para responder si la próxima tasa va a ser **alta** (más de 20 %
+anual): ahí el mejor alcanza un AUC de {{< meta r.modelo.auc >}}. Esa señal ya la usa la regla de
+entrada del carry.
+
+{{< include _figuras/roc-funding.md >}}
+
+# ¿Qué riesgo hay? Simulación
+
+Un backtest es una sola historia. Para ver muchas historias posibles, armamos un simulador. El
+funding pasa por tres regímenes (negativo, normal y alto), y estimamos con los datos la probabilidad
+de pasar de uno a otro. La primera versión del simulador generaba demasiados ciclos de entrada y
+salida, así que la descartamos. La versión final reproduce la historia razonablemente:
+{{< meta r.sim.ciclos_sim >}} ciclos por año contra {{< meta r.sim.ciclos_hist >}} reales.
+
+{{< include _tablas/validacion.md >}}
+
+{{< include _figuras/markov-transiciones.md >}}
+
+Con 10.000 trayectorias simuladas, el carry H2 rinde en promedio {{< meta r.sim.media >}}
+(mediana {{< meta r.sim.mediana >}}). Le gana al 4 %, pero por poco. Rinde menos que el 4 % en el
+{{< meta r.sim.p_bajo_4 >}} de los años simulados y pierde plata en el {{< meta r.sim.p_perdida >}}.
+
+{{< include _figuras/montecarlo-retornos.md >}}
+
+## El riesgo que importa: que quiebre el exchange
+
+La estrategia es neutral al precio, pero no al exchange. Si el exchange quiebra, se pierde todo lo
+depositado, como pasó con FTX en 2022. Por eso simulamos ese caso:
+
+{{< include _tablas/escenarios.md >}}
+
+Con una probabilidad de quiebra del 2 % anual, el retorno medio cae a {{< meta r.sim.media_p2 >}};
+con un 5 %, a {{< meta r.sim.media_p5 >}}. **El punto de equilibrio es una probabilidad de quiebra
+de {{< meta r.sim.quiebra_equilibrio >}} anual**: por encima de eso, conviene más la stablecoin.
+
+Si limitamos la pérdida en el peor 5 % de los años (CVaR) a un 5 %, solo se puede poner hasta un
+{{< meta r.sim.max_carry_cvar >}} del capital en el carry, y aun así rinde menos que no invertir.
+
+{{< include _figuras/asignacion-frontera.md >}}
+
+# Qué decidimos
+
+1. **H2 sigue adelante y H1 no.** El carry en monedas medianas pasó los cuatro gates en desarrollo.
+   En BTC y ETH no le gana a estar siempre invertido.
+2. **El holdout sigue cerrado** hasta verificar en la cuenta las comisiones reales de futuros. Abrirlo
+   antes sería gastar el examen final con supuestos dudosos.
+3. **El riesgo de contraparte manda.** Antes de operar con dinero real, el sistema necesita un
+   límite de capital por exchange, calibrado con el punto de equilibrio de
+   {{< meta r.sim.quiebra_equilibrio >}}, y un kill-switch.
+4. **Primero paper trading.** El siguiente paso es operar H2 con dinero simulado durante semanas,
+   con alertas a Telegram, antes de comprometer capital.
+
+::: {.callout-important}
+## Límites de este análisis
+Son resultados del periodo de desarrollo (enero de 2020 a junio de 2024). Rentabilidades pasadas
+no garantizan las futuras. La stablecoin también tiene riesgo (de *depeg* y de contraparte), y aquí
+no lo modelamos.
+:::
