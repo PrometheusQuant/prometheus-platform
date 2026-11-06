@@ -1,8 +1,8 @@
 # PrometheusQuant — Modelo de negocio y viabilidad económica preliminar
 
-**Proyecto Integrador · Capítulo 8 (competencia, Canvas, costes y ROI)**  
-**Estado:** plan aprobado en Jira; documento presentado para revisión de código.  
-**Fecha:** 2026-11-06.  
+**Proyecto Integrador · Capítulo 8 (competencia, Canvas, costes y ROI)**
+**Estado:** plan aprobado en Jira; documento presentado para revisión de código.
+**Fecha:** 2026-11-06.
 **Épica relacionada:** PQ-10. **Ticket:** PQ-44 (asignado a Boris Igor Miranda Prieto).
 
 ## 1. Resumen ejecutivo
@@ -104,6 +104,106 @@ C^*=\frac{12M}{r_P-r_B}
 \]
 
 Con \(M=10\) USD/mes y una ventaja **hipotética** de 0,41 puntos porcentuales, se obtiene \(C^*\approx 29.268\) USD. Esta cifra es únicamente una sensibilidad aritmética, no un objetivo de inversión: omite tiempo de trabajo, impuestos, escalabilidad, costes y cambios de comportamiento del mercado.
+
+### 6.2 Costes cotizados y evaluación financiera (PQ-49)
+
+> **Agregado por PQ-49.** Completa las secciones 5 y 6 con precios cotizados en sus fuentes y con
+> el VAN, la TIR y el capital de equilibrio calculados por código. Las tablas siguientes las genera
+> `uv run pq research finance --update-doc docs/academico/modelo-de-negocio.md` a partir de los
+> escenarios del capítulo 6. No se editan a mano.
+
+**Cómo se plantea la decisión.**
+- **La comparación es incremental:** poner un capital C en el carry en lugar de dejarlo en la stablecoin
+  al 4 %, que es el benchmark del pre-registro y también la tasa de descuento (costo de
+  oportunidad del capital).
+- **La fórmula es la de la sección 5.2:** flujo anual = C·(r_P − r_B) − costes de operación. La
+  inversión inicial es la puesta en marcha del despliegue.
+- **El desarrollo ya realizado es un costo hundido**, así que no entra en la decisión de operar.
+
+<!-- PQ-49:inicio (generado por `uv run pq research finance --update-doc`) -->
+
+**Fecha de cotización:** 2026-11-06. **Tasa de descuento y benchmark:** 4,0 % anual (stablecoin).
+
+#### Costes cotizados (8.3)
+
+| Concepto | USD/mes | Fuente | Verificado |
+|---|---:|---|---|
+| Laptop propia (solo durante la demo) | 0,00 | equipo existente (2026-11-06) | sí |
+| Oracle Cloud Always Free (Ampere A1, 2 OCPU y 12 GB) | 0,00 | <https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm> (2026-11-06) | sí |
+| Hetzner Cloud Cost-Optimized (plan más barato) | 6,69 | <https://www.hetzner.com/cloud/> (2026-11-06) | sí |
+| Dominio .com en Cloudflare Registrar (opcional) | 0,93 | <https://costgoat.com/compare/domains/com> (2026-10-20) | **por verificar** |
+
+- **Horas del equipo:** 1,16 USD/h (salario mínimo nacional 2026 (DS 5516) / 240 h / TCO del BCB). Es un piso: el costo de
+  oportunidad real de un analista es mayor. Las horas de operación (8 h/mes) y de puesta en marcha (16 h) son **supuestos declarados**.
+- **Comisiones y slippage de Binance:** ya están dentro de los retornos simulados (VIP 0, [compliance](../compliance/binance.md)); las reales se confirman en PQ-17.
+- **Desarrollo ya realizado:** costo hundido; no entra en la decisión de operar.
+
+#### Evaluación con Oracle Cloud Always Free (Ampere A1, 2 OCPU y 12 GB) (8.4)
+
+Flujo anual = C·(r_P - 4 %) - costes de operación. VAN a 1 y 3 años; TIR sobre la puesta en marcha; capital de equilibrio = capital mínimo con VAN = 0.
+
+| Escenario (cap. 6) | r_P medio | Capital | VAN 1 año | VAN 3 años | TIR 3 años |
+|---|---:|---:|---:|---:|---:|
+| sin quiebra del exchange | 4,4 % | 500 USD | -123 USD | -321 USD | no existe |
+| sin quiebra del exchange | 4,4 % | 1.000 USD | -121 USD | -315 USD | no existe |
+| sin quiebra del exchange | 4,4 % | 5.000 USD | -105 USD | -269 USD | no existe |
+| sin quiebra del exchange | 4,4 % | 10.000 USD | -85 USD | -211 USD | no existe |
+| quiebra con p = 2% anual | 2,2 % | 500 USD | -134 USD | -352 USD | no existe |
+| quiebra con p = 2% anual | 2,2 % | 1.000 USD | -143 USD | -378 USD | no existe |
+| quiebra con p = 2% anual | 2,2 % | 5.000 USD | -214 USD | -583 USD | no existe |
+| quiebra con p = 2% anual | 2,2 % | 10.000 USD | -303 USD | -840 USD | no existe |
+| quiebra con p = 5% anual | -1,0 % | 500 USD | -149 USD | -395 USD | no existe |
+| quiebra con p = 5% anual | -1,0 % | 1.000 USD | -173 USD | -464 USD | no existe |
+| quiebra con p = 5% anual | -1,0 % | 5.000 USD | -363 USD | -1.014 USD | no existe |
+| quiebra con p = 5% anual | -1,0 % | 10.000 USD | -601 USD | -1.701 USD | no existe |
+
+**Capital de equilibrio (VAN = 0) por infraestructura, a 3 años**
+
+| Escenario | Laptop propia (solo durante la demo) | Oracle Cloud Always Free (Ampere A1, 2 OCPU y 12 GB) | Hetzner Cloud Cost-Optimized (plan más barato) |
+|---|---:|---:|---:|
+| sin quiebra del exchange | 28.368 USD | 28.368 USD | 47.714 USD |
+| quiebra con p = 2% anual | no existe | no existe | no existe |
+| quiebra con p = 5% anual | no existe | no existe | no existe |
+
+**Sensibilidad a la tarifa horaria** (escenario sin quiebra del exchange, Oracle, 3 años). Las horas de operación son el costo dominante; sin valorarlas, cualquier capital tiene VAN positivo:
+
+| Tarifa | USD/h | Capital de equilibrio |
+|---|---:|---:|
+| horas no valoradas | 0,00 | 0 USD |
+| salario mínimo (fuente oficial) | 1,16 | 28.368 USD |
+| supuesto ilustrativo | 5,00 | 122.654 USD |
+
+**Rango de un año (p5 a p95 del Monte Carlo), por cada 1.000 USD frente a la stablecoin:**
+
+| Escenario | Peor año (p5) | Año medio | Buen año (p95) |
+|---|---:|---:|---:|
+| sin quiebra del exchange | -47 USD | 4 USD | 91 USD |
+| quiebra con p = 2% anual | -49 USD | -18 USD | 91 USD |
+| quiebra con p = 5% anual | -1.040 USD | -50 USD | 90 USD |
+
+<!-- PQ-49:fin -->
+
+**Lectura.**
+- **Con los costes cotizados, el carry no compensa en ninguno de los capitales evaluados
+  (500 a 10.000 USD).** El VAN es negativo en los tres escenarios y no hay TIR, porque el flujo
+  anual es negativo.
+- **El costo dominante no es la infraestructura**, que es gratuita en Oracle, sino **las horas de
+  operación**. Aun valoradas al salario mínimo, superan la ventaja esperada sobre la stablecoin
+  para capitales pequeños.
+- **El capital de equilibrio solo existe sin quiebra del exchange.** Con una probabilidad de quiebra
+  del 2 % o del 5 % anual, el retorno esperado queda por debajo del 4 % y ningún capital compensa.
+  Es la misma conclusión del capítulo 6, que da la asignación óptima de 0 % al carry con CVaR ≤ 5 %.
+
+Dos resultados del capítulo 7.4
+([validación estadística](../investigacion/2026-11-06-validacion-estadistica.md)) refuerzan esa
+cautela:
+- el exceso del carry sobre el 4 % **no es estadísticamente significativo**;
+- el rango de un año (p5 a p95) va de perder a ganar en todos los escenarios.
+
+**Conclusión del capítulo 8.4.** Con capital propio menor de 10.000 USD, el carry **no es viable
+como fuente de ingreso**. Su valor está en el proceso: datos, validación, simulación y control de
+riesgo, reutilizables para las estrategias siguientes. La decisión final sobre H2 la toma el
+holdout (PQ-50) con las comisiones reales (PQ-17), que podrían empeorar estas cifras.
 
 ## 7. Conclusión de viabilidad y ruta futura
 
