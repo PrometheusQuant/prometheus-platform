@@ -34,6 +34,10 @@ DB_FILE = "gold.duckdb"
 DICTIONARY_FILE = "DICCIONARIO.md"
 KLINE_INTERVAL = "1h"
 HOLDOUT_DATE = HOLDOUT_START.date()
+# Un día D se devenga hasta la liquidación y la valoración de las 00:00 de D + 1 (enm. 1.3). El
+# último día cuyo devengo termina antes del holdout es, por tanto, el 2024-06-29: el 30 de junio
+# incluye la liquidación del 2024-07-01 00:00, que es del holdout (pre-registro §7, KE-014).
+LAST_DAY = HOLDOUT_DATE - timedelta(days=2)
 _MONTHS = [
     "enero",
     "febrero",
@@ -169,7 +173,7 @@ FACT_FUNDING = GoldTable(
     description="Funding cobrado o pagado por las posiciones cortas en el perpetuo, por día.",
     sources=("silver/funding/<SYMBOL>.parquet ← bronze/dataset=fundingRate",),
     columns=_cols(
-        ("fecha", DATE, "Día UTC de la liquidación (event_time)"),
+        ("fecha", DATE, "Día UTC de devengo: la liquidación de las 00:00 es del día anterior"),
         ("simbolo", STR, "Par"),
         ("funding_total", FLT, "Suma de las tasas liquidadas en el día (fracción del nocional)"),
         ("funding_medio", FLT, "Tasa media por liquidación"),
@@ -201,6 +205,8 @@ FACT_MERCADO = GoldTable(
         ("base", FLT, "(cierre_perp - cierre_spot) / cierre_spot"),
         ("volumen_spot_usd", FLT, "Volumen en USDT negociado en spot en el día"),
         ("volumen_perp_usd", FLT, "Volumen en USDT negociado en el perpetuo en el día"),
+        ("horas_spot", INT, "Velas horarias de spot del día (24 si el día está completo)"),
+        ("horas_perp", INT, "Velas horarias del perpetuo del día (24 si el día está completo)"),
     ),
     key=("fecha", "simbolo"),
     foreign_keys=(ForeignKey("fecha", "dim_fecha"), ForeignKey("simbolo", "dim_simbolo")),
@@ -324,7 +330,11 @@ FACT_CALIDAD = GoldTable(
     name="fact_calidad",
     kind="hecho",
     grain="una tabla silver",
-    description="Informe de calidad de cada tabla silver: filas, huecos y outliers.",
+    description=(
+        "Informe de calidad de cada tabla silver: filas, huecos y outliers. Única excepción al"
+        " corte del holdout: describe la disponibilidad de **toda** la historia de silver (hasta"
+        " 2026-09-30), sin precios, tasas ni retornos."
+    ),
     sources=("silver/_quality/*.json",),
     columns=_cols(
         ("tabla", STR, "Tabla silver, p. ej. funding/SOLUSDT (clave)"),
@@ -515,14 +525,16 @@ def build_fact_funding(data_dir: Path) -> pl.DataFrame:
         frames.append(
             pl.scan_parquet(path)
             .filter(pl.col("event_time") < HOLDOUT_START)
-            .group_by(pl.col("event_time").dt.date().alias("fecha"))
+            # Día de devengo: la liquidación de las 00:00 corresponde al día anterior.
+            .group_by((pl.col("event_time") - timedelta(milliseconds=1)).dt.date().alias("fecha"))
             .agg(
-                pl.col("funding_rate").sum().alias("funding_total"),
+                _sum_or_null("funding_rate").alias("funding_total"),
                 pl.col("funding_rate").mean().alias("funding_medio"),
                 pl.col("funding_rate_annualized").mean().alias("funding_anualizado_medio"),
                 pl.len().cast(pl.Int64).alias("liquidaciones"),
             )
             .with_columns(pl.lit(symbol).alias("simbolo"))
+            .filter(pl.col("fecha") <= LAST_DAY)
             .collect()
         )
     if not frames:
@@ -530,15 +542,21 @@ def build_fact_funding(data_dir: Path) -> pl.DataFrame:
     return pl.concat(frames).select(FACT_FUNDING.schema.names()).sort("simbolo", "fecha")
 
 
+def _sum_or_null(column: str) -> pl.Expr:
+    """Suma que deja nulo un grupo sin ningún valor (polars devolvería 0: sería inventar)."""
+    return pl.when(pl.col(column).is_not_null().any()).then(pl.col(column).sum())
+
+
 def _daily_klines(path: Path, prefix: str) -> pl.LazyFrame:
     return (
         pl.scan_parquet(path)
-        .filter(pl.col("open_time") < HOLDOUT_START)
+        .filter(pl.col("open_time").dt.date() <= LAST_DAY)
         .sort("open_time")
         .group_by(pl.col("open_time").dt.date().alias("fecha"))
         .agg(
             pl.col("close").last().alias(f"cierre_{prefix}"),
-            pl.col("quote_volume").sum().alias(f"volumen_{prefix}_usd"),
+            _sum_or_null("quote_volume").alias(f"volumen_{prefix}_usd"),
+            pl.len().cast(pl.Int64).alias(f"horas_{prefix}"),
         )
     )
 
@@ -576,14 +594,16 @@ def build_fact_retorno(data_dir: Path) -> pl.DataFrame:
         wide = pl.read_parquet(path)
         if wide.schema["date"] == pl.String:  # los artefactos guardan la fecha ISO como texto
             wide = wide.with_columns(pl.col("date").str.to_datetime(time_zone="UTC"))
+        _check_valuation_times(wide["date"], path)
         frames.append(
             wide.unpivot(index="date", variable_name="configuracion", value_name="retorno")
+            # Una valoración en el holdout incluye su liquidación de las 00:00: queda fuera.
+            .filter(pl.col("date") < HOLDOUT_START)
             .with_columns(
                 # Valoración a las 00:00 UTC (enm. 1.3): el retorno es del día anterior.
                 (pl.col("date").dt.date() - timedelta(days=1)).alias("fecha"),
                 (pl.lit(f"{hyp}/") + pl.col("configuracion")).alias("configuracion_id"),
             )
-            .filter(pl.col("fecha") < HOLDOUT_DATE)
             .sort("configuracion_id", "fecha")
             .with_columns(
                 (1 + pl.col("retorno")).cum_prod().over("configuracion_id").alias("capital")
@@ -591,6 +611,15 @@ def build_fact_retorno(data_dir: Path) -> pl.DataFrame:
             .select(FACT_RETORNO.schema.names())
         )
     return pl.concat(frames) if frames else FACT_RETORNO.empty()
+
+
+def _check_valuation_times(dates: pl.Series, path: Path) -> None:
+    """El desplazamiento de un día solo vale para valoraciones a las 00:00 UTC (enm. 1.3)."""
+    dtype = dates.dtype
+    if not isinstance(dtype, pl.Datetime) or dtype.time_zone != "UTC":
+        raise GoldValidationError(f"{path}: 'date' debe ser un instante UTC, no {dtype}")
+    if not (dates.dt.hour() == 0).all() or not (dates.dt.minute() == 0).all():
+        raise GoldValidationError(f"{path}: hay valoraciones fuera de las 00:00 UTC")
 
 
 def build_fact_desempeno(data_dir: Path, report: GoldReport) -> pl.DataFrame:
@@ -758,8 +787,24 @@ def validate(tables: Mapping[str, pl.DataFrame]) -> None:
                 raise GoldValidationError(
                     f"{table.name}.{fk.column}: {orphans.height} filas sin {fk.table}"
                 )
-        if table in DATED_FACTS and frame.filter(pl.col("fecha") >= HOLDOUT_DATE).height:
-            raise GoldValidationError(f"{table.name}: tiene filas del holdout (≥ {HOLDOUT_DATE})")
+        if "fecha" in table.schema and frame.filter(pl.col("fecha") > LAST_DAY).height:
+            raise GoldValidationError(
+                f"{table.name}: tiene filas posteriores al {LAST_DAY} (devengo en el holdout)"
+            )
+    _validate_calendar(tables["dim_fecha"])
+    retornos = tables["fact_retorno_estrategia"]["retorno"]
+    if retornos.null_count() or retornos.is_nan().any():
+        raise GoldValidationError("fact_retorno_estrategia: retorno nulo o NaN")
+
+
+def _validate_calendar(calendar: pl.DataFrame) -> None:
+    if calendar.is_empty():
+        return
+    first, last = calendar["fecha"].min(), calendar["fecha"].max()
+    if isinstance(first, date) and isinstance(last, date):
+        expected = (last - first).days + 1
+        if calendar.height != expected:
+            raise GoldValidationError(f"dim_fecha: {calendar.height} días ≠ {expected} (huecos)")
 
 
 # --- Escritura ---------------------------------------------------------------------------------
@@ -795,8 +840,10 @@ def render_dictionary(heading: str = "#") -> str:
         "",
         "Generado por `uv run pq gold docs` desde `data_platform/gold.py`. No editar a mano.",
         "",
-        "Todos los hechos con fecha terminan el 2024-06-30: el holdout (desde el 2024-07-01) sigue",
-        "cerrado hasta su evaluación única (PQ-50).",
+        "Todos los hechos con fecha terminan el 2024-06-29: es el último día cuyo devengo",
+        "(hasta la liquidación y la valoración de las 00:00 del día siguiente) no toca el",
+        "holdout, que empieza el 2024-07-01 y sigue cerrado hasta su evaluación única (PQ-50).",
+        "Ver KE-014.",
         "",
     ]
     for table in TABLES:
@@ -866,7 +913,10 @@ evaluación, no series temporales.
 
 - El esquema de cada tabla coincide con el declarado.
 - Claves sin nulos ni duplicados; toda clave foránea existe en su dimensión.
-- Ningún hecho con fecha tiene filas del holdout (desde el 2024-07-01).
+- Ningún hecho con fecha pasa del 2024-06-29: nada se devenga en el holdout (2024-07-01).
+- `dim_fecha` es continua; los retornos no tienen nulos ni NaN.
+- Los retornos vienen de valoraciones a las 00:00 UTC (si no, la construcción se detiene).
+- Excepción declarada: `fact_calidad` describe la disponibilidad de toda la historia de silver.
 - Lo que no existe en las fuentes queda nulo: no se rellena ni se inventa.
 """
 

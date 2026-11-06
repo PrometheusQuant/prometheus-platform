@@ -21,6 +21,7 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-011 | La tabla oficial de comisiones de futuros no se lee sin sesión | Abierto |
 | KE-012 | Dependencias de desarrollo con CVE (`filelock`, `virtualenv`) | Resuelto |
 | KE-013 | Los tests leían el `.env` real de quien los ejecuta | Resuelto |
+| KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Abierto |
 
 ---
 
@@ -113,3 +114,26 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 - **Solución:** fixture `autouse` en `tests/conftest.py` que desactiva el `.env` y borra las `PQ_*`
   en todos los tests; el test que prueba la lectura del `.env` lo reactiva sobre `tmp_path`.
   **Resuelto** (PQ-38).
+
+### KE-014: la evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout)
+
+- **Síntoma:** encontrado por la revisión adversarial de PQ-46 (skill `doubt-driven-development`).
+  - `daily_returns.parquet` termina con la valoración del 2024-07-01 00:00.
+  - Esa valoración incluye el cobro de la liquidación de ese instante y la decisión que se toma con ella.
+  - El pre-registro (§7) pone el holdout **desde 2024-07-01 00:00 UTC**.
+- **Causa:** el corte de `simulate_symbol` (`open_time < HOLDOUT_START`) se aplica solo a las velas.
+  - La última vela cierra exactamente a las 00:00 y aplica `settle_and_decide` con la liquidación de ese instante.
+  - Afecta a las evaluaciones de PQ-23 a PQ-25 desde el Sprint 2.
+- **Impacto medido (insignificante):**
+  - En H2, la configuración elegida estaba fuera de posición ese día (retorno 0) y B1 movió −0,003 %.
+  - Sin ese día, el Sharpe pasa de 5,573 a 5,575, el CAGR de 5,030 % a 5,033 % y el de B1 de 0,659 a 0,660.
+  - En H1 el cambio es igual de pequeño.
+  - Ningún gate ni prueba de PQ-48 cambia de resultado.
+- **Mitigación hoy:** la capa gold excluye esa valoración y todo lo que se devenga en el holdout.
+  Sus hechos terminan el 2024-06-29.
+- **Solución pendiente (PQ-50):**
+  - La corrección del código exige volver a ejecutar la evaluación, que cuenta en N (pre-registro §10).
+  - Se hará en la misma reejecución que pida PQ-17 si las comisiones reales son más altas, o
+    al preparar la evaluación del holdout.
+  - Sea como sea, la evaluación del holdout debe contar esa liquidación como suya, y la del
+    desarrollo no.

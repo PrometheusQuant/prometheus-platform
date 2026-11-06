@@ -58,15 +58,20 @@ evaluación, no series temporales.
 
 - El esquema de cada tabla coincide con el declarado.
 - Claves sin nulos ni duplicados; toda clave foránea existe en su dimensión.
-- Ningún hecho con fecha tiene filas del holdout (desde el 2024-07-01).
+- Ningún hecho con fecha pasa del 2024-06-29: nada se devenga en el holdout (2024-07-01).
+- `dim_fecha` es continua; los retornos no tienen nulos ni NaN.
+- Los retornos vienen de valoraciones a las 00:00 UTC (si no, la construcción se detiene).
+- Excepción declarada: `fact_calidad` describe la disponibilidad de toda la historia de silver.
 - Lo que no existe en las fuentes queda nulo: no se rellena ni se inventa.
 
 ## Diccionario de datos de la capa gold
 
 Generado por `uv run pq gold docs` desde `data_platform/gold.py`. No editar a mano.
 
-Todos los hechos con fecha terminan el 2024-06-30: el holdout (desde el 2024-07-01) sigue
-cerrado hasta su evaluación única (PQ-50).
+Todos los hechos con fecha terminan el 2024-06-29: es el último día cuyo devengo
+(hasta la liquidación y la valoración de las 00:00 del día siguiente) no toca el
+holdout, que empieza el 2024-07-01 y sigue cerrado hasta su evaluación única (PQ-50).
+Ver KE-014.
 
 ### `dim_fecha` (dimensión)
 
@@ -147,7 +152,7 @@ Funding cobrado o pagado por las posiciones cortas en el perpetuo, por día.
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `fecha` | Date | Día UTC de la liquidación (event_time) |
+| `fecha` | Date | Día UTC de devengo: la liquidación de las 00:00 es del día anterior |
 | `simbolo` | String | Par |
 | `funding_total` | Float64 | Suma de las tasas liquidadas en el día (fracción del nocional) |
 | `funding_medio` | Float64 | Tasa media por liquidación |
@@ -172,6 +177,8 @@ Cierre diario de spot y perpetuo, base y volumen negociado.
 | `base` | Float64 | (cierre_perp - cierre_spot) / cierre_spot |
 | `volumen_spot_usd` | Float64 | Volumen en USDT negociado en spot en el día |
 | `volumen_perp_usd` | Float64 | Volumen en USDT negociado en el perpetuo en el día |
+| `horas_spot` | Int64 | Velas horarias de spot del día (24 si el día está completo) |
+| `horas_perp` | Int64 | Velas horarias del perpetuo del día (24 si el día está completo) |
 
 ### `fact_retorno_estrategia` (hecho)
 
@@ -282,7 +289,7 @@ Optimización con CVaR: retorno esperado y riesgo según el peso en el carry.
 
 ### `fact_calidad` (hecho)
 
-Informe de calidad de cada tabla silver: filas, huecos y outliers.
+Informe de calidad de cada tabla silver: filas, huecos y outliers. Única excepción al corte del holdout: describe la disponibilidad de **toda** la historia de silver (hasta 2026-09-30), sin precios, tasas ni retornos.
 
 - **Grano:** una tabla silver
 - **Clave:** `tabla`

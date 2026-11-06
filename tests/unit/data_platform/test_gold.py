@@ -121,7 +121,8 @@ def test_builds_every_declared_table_with_its_schema(lake: Path) -> None:
 def test_no_dated_fact_reaches_the_holdout(lake: Path) -> None:
     tables = build_tables(lake)
     for name in ("fact_funding_diario", "fact_mercado_diario", "fact_retorno_estrategia"):
-        assert tables[name]["fecha"].max() == date(2024, 6, 30)
+        # El 30 de junio se devenga hasta la liquidación del 1 de julio 00:00 (holdout): fuera.
+        assert tables[name]["fecha"].max() == date(2024, 6, 29)
     assert set(tables["dim_fecha"]["periodo"]) == {"desarrollo"}
 
 
@@ -129,9 +130,17 @@ def test_returns_are_dated_by_the_day_they_belong_to_and_compounded(lake: Path) 
     ret = build_tables(lake)["fact_retorno_estrategia"].filter(
         pl.col("configuracion_id") == "H2/k9-theta20"
     )
-    # 2024-06-30 00:00 → retorno del 29; 2024-07-01 00:00 → del 30; 2024-07-02 → holdout, fuera.
-    assert ret["fecha"].to_list() == [date(2024, 6, 29), date(2024, 6, 30)]
-    assert ret["capital"].to_list() == pytest.approx([1.01, 1.01 * 1.02])
+    # 2024-06-30 00:00 → retorno del 29. La valoración del 2024-07-01 00:00 incluye la
+    # liquidación de ese instante, que ya es holdout (KE-014): queda fuera, igual que la del 2.
+    assert ret["fecha"].to_list() == [date(2024, 6, 29)]
+    assert ret["capital"].to_list() == pytest.approx([1.01])
+
+
+def test_funding_is_dated_by_accrual_day(lake: Path) -> None:
+    funding = build_tables(lake)["fact_funding_diario"].filter(pl.col("simbolo") == "SOLUSDT")
+    # La liquidación del 29 a las 00:00 se devengó el 28; el 29 suma 08:00, 16:00 y 30/06 00:00.
+    assert funding["fecha"].to_list() == [date(2024, 6, 28), date(2024, 6, 29)]
+    assert funding["liquidaciones"].to_list() == [1, 3]
 
 
 def test_dimensions_and_derived_facts(lake: Path) -> None:
@@ -151,6 +160,7 @@ def test_dimensions_and_derived_facts(lake: Path) -> None:
     market = tables["fact_mercado_diario"].filter(pl.col("simbolo") == "SOLUSDT").row(0, named=True)
     assert market["cierre_perp"] - market["cierre_spot"] == pytest.approx(0.1)
     assert market["volumen_spot_usd"] == pytest.approx(240.0)
+    assert (market["horas_spot"], market["horas_perp"]) == (24, 24)
 
     metrics = tables["fact_metricas_modelo"].rows_by_key("modelo_id", named=True, unique=True)
     assert metrics["regresion/ridge/ajustado"]["auc"] is None  # no aplica: nulo, no cero
@@ -218,8 +228,49 @@ def test_validation_rejects_holdout_rows_even_with_a_matching_calendar(lake: Pat
             tables["fact_funding_diario"].tail(1).with_columns(pl.lit(late).alias("fecha")),
         ]
     )
-    with pytest.raises(GoldValidationError, match="holdout"):
+    with pytest.raises(GoldValidationError, match="posteriores al 2024-06-29"):
         validate(tables)
+
+
+def test_validation_rejects_a_calendar_with_gaps_and_non_finite_returns(lake: Path) -> None:
+    tables = build_tables(lake)
+    gapped = dict(
+        tables, dim_fecha=tables["dim_fecha"].filter(pl.col("fecha") != date(2024, 6, 28))
+    )
+    gapped["fact_funding_diario"] = gapped["fact_funding_diario"].filter(
+        pl.col("fecha") != date(2024, 6, 28)
+    )
+    gapped["dim_fecha"] = pl.concat(
+        [
+            gapped["dim_fecha"],
+            tables["dim_fecha"].head(1).with_columns(pl.lit(date(2024, 6, 20)).alias("fecha")),
+        ]
+    )
+    with pytest.raises(GoldValidationError, match="huecos"):
+        validate(gapped)
+
+    broken = dict(tables)
+    broken["fact_retorno_estrategia"] = tables["fact_retorno_estrategia"].with_columns(
+        pl.lit(float("nan")).alias("retorno")
+    )
+    with pytest.raises(GoldValidationError, match="NaN"):
+        validate(broken)
+
+
+def test_returns_valued_outside_midnight_stop_the_build(lake: Path) -> None:
+    path = lake / "research" / "carry" / "H2" / "daily_returns.parquet"
+    pl.DataFrame({"date": ["2024-06-30 08:00:00+00:00"], "k9-theta20": [0.01]}).write_parquet(path)
+    with pytest.raises(GoldValidationError, match="00:00 UTC"):
+        build_tables(lake)
+
+
+def test_a_day_without_any_value_stays_null_not_zero(lake: Path) -> None:
+    path = lake / "silver" / "funding" / "SOLUSDT.parquet"
+    pl.read_parquet(path).with_columns(
+        pl.lit(None, pl.Float64).alias("funding_rate")
+    ).write_parquet(path)
+    funding = build_tables(lake)["fact_funding_diario"].filter(pl.col("simbolo") == "SOLUSDT")
+    assert funding["funding_total"].to_list() == [None, None]
 
 
 def test_write_gold_produces_parquet_duckdb_csv_and_dictionary(lake: Path, tmp_path: Path) -> None:
@@ -236,7 +287,7 @@ def test_write_gold_produces_parquet_duckdb_csv_and_dictionary(lake: Path, tmp_p
             "select count(*) from fact_retorno_estrategia r "
             "join dim_configuracion c using (configuracion_id) join dim_fecha f using (fecha)"
         ).fetchall()
-    assert joined == [(4,)]
+    assert joined == [(2,)]  # 2 configuraciones x 1 día de desarrollo
 
 
 def test_documentation_page_is_up_to_date() -> None:
@@ -249,7 +300,7 @@ def test_cli_builds_gold_and_writes_docs(
 ) -> None:
     monkeypatch.setenv("PQ_DATA_DIR", str(lake))
     assert cli.main(["gold", "build"]) == 0
-    assert "fact_retorno_estrategia: filas=4" in capsys.readouterr().out
+    assert "fact_retorno_estrategia: filas=2" in capsys.readouterr().out
     assert (lake / "gold" / "gold.duckdb").is_file()
 
     out = tmp_path / "modelo-gold.md"

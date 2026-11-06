@@ -40,7 +40,9 @@ Como jurado del ítem 7.1, quiero ver de dónde sale cada número para auditar e
 **Escenarios de aceptación**
 
 1. **Dados** datos silver hasta 2026-09-30, **cuando** se construye gold, **entonces** ningún hecho
-   con fecha tiene filas desde el 2024-07-01 (inicio del holdout, pre-registro §7).
+   con fecha pasa del 2024-06-29. Ese es el último día cuyo devengo (hasta la liquidación y la
+   valoración de las 00:00 del día siguiente) no toca el holdout, que empieza el 2024-07-01
+   (pre-registro §7, KE-014).
 2. **Dado** el retorno diario valorado a las 00:00 del día siguiente (enmienda 1.3), **cuando** se
    pasa a gold, **entonces** su `fecha` es el día al que corresponde el retorno.
 
@@ -59,7 +61,8 @@ Como jurado del ítem 7.1, quiero ver de dónde sale cada número para auditar e
 - **FR-003** Las claves de las dimensiones son de una sola columna y únicas. Las claves de los
   hechos son únicas.
 - **FR-004** Todo valor de una clave foránea existe en su dimensión.
-- **FR-005** Los hechos con fecha terminan antes del inicio del holdout. La constante vive en
+- **FR-005** Los hechos con fecha terminan el último día cuyo devengo no toca el holdout. La
+  fecha del funding es la de su devengo, igual que la de los retornos. La constante vive en
   `domain`, y research y gold usan la misma.
 - **FR-006** Salidas: Parquet (fuente de verdad), DuckDB (consultas SQL) y CSV UTF-8 con
   diccionario (Power BI).
@@ -68,5 +71,5 @@ Como jurado del ítem 7.1, quiero ver de dónde sale cada número para auditar e
 
 ## Criterios de éxito
 
-- Con el lakehouse real: 13 tablas, 0 huérfanos, 0 claves duplicadas, 0 filas en el holdout.
+- Con el lakehouse real: 13 tablas, 0 huérfanos, 0 claves duplicadas, 0 filas después del 2024-06-29.
 - Cobertura de tests ≥ 80 % y los contratos de arquitectura intactos.
