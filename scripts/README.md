@@ -21,3 +21,4 @@ generar un informe ad hoc o automatizar algo del repositorio.
 | `audit_data_vision.py` | Auditoría de las fuentes de Binance Data Vision (spike PQ-19) |
 | `capture_dashboard.py` | Captura cada pestaña del dashboard en PNG con Playwright para el informe y la presentación (PQ-41) |
 | `export_sessions.py` | Exporta las sesiones de Claude Code a Markdown para NotebookLM, con secretos enmascarados; la salida (`notebooklm/`) queda fuera de git (PQ-40) |
+| `powerbi.py` | Genera las consultas de Power Query del modelo gold y calcula los valores de control del dashboard de Power BI (PQ-47) |

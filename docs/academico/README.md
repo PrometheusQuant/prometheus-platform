@@ -23,7 +23,7 @@ carpeta a partir de esa evidencia.
 | 6.1–6.2 | Pseudoaleatorios con bondad de ajuste; simulación y optimización | `research/`, `academico/simulacion.md` | PQ-9 |
 | 6.3 | Rediseño del proceso con PDCA | `metodologia/`, ciclo de `estrategias/` | PQ-9 |
 | 7.1 | Modelado de datos y ETL | [Capa gold: modelo en estrella](../arquitectura/modelo-gold.md) (`pq gold build`) | PQ-3, PQ-10 (PQ-46) |
-| 7.2 | Dashboard interactivo y KPIs | [Dashboard en Streamlit](../runbooks/dashboard.md) (PQ-34); Grafana para la operación | PQ-10 |
+| 7.2 | Dashboard interactivo y KPIs | [Dashboard de negocio en Power BI](dashboard-power-bi.md) sobre la capa gold (PQ-47) y [tablero en Streamlit](../runbooks/dashboard.md) (PQ-34); Grafana para la operación | PQ-10 |
 | 7.3 | Despliegue (TRL 5) | Imagen Docker del dashboard; paper trading en testnet | PQ-7 |
 | 7.4 | Validación estadística | [Pruebas t con HAC, bootstrap, ANOVA y Friedman](../investigacion/2026-11-06-validacion-estadistica.md) (`pq research stats`), además de Deflated Sharpe y PBO | PQ-4, PQ-9 (PQ-48) |
 | 8.1–8.4 | Competencia, Canvas, costes cloud, ROI | `academico/modelo-de-negocio.md`, [`deploy/`](https://github.com/PrometheusQuant/prometheus-platform/tree/develop/deploy) | PQ-10 |
