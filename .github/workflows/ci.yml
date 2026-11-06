@@ -34,6 +34,15 @@ jobs:
       - name: Tests y cobertura
         run: uv run pytest --cov-report=xml
 
+  dependencies:
+    name: Dependencias sin vulnerabilidades conocidas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Auditar el uv.lock con pip-audit (OWASP A03, cadena de suministro)
+        run: make audit
+
   secrets:
     name: Escaneo de secretos
     runs-on: ubuntu-latest

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check docs docs-build
+.PHONY: help setup lint format typecheck arch test check audit docs docs-build
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -24,6 +24,11 @@ arch: ## Verifica los límites de la arquitectura hexagonal
 
 test: ## Tests con cobertura
 	uv run pytest
+
+audit: ## Busca vulnerabilidades conocidas en las dependencias del uv.lock (pip-audit)
+	uv export --frozen --no-emit-project --format requirements-txt -o .audit-requirements.txt
+	uvx pip-audit==2.10.1 --requirement .audit-requirements.txt --require-hashes --disable-pip --progress-spinner off
+	rm -f .audit-requirements.txt
 
 check: lint typecheck arch test ## Todo lo que corre CI
 

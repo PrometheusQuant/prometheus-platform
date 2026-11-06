@@ -39,3 +39,6 @@ mlruns/
 # Jupyter
 .ipynb_checkpoints/
 site/
+
+# pip-audit
+.audit-requirements.txt
