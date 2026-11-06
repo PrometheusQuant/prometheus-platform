@@ -13,9 +13,11 @@ mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
+from scipy import stats
 
 from prometheus_platform.research.carry_evaluation import HypothesisEvaluation
 from prometheus_platform.research.funding_model import ModelStudy
+from prometheus_platform.research.simulation import REGIME_NAMES, Regime, SimulationStudy
 
 
 def summary(evaluation: HypothesisEvaluation) -> dict[str, Any]:
@@ -107,3 +109,132 @@ def plot_roc(study: ModelStudy, path: Path) -> Path:
     fig.savefig(path)
     plt.close(fig)
     return path
+
+
+def write_simulation(study: SimulationStudy, out_dir: Path) -> Path:
+    """Resumen JSON del estudio de simulación (cap. 6)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    names = [REGIME_NAMES[r] for r in Regime]
+    payload = {
+        "markov_1er_orden": {
+            "estados": names,
+            "conteos": study.chain.counts.tolist(),
+            "transicion": study.chain.transition.tolist(),
+            "estacionaria": study.chain.stationary.tolist(),
+            "chi2_independencia": study.chain.chi2,
+            "chi2_p": study.chain.chi2_p_value,
+            "duracion_esperada": study.chain.expected_duration.tolist(),
+        },
+        "markov_bloques": {
+            "bloque_liquidaciones": study.block_model.block,
+            "transicion": study.block_model.chain.transition.tolist(),
+            "estacionaria": study.block_model.chain.stationary.tolist(),
+            "chi2_p": study.block_model.chain.chi2_p_value,
+            "bloques_por_regimen": {
+                REGIME_NAMES[r]: len(v) for r, v in study.block_model.weeks.items()
+            },
+        },
+        "distribuciones": {
+            REGIME_NAMES[r]: {
+                "n": m.n,
+                "masas_puntuales": m.point_mass,
+                "ajustes": [asdict(f) for f in m.fits],
+                "mejor": m.best.distribution if m.fits else None,
+            }
+            for r, m in study.regime_models.items()
+        },
+        "duraciones": [asdict(t) | {"regime": REGIME_NAMES[t.regime]} for t in study.sojourn],
+        "validacion": [asdict(study.historical)] + [asdict(v) for v in study.validation],
+        "escenarios": study.scenarios,
+        "probabilidad_quiebra_equilibrio": study.break_even_failure,
+        "frontera": study.frontier,
+    }
+    path = out_dir / "summary.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    return path
+
+
+def _save(fig: Any, path: Path) -> Path:
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+    return path
+
+
+def _plot_transitions(study: SimulationStudy, path: Path) -> Path:
+    names = [REGIME_NAMES[r] for r in Regime]
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.8), dpi=150)
+    block_days = study.block_model.block // 3
+    for ax, matrix, title in (
+        (axes[0], study.chain.transition, "Liquidación a liquidación (1er orden)"),
+        (axes[1], study.block_model.chain.transition, f"Bloques de {block_days} días"),
+    ):
+        ax.imshow(matrix, cmap="Oranges", vmin=0, vmax=1)
+        ax.set_xticks(range(3), names)
+        ax.set_yticks(range(3), names)
+        ax.set_xlabel("régimen siguiente")
+        ax.set_title(title, fontsize=9)
+        for i, j in np.ndindex(matrix.shape):
+            ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center", fontsize=9)
+    axes[0].set_ylabel("régimen actual")
+    return _save(fig, path)
+
+
+def _plot_high_fit(study: SimulationStudy, path: Path) -> Path:
+    high = next(t for t in study.sojourn if t.regime is Regime.HIGH)
+    model = study.regime_models[Regime.HIGH]
+    fig, ax = plt.subplots(figsize=(6.5, 3.8), dpi=150)
+    ax.hist(model.empirical, bins=60, density=True, color="#cbd5e1", label="observado")
+    grid = np.linspace(0, np.quantile(model.empirical, 0.99), 300)
+    for fit in sorted(model.fits, key=lambda f: f.ks_statistic)[:2]:
+        dist = getattr(stats, fit.distribution)(*fit.params)
+        ax.plot(grid, dist.pdf(grid), label=f"{fit.distribution} (KS {fit.ks_statistic:.3f})")
+    ax.set_xlim(0, grid[-1])
+    ax.set_xlabel("exceso sobre 20 % anual")
+    ax.set_title(
+        f"Régimen alto: ajuste de distribuciones (racha p95: {high.p95_observed:.0f} observada"
+        f" vs {high.p95_geometric:.0f} geométrica)",
+        fontsize=8,
+    )
+    ax.legend(fontsize=8)
+    return _save(fig, path)
+
+
+def _plot_montecarlo(study: SimulationStudy, path: Path) -> Path:
+    fig, ax = plt.subplots(figsize=(6.5, 3.8), dpi=150)
+    ax.hist(study.baseline.annual_returns * 100, bins=80, alpha=0.75, color="#c2410c",
+            label="sin quiebra")  # fmt: skip
+    ax.hist(study.tail_returns * 100, bins=80, alpha=0.45, color="#1d4ed8",
+            label="con quiebra (p = 2 % anual)")  # fmt: skip
+    ax.axvline(4, color="#334155", linestyle="--", linewidth=1, label="stablecoin 4 %")
+    ax.set_yscale("log")
+    ax.set_xlabel("retorno a 1 año (%)")
+    ax.set_ylabel("trayectorias (escala log)")
+    ax.set_title("Monte Carlo del carry H2 (años simulados)", fontsize=9)
+    ax.legend(fontsize=8)
+    return _save(fig, path)
+
+
+def _plot_frontier(study: SimulationStudy, path: Path) -> Path:
+    fig, ax = plt.subplots(figsize=(6.5, 3.8), dpi=150)
+    w = [f["w_carry"] * 100 for f in study.frontier]
+    ax.plot(w, [f["retorno_esperado"] * 100 for f in study.frontier], color="#c2410c",
+            label="retorno esperado")  # fmt: skip
+    ax.plot(w, [f["cvar95"] * 100 for f in study.frontier], color="#1d4ed8", label="CVaR 95 %")
+    ax.set_xlabel("% del capital en el carry (resto en stablecoin)")
+    ax.set_ylabel("%")
+    ax.set_title("Asignación con riesgo de quiebra del exchange (p = 2 % anual)", fontsize=9)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
+    return _save(fig, path)
+
+
+def plot_simulation(study: SimulationStudy, figures: Path) -> list[Path]:
+    """Las cuatro figuras del capítulo 6."""
+    figures.mkdir(parents=True, exist_ok=True)
+    return [
+        _plot_transitions(study, figures / "markov-transiciones.png"),
+        _plot_high_fit(study, figures / "ajuste-regimen-alto.png"),
+        _plot_montecarlo(study, figures / "montecarlo-retornos.png"),
+        _plot_frontier(study, figures / "asignacion-frontera.png"),
+    ]
