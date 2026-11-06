@@ -15,7 +15,7 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-005 | MLflow completo exige `pyarrow < 24` | Workaround |
 | KE-006 | El almacén en archivos de MLflow está en mantenimiento | Workaround |
 | KE-007 | Días ausentes en las velas del perp de SOL y XRP en 2022 | Abierto |
-| KE-008 | Docker sin integración WSL en la máquina de desarrollo | Abierto |
+| KE-008 | El agente no puede ejecutar Docker desde su terminal (falso positivo) | Resuelto |
 | KE-009 | `gh pr edit` falla por la deprecación de Projects clásicos | Workaround |
 | KE-010 | El modo automático bloquea el force-push | Workaround |
 | KE-011 | La tabla oficial de comisiones de futuros no se lee sin sesión | Abierto |
@@ -69,11 +69,20 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 - **Workaround:** silver lo informa y no lo imputa; el backtest ejecuta en la siguiente vela disponible.
 - **Pendiente:** contrastar con los archivos diarios y la API REST.
 
-### KE-008: Docker sin integración WSL en la máquina de desarrollo
+### KE-008: el agente no puede ejecutar Docker desde su terminal (falso positivo)
 
-- **Síntoma:** `The command 'docker' could not be found in this WSL 2 distro`.
-- **Solución (la aplica el titular):** Docker Desktop → *Settings* → *Resources* → *WSL integration* →
-  activar la distribución. Mientras tanto, la CI construye y prueba la imagen del dashboard en cada PR.
+- **Síntoma:** desde la terminal del agente de IA, `docker` responde `The command 'docker' could not be
+  found in this WSL 2 distro`, y el binario de `/mnt/wsl/docker-desktop/cli-tools` se cae al arrancar.
+- **Diagnóstico erróneo inicial:** se registró como «integración WSL desactivada». No lo estaba: el
+  2026-11-06 el titular confirmó que la integración con Ubuntu ya estaba activa y que
+  `docker compose up --build` levanta el dashboard en http://127.0.0.1:8501 desde su propia terminal.
+- **Causa:** el proceso del agente no ve el enlace `docker` que Docker Desktop instala en la sesión del
+  usuario, y solo encuentra el aviso de Windows en el `PATH`. Es una limitación del entorno del agente,
+  no de la máquina.
+- **Consecuencia:** las pruebas de Docker las hace el titular en su terminal; la CI construye la imagen
+  y comprueba su salud en cada PR. **Resuelto.**
+- **Lección:** antes de declarar un fallo de configuración del usuario, confirmarlo en su terminal y
+  no solo en la del agente.
 
 ### KE-009: `gh pr edit` falla por la deprecación de Projects clásicos
 

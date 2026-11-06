@@ -11,7 +11,7 @@ funding y simulación. Decisión en [ADR-0009](../adr/0009-streamlit-y-docker-pa
 make dashboard          # http://localhost:8501
 ```
 
-**Con Docker** (requiere Docker Desktop con la integración WSL activada, ver KE-008):
+**Con Docker** (Docker Desktop con integración WSL; verificado por el titular el 2026-11-06):
 
 ```bash
 docker compose up --build    # http://127.0.0.1:8501
