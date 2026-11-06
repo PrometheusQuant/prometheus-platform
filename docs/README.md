@@ -13,3 +13,5 @@
 
 Escribe en español, enlaza el ticket `PQ-<n>` cuando corresponda y marca como *no verificado*
 lo que no tenga fuente.
+
+Términos técnicos: [glosario](glosario.md).
