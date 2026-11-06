@@ -65,7 +65,7 @@ def lake(tmp_path: Path) -> Path:
         }
     ).write_parquet(root / "research/carry/H2/daily_returns.parquet")
     write(
-        root / "research/funding_model/summary.json",
+        root / "research/funding_model/residual/summary.json",
         {
             "regression": [{"name": "ridge", "tuned": True, "rmse": 1.0, "mae": 0.1, "r2": 0.7}],
             "classification": [{"name": "rf", "tuned": False, "auc": 0.97, "f1": float("nan")}],
@@ -121,6 +121,7 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
     assert equity_curves(art.carry_returns["H2"], "no-existe").is_empty()
 
     assert art.model is not None
+    assert art.model_mode == "residual"
     regression, classification = model_tables(art.model)
     assert regression["modelo"].to_list() == ["ridge (ajustado)"]
     assert classification["F1"].to_list() == [None]  # NaN se muestra vacío
@@ -170,3 +171,11 @@ def test_app_degrades_gracefully_without_artifacts(
     assert not at.exception
     assert len(at.info) == 5
     assert not at.dataframe
+
+
+def test_model_falls_back_to_the_level_formulation(tmp_path: Path) -> None:
+    write(tmp_path / "research/funding_model/level/summary.json", {"regression": []})
+    write(tmp_path / "research/funding_model/summary.json", {"legado": True})  # se ignora
+    art = load_artifacts(tmp_path)
+    assert art.model_mode == "level"
+    assert art.model == {"regression": []}

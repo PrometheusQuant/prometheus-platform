@@ -15,6 +15,7 @@ from typing import Any
 import polars as pl
 
 HYPOTHESES = ("H1", "H2")
+MODEL_MODES = ("residual", "level")
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class Artifacts:
     carry: dict[str, dict[str, Any]] = field(default_factory=dict)
     carry_returns: dict[str, pl.DataFrame] = field(default_factory=dict)
     model: dict[str, Any] | None = None
+    model_mode: str | None = None
     simulation: dict[str, Any] | None = None
     missing: list[Missing] = field(default_factory=list)
 
@@ -63,9 +65,16 @@ def load_artifacts(data_dir: Path) -> Artifacts:
         if returns.exists():
             art.carry_returns[hyp] = pl.read_parquet(returns)
 
-    art.model = _read_json(data_dir / "research" / "funding_model" / "summary.json")
+    # La formulación oficial del cap. 5 es la residual (v2); level (v1) queda como respaldo.
+    for mode in MODEL_MODES:
+        art.model = _read_json(data_dir / "research" / "funding_model" / mode / "summary.json")
+        if art.model is not None:
+            art.model_mode = mode
+            break
     if art.model is None:
-        art.missing.append(Missing("modelo de funding", "uv run pq research funding-model …"))
+        art.missing.append(
+            Missing("modelo de funding", "uv run pq research funding-model --figures …")
+        )
     art.simulation = _read_json(data_dir / "research" / "simulation" / "summary.json")
     if art.simulation is None:
         art.missing.append(Missing("simulación", "uv run pq research simulate --figures …"))

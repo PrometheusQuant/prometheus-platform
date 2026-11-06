@@ -79,6 +79,8 @@ def _tab_model(art: Artifacts) -> None:
     if art.model is None:
         _missing(art, "modelo")
         return
+    if art.model_mode != "residual":
+        st.warning("Se muestra la formulación `level` (v1); la oficial del cap. 5 es `residual`.")
     regression, classification = model_tables(art.model)
     st.markdown("**Regresión** (validación walk-forward)")
     st.dataframe(regression, hide_index=True, width="stretch")
