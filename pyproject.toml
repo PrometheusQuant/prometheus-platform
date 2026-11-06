@@ -1,6 +1,6 @@
 [project]
 name = "prometheus-platform"
-version = "0.1.0"
+version = "0.2.0"
 description = "Plataforma de trading multiestrategia de PrometheusQuant: datos, investigación, backtesting, paper y ejecución en vivo."
 readme = "README.md"
 license = "Apache-2.0"
@@ -148,4 +148,5 @@ modules = [
 name = "cz_conventional_commits"
 tag_format = "v$version"
 version_provider = "pep621"
+version_files = ["src/prometheus_platform/__init__.py:__version__"]
 update_changelog_on_bump = true
