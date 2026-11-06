@@ -3,7 +3,7 @@
 **Proyecto Integrador · Capítulo 3.1**  
 **Estado:** plan aprobado en Jira; documento presentado para revisión de código.  
 **Fecha:** 2026-11-06.  
-**Épica relacionada:** PQ-10. **Ticket:** PQ-43 (asignado a Boris Igor Miranda Prieto).
+**Épica relacionada:** PQ-10. **Ticket:** PQ-43.
 
 ## 1. Objetivo de impacto
 
