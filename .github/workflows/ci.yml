@@ -16,6 +16,7 @@ jobs:
   quality:
     name: Calidad (lint, tipos, arquitectura, tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -37,6 +38,7 @@ jobs:
   dependencies:
     name: Dependencias sin vulnerabilidades conocidas
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -46,6 +48,7 @@ jobs:
   dashboard-image:
     name: Imagen Docker del dashboard
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Construir la imagen
@@ -65,13 +68,15 @@ jobs:
       - name: Pruebas en navegador real (Playwright, PQ-41)
         run: |
           uv sync --locked --only-group e2e
-          uv run --no-sync playwright install --with-deps chromium
+          # Sin --with-deps: el runner ya trae las librerías de Chrome y apt-get tardaba hasta 11 min.
+          uv run --no-sync playwright install chromium
           uv run --no-sync pytest tests/e2e -p no:cacheprovider \
             --base-url http://127.0.0.1:8501 -o addopts="-ra --strict-markers --import-mode=importlib"
 
   secrets:
     name: Escaneo de secretos
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
