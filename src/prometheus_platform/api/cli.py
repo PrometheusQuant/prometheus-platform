@@ -118,6 +118,12 @@ def build_parser() -> argparse.ArgumentParser:
     studies.add_parser(
         "stats", help="Validación estadística de la optimización: t, ANOVA, Friedman (cap. 7.4)"
     )
+    finance = studies.add_parser(
+        "finance", help="Costes cotizados, VAN, TIR y capital de equilibrio (cap. 8.3-8.4)"
+    )
+    finance.add_argument(
+        "--update-doc", type=Path, help="reescribe el bloque PQ-49 de este documento Markdown"
+    )
 
     report = commands.add_parser("report", help="Informe ejecutivo en Quarto (PQ-39)")
     report_actions = report.add_subparsers(dest="action", required=True)
@@ -325,7 +331,34 @@ def _research_stats(data_dir: Path) -> int:
     return 0
 
 
+def _research_finance(data_dir: Path, doc: Path | None) -> int:
+    from prometheus_platform.research.finance import (  # noqa: PLC0415
+        render_markdown,
+        run_finance,
+        update_document,
+        write_finance,
+    )
+
+    summary = run_finance(data_dir)
+    path = write_finance(summary, data_dir / "research" / "finance")
+    for e in summary.evaluaciones:
+        if e["infraestructura"].startswith("Oracle") and e["capital"] == 1_000 and e["anios"] == 3:
+            equilibrio = e["capital_equilibrio"]
+            print(
+                f"{e['escenario']}: r_P={e['retorno_anual']:.2%} VAN(3 años, 1.000 USD)="
+                f"{e['van']:.2f} USD; capital de equilibrio="
+                + ("no existe" if equilibrio is None else f"{equilibrio:,.0f} USD")
+            )
+    if doc is not None:
+        update_document(doc, render_markdown(summary))
+        print(f"bloque PQ-49 actualizado en {doc}")
+    print(f"resultados en {path}")
+    return 0
+
+
 def _research(args: argparse.Namespace, data_dir: Path) -> int:
+    if args.study == "finance":
+        return _research_finance(data_dir, args.update_doc)
     if args.study == "stats":
         return _research_stats(data_dir)
     if args.study == "eda":
