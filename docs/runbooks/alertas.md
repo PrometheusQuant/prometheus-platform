@@ -43,3 +43,7 @@ como alerta. El código está en `ops/alerting.py` y `adapters/notifiers.py` (pa
 | `HTTP 400` | `chat_id` incorrecto, o nunca se le escribió al bot |
 | `error de red (ConnectTimeout)` | Sin salida a internet o api.telegram.org bloqueado |
 | `sin canal de alertas` | Faltan las variables en `.env` |
+| `getUpdates` responde `{"ok": true, "result": []}` | El token es válido, pero ese bot no tiene mensajes: el token es de otro bot, se le escribió a un bot de nombre parecido o el mensaje tiene más de 24 h. Abre `.../bot<TOKEN>/getMe`, entra a `t.me/<username>` que indica, envía un mensaje y repite |
+
+La URL `api.telegram.org/bot<TOKEN>/...` queda en el historial del navegador: bórrala al terminar.
+Si el token se filtra, `/revoke` en @BotFather y actualiza `.env`.
