@@ -25,7 +25,7 @@ carpeta a partir de esa evidencia.
 | 7.1 | Modelado de datos y ETL | [Capa gold: modelo en estrella](../arquitectura/modelo-gold.md) (`pq gold build`) | PQ-3, PQ-10 (PQ-46) |
 | 7.2 | Dashboard interactivo y KPIs | [Dashboard en Streamlit](../runbooks/dashboard.md) (PQ-34); Grafana para la operación | PQ-10 |
 | 7.3 | Despliegue (TRL 5) | Imagen Docker del dashboard; paper trading en testnet | PQ-7 |
-| 7.4 | Validación estadística | Deflated Sharpe, PBO, pruebas de hipótesis | PQ-4 |
+| 7.4 | Validación estadística | [Pruebas t con HAC, bootstrap, ANOVA y Friedman](../investigacion/2026-11-06-validacion-estadistica.md) (`pq research stats`), además de Deflated Sharpe y PBO | PQ-4, PQ-9 (PQ-48) |
 | 8.1–8.4 | Competencia, Canvas, costes cloud, ROI | `academico/modelo-de-negocio.md`, [`deploy/`](https://github.com/PrometheusQuant/prometheus-platform/tree/develop/deploy) | PQ-10 |
 | 9.1–9.4 | Conclusiones, pitch, code review, evaluación 360 | `academico/informe/`, historial de PRs | PQ-10 |
 
