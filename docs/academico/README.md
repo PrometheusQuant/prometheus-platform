@@ -51,3 +51,4 @@ Material con copyright (libros, papers en PDF) ni datos personales: se citan en 
 | 6.1–6.3 Simulación y optimización | [Simulación del carry](../investigacion/2026-11-05-simulacion-carry.md): Markov estimada, KS/χ², Monte Carlo validado, optimización con CVaR y PDCA |
 | 7.2–7.3 Dashboard y despliegue | [Dashboard en Streamlit + Docker](../runbooks/dashboard.md) ([ADR-0009](../adr/0009-streamlit-y-docker-para-el-dashboard.md)) |
 | 9.2 Pitch | [Informe ejecutivo en PDF](informe-ejecutivo.pdf), generado con `make report` (Quarto) desde los JSON de resultados |
+| 9.2 Preparación de la defensa | `uv run python scripts/export_sessions.py`: las sesiones de trabajo con Claude Code en Markdown, con secretos enmascarados, para cargarlas en NotebookLM y ensayar preguntas del jurado |

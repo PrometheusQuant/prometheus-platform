@@ -14,6 +14,7 @@ nombre sugiera un secreto. Es una segunda barrera; la primera es no loguear secr
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from collections.abc import Mapping, MutableMapping
 from typing import Any, TextIO, cast
@@ -44,6 +45,40 @@ def _redact(value: Any) -> Any:
             for k, v in value.items()
         }
     return value
+
+
+# Formatos conocidos de credenciales en texto libre.
+_TOKEN_PATTERNS = [
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
+    re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}"),  # Anthropic / OpenAI
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{30,}"),  # GitHub
+    re.compile(r"\bxox[abpr]-[A-Za-z0-9-]{10,}"),  # Slack
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),  # AWS
+    re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b"),  # bot de Telegram
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),  # JWT
+    # 64 alfanuméricos con mayúsculas (formato de las claves de Binance; un SHA-256 en hex no).
+    re.compile(r"\b(?=[A-Za-z0-9]{64}\b)(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{64}\b"),
+]
+# Asignaciones cuyo nombre sugiere un secreto (mismo criterio que para los campos del log).
+_ASSIGNMENT = re.compile(
+    r"(?P<key>\b[\w.-]*(?:" + "|".join(_SENSITIVE_KEY_PARTS) + r")[\w.-]*)"
+    r"(?P<sep>[\"']?\s*[:=]\s*[\"']?)(?P<value>[^\s\"',;]+)",
+    re.IGNORECASE,
+)
+
+
+def redact_text(text: str) -> str:
+    """Enmascara secretos en texto libre (p. ej. transcripciones exportadas)."""
+    for pattern in _TOKEN_PATTERNS:
+        text = pattern.sub(REDACTED, text)
+
+    def _mask(match: re.Match[str]) -> str:
+        value = match.group("value")
+        if value == REDACTED or not value.strip("*"):
+            return match.group(0)
+        return f"{match.group('key')}{match.group('sep')}{REDACTED}"
+
+    return _ASSIGNMENT.sub(_mask, text)
 
 
 def redact_secrets(_logger: WrappedLogger, _method: str, event_dict: EventDict) -> EventDict:
