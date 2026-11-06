@@ -106,6 +106,13 @@ def build_parser() -> argparse.ArgumentParser:
     simulate.add_argument("--figures", type=Path, required=True)
     simulate.add_argument("--paths", type=int, default=10_000)
 
+    report = commands.add_parser("report", help="Informe ejecutivo en Quarto (PQ-39)")
+    report_actions = report.add_subparsers(dest="action", required=True)
+    inputs = report_actions.add_parser(
+        "inputs", help="Escribe cifras, tablas y figuras del informe"
+    )
+    inputs.add_argument("--out", type=Path, default=Path("reports/storytelling"))
+
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
     alert_actions.add_parser("test", help="Envía una alerta de prueba por el canal configurado")
@@ -273,6 +280,16 @@ def _research(args: argparse.Namespace, data_dir: Path) -> int:
     return _research_carry(data_dir, args.hypothesis, args.figures)
 
 
+def _report_inputs(data_dir: Path, out: Path) -> int:
+    from prometheus_platform.api.report import build_report_inputs  # noqa: PLC0415
+
+    missing = build_report_inputs(data_dir, Path.cwd(), out)
+    for artifact in missing:
+        print(f"aviso: falta el artefacto «{artifact}»; sus cifras quedan como n/d")
+    print(f"entradas del informe en {out}")
+    return 0
+
+
 def _alert_test(notifier: Notifier | None, environment: str) -> int:
     if notifier is None:
         print("sin canal de alertas: configura PQ_TELEGRAM_BOT_TOKEN y PQ_TELEGRAM_CHAT_ID")
@@ -296,6 +313,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(settings, notifier=notifier)
     if args.command == "alert":
         return _alert_test(notifier, settings.environment.value)
+    if args.command == "report":
+        return _report_inputs(settings.data_dir, args.out)
     if args.command == "silver":
         return _silver_build(settings.data_dir, args.symbol, args.interval)
     if args.command == "research":

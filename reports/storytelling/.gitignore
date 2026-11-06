@@ -1,0 +1,8 @@
+# Generado por `make report` (uv run pq report inputs + quarto render)
+_resultados.yml
+_tablas/
+_figuras/
+_img/
+*.pdf
+*.typ
+.quarto/
