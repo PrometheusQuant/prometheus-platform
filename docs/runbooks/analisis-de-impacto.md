@@ -15,7 +15,7 @@ con menos de 1.000 USD.
 | **Alertas** | Alto mientras haya posición: sin alertas, nadie se entera de lo anterior | 1 h | 30 min | Logs JSON; alertas a Telegram ([alertas](alertas.md)) | Heartbeat del propio canal |
 | **Claves de API** | Crítico si se filtran | 0 (prevenir) | 15 min para revocar | Sin permiso de retiro; `SecretStr`; gitleaks | Lista blanca de IP al tener servidor fijo |
 | **Custodia en el exchange** | Crítico: quiebra o congelamiento de retiros | No aplica (no se recupera) | No aplica | — | Límite de capital por exchange calibrado con la [simulación](../investigacion/2026-11-05-simulacion-carry.md) (probabilidad de quiebra de equilibrio: 0,40 % anual) |
-| **Dashboard** (PQ-34) | Bajo: es de consulta | 7 días | 1 día | — | Imagen Docker reproducible |
+| **Dashboard** ([runbook](dashboard.md)) | Bajo: es de consulta | 7 días | 1 día | Imagen Docker reproducible, construida y probada en la CI | — |
 | **CI/CD** | Bajo: frena los cambios, no la operación | 3 días | 1 día | GitHub Actions; `make check` en local | — |
 
 ## Riesgos principales y mitigación

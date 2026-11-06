@@ -73,7 +73,7 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 
 - **Síntoma:** `The command 'docker' could not be found in this WSL 2 distro`.
 - **Solución (la aplica el titular):** Docker Desktop → *Settings* → *Resources* → *WSL integration* →
-  activar la distribución. Bloquea probar en local la imagen del dashboard (PQ-34).
+  activar la distribución. Mientras tanto, la CI construye y prueba la imagen del dashboard en cada PR.
 
 ### KE-009: `gh pr edit` falla por la deprecación de Projects clásicos
 

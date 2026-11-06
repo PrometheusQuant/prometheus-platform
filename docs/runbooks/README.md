@@ -7,6 +7,7 @@ Cada runbook indica: cuándo aplica, pasos exactos, cómo verificar que funcion�
 
 - [Errores conocidos (KEDB)](errores-conocidos.md): problemas analizados y su workaround.
 - [Gestión de incidentes](incidentes.md): severidades, respuesta y post-mortem.
+- [Dashboard de investigación](dashboard.md): abrirlo en local o con Docker.
 - [Alertas a Telegram](alertas.md): configurar el bot y probar el canal.
 - [Análisis de impacto (BIA)](analisis-de-impacto.md): MTPD y RTO por proceso, riesgos y mitigación.
 

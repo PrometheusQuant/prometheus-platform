@@ -1,0 +1,14 @@
+# Solo se copian pyproject, uv.lock, licencias y src (ver Dockerfile).
+.git
+.venv
+data
+site
+docs
+tests
+notebooks
+**/__pycache__
+.env
+.env.*
+!.env.example
+*.parquet
+.audit-requirements.txt

@@ -76,6 +76,7 @@ nav:
       - "0006 NautilusTrader para ejecución": adr/0006-nautilustrader-para-ejecucion.md
       - "0007 MkDocs Material para la documentación": adr/0007-mkdocs-material-para-la-documentacion.md
       - "0008 Spec Kit solo para historias grandes": adr/0008-spec-kit-solo-para-historias-grandes.md
+      - "0009 Streamlit y Docker para el dashboard": adr/0009-streamlit-y-docker-para-el-dashboard.md
       - Plantilla: adr/0000-plantilla.md
   - Metodología:
       - metodologia/README.md
@@ -94,6 +95,7 @@ nav:
       - Errores conocidos: runbooks/errores-conocidos.md
       - Incidentes: runbooks/incidentes.md
       - Alertas a Telegram: runbooks/alertas.md
+      - Dashboard: runbooks/dashboard.md
       - Análisis de impacto (BIA): runbooks/analisis-de-impacto.md
   - Investigación:
       - investigacion/README.md
