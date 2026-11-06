@@ -97,6 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
     model = studies.add_parser("funding-model", help="Modelo predictivo del funding (cap. 5)")
     model.add_argument("--figures", type=Path, required=True)
     model.add_argument("--target-mode", choices=["level", "residual"], default="residual")
+    simulate = studies.add_parser(
+        "simulate", help="Markov, bondad de ajuste y Monte Carlo (cap. 6)"
+    )
+    simulate.add_argument("--figures", type=Path, required=True)
+    simulate.add_argument("--paths", type=int, default=10_000)
     return parser
 
 
@@ -207,6 +212,31 @@ def _research_model(data_dir: Path, figures: Path, target_mode: str) -> int:
     return 0
 
 
+def _research_simulate(data_dir: Path, figures: Path, paths: int) -> int:
+    from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
+    from prometheus_platform.research.panel import development_only  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_simulation,
+        write_simulation,
+    )
+    from prometheus_platform.research.simulation import (  # noqa: PLC0415
+        development_sequences,
+        run_simulation_study,
+    )
+
+    panels = [
+        development_only(ce.load_symbol(data_dir / "silver", s).settlements)
+        for s in ce.HYPOTHESES["H2"]
+    ]
+    study = run_simulation_study(development_sequences(panels), n_paths=paths)
+    path = write_simulation(study, data_dir / "research" / "simulation")
+    plot_simulation(study, figures)
+    print(f"resumen={path}")
+    for row in [study.historical, *study.validation]:
+        print(f"  {row.model}: ciclos/año={row.cycles:.1f} retorno={row.mean_return:.2%}")
+    return 0
+
+
 def _research_eda(data_dir: Path, figures: Path) -> int:
     from prometheus_platform.research.eda import (  # noqa: PLC0415
         correlation_matrix,
@@ -234,6 +264,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _silver_build(settings.data_dir, args.symbol, args.interval)
     if args.command == "research" and args.study == "eda":
         return _research_eda(settings.data_dir, args.figures)
+    if args.command == "research" and args.study == "simulate":
+        return _research_simulate(settings.data_dir, args.figures, args.paths)
     if args.command == "research" and args.study == "funding-model":
         return _research_model(settings.data_dir, args.figures, args.target_mode)
     if args.command == "research":

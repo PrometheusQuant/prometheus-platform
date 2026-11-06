@@ -48,3 +48,4 @@ Material con copyright (libros, papers en PDF) ni datos personales: se citan en 
 | 4.1–4.2 Extracción y limpieza | Ingesta bronze (`pq ingest`) y capa silver con checks (`pq silver build`, `specs/PQ-21-capa-silver/`) |
 | 4.3 Feature engineering | [EDA de las features](../investigacion/2026-10-30-eda-features-funding.md) |
 | 5.1–5.3 Modelado | [Modelo predictivo del funding](../investigacion/2026-10-30-modelo-predictivo-funding.md) y [evaluación del carry](../estrategias/01-carry/evaluacion.md) |
+| 6.1–6.3 Simulación y optimización | [Simulación del carry](../investigacion/2026-11-05-simulacion-carry.md): Markov estimada, KS/χ², Monte Carlo validado, optimización con CVaR y PDCA |
