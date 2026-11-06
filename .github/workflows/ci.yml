@@ -43,6 +43,25 @@ jobs:
       - name: Auditar el uv.lock con pip-audit (OWASP A03, cadena de suministro)
         run: make audit
 
+  dashboard-image:
+    name: Imagen Docker del dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Construir la imagen
+        run: docker build -t pq-dashboard:ci .
+      - name: Arrancar en solo lectura y comprobar que responde
+        run: |
+          mkdir -p empty-data
+          docker run -d --name pq --read-only --tmpfs /tmp --cap-drop ALL \
+            -v "$PWD/empty-data:/data:ro" -p 127.0.0.1:8501:8501 pq-dashboard:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs pq
+          exit 1
+
   secrets:
     name: Escaneo de secretos
     runs-on: ubuntu-latest

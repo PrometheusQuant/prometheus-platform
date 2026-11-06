@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit docs docs-build
+.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -24,6 +24,9 @@ arch: ## Verifica los límites de la arquitectura hexagonal
 
 test: ## Tests con cobertura
 	uv run pytest
+
+dashboard: ## Abre el dashboard de investigación en http://localhost:8501 (solo lectura)
+	uv run streamlit run src/prometheus_platform/api/dashboard/app.py
 
 audit: ## Busca vulnerabilidades conocidas en las dependencias del uv.lock (pip-audit)
 	uv export --frozen --no-emit-project --format requirements-txt -o .audit-requirements.txt

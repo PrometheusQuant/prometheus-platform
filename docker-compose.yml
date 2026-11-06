@@ -1,0 +1,16 @@
+# Dashboard de solo lectura (PQ-34):  docker compose up --build  ->  http://127.0.0.1:8501
+services:
+  dashboard:
+    build: .
+    image: prometheusquant/dashboard:local
+    ports:
+      - "127.0.0.1:8501:8501"   # solo en la máquina local, no en la red
+    volumes:
+      - ./data:/data:ro         # el contenedor no puede modificar el lakehouse
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
