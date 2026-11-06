@@ -13,3 +13,4 @@ Una carpeta por historia de **5 puntos o más**: `PQ-<n>-<nombre>/spec.md` (qué
 | PQ-34 Dashboard | [spec](PQ-34-dashboard/spec.md) · [plan](PQ-34-dashboard/plan.md) |
 | PQ-46 Capa gold | [spec](PQ-46-capa-gold/spec.md) · [plan](PQ-46-capa-gold/plan.md) |
 | PQ-22 Orquestación con Dagster | [spec](PQ-22-dagster/spec.md) · [plan](PQ-22-dagster/plan.md) |
+| PQ-58 Simulador interactivo | [spec](PQ-58-simulador-interactivo/spec.md) · [plan](PQ-58-simulador-interactivo/plan.md) |
