@@ -64,6 +64,8 @@ class QualityReport:
     last: str | None = None
     checks: list[str] = field(default_factory=list)
     describe: dict[str, dict[str, float | None]] = field(default_factory=dict)
+    # Fuentes de bronze combinadas y diferencias entre ellas donde se solapan (PQ-65).
+    fuentes: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, ensure_ascii=False)
@@ -374,12 +376,17 @@ def asof_join(
 # --- E/S --------------------------------------------------------------------------------
 
 
-def bronze_files(
-    bronze_root: Path, dataset: DatasetKind, market: Market, symbol: str, interval: str | None
+AUDITED_SOURCE = "binance_data_vision"
+API_SOURCE = "binance_api"
+_PARTITION = re.compile(r"^(year|month)=(\d+)$")
+_MISMATCH_TOLERANCE = 1e-9
+
+
+def _source_files(
+    source_root: Path, dataset: DatasetKind, market: Market, symbol: str, interval: str | None
 ) -> list[Path]:
     base = (
-        bronze_root
-        / "source=binance_data_vision"
+        source_root
         / f"dataset={dataset}"
         / f"market={market}"
         / f"symbol={symbol}"
@@ -388,10 +395,102 @@ def bronze_files(
     return sorted(base.rglob("*.parquet"))
 
 
+def bronze_files(
+    bronze_root: Path, dataset: DatasetKind, market: Market, symbol: str, interval: str | None
+) -> list[Path]:
+    """Archivos de la fuente auditada (Data Vision)."""
+    return _source_files(
+        bronze_root / f"source={AUDITED_SOURCE}", dataset, market, symbol, interval
+    )
+
+
 def read_bronze(files: list[Path]) -> pl.DataFrame:
     if not files:
         return pl.DataFrame()
     return pl.concat([pl.read_parquet(f) for f in files], how="diagonal_relaxed")
+
+
+def _partition_month(path: Path) -> tuple[int, int]:
+    found: dict[str, int] = {}
+    for part in path.parts:
+        if match := _PARTITION.match(part):
+            found[match.group(1)] = int(match.group(2))
+    return found["year"], found["month"]
+
+
+def _keyed(frame: pl.DataFrame, dataset: DatasetKind) -> pl.DataFrame:
+    """Clave temporal en ms y valores numéricos para comparar las dos fuentes."""
+    if dataset is DatasetKind.KLINES:
+        return frame.select(
+            to_epoch_ms("open_time").alias("_key"),
+            *[pl.col(c).cast(pl.Float64) for c in (*PRICE_COLUMNS, "volume")],
+        )
+    calc = to_epoch_ms("calc_time")
+    return frame.select(
+        (((calc + HOUR_MS // 2) // HOUR_MS) * HOUR_MS).alias("_key"),
+        pl.col("last_funding_rate").cast(pl.Float64),
+        # La API no trae el intervalo: se infiere (fundingInfo o 8 h). Si difiere, se informa.
+        pl.col("funding_interval_hours").cast(pl.Float64),
+    )
+
+
+def compare_sources(
+    audited: pl.DataFrame, api: pl.DataFrame, dataset: DatasetKind
+) -> dict[str, int]:
+    """Diferencias entre la API y Data Vision en el tramo que la API cubre."""
+    if audited.is_empty() or api.is_empty():
+        return {"solo_api": 0, "solo_data_vision": 0, "valores_distintos": 0}
+    a, b = _keyed(audited, dataset), _keyed(api, dataset)
+    low, high = b["_key"].min(), b["_key"].max()
+    a = a.filter(pl.col("_key").is_between(low, high))
+    values = [c for c in b.columns if c != "_key"]
+    joined = a.join(b, on="_key", how="inner", suffix="_api")
+    differs = pl.any_horizontal(
+        [
+            (pl.col(c) - pl.col(f"{c}_api")).abs()
+            > _MISMATCH_TOLERANCE * pl.max_horizontal(pl.lit(1.0), pl.col(c).abs())
+            for c in values
+        ]
+    )
+    return {
+        "solo_api": b.join(a, on="_key", how="anti").height,
+        "solo_data_vision": a.join(b, on="_key", how="anti").height,
+        "valores_distintos": joined.filter(differs).height,
+    }
+
+
+def read_bronze_sources(
+    bronze_root: Path,
+    dataset: DatasetKind,
+    market: Market,
+    symbol: str,
+    interval: str | None,
+) -> tuple[pl.DataFrame, dict[str, int]]:
+    """Bronze de Data Vision más el de la API, con precedencia de Data Vision (PQ-65).
+
+    Data Vision es la fuente auditada: si publicó un mes, los días de ese mes que vinieron de la
+    API se descartan y solo se comparan con los suyos para informar las diferencias. La API cubre
+    los meses que Data Vision todavía no publicó (el mes en curso).
+    """
+    audited_files = bronze_files(bronze_root, dataset, market, symbol, interval)
+    api_files = _source_files(
+        bronze_root / f"source={API_SOURCE}", dataset, market, symbol, interval
+    )
+    audited_months = {_partition_month(f) for f in audited_files}
+    kept = [f for f in api_files if _partition_month(f) not in audited_months]
+    replaced = [f for f in api_files if _partition_month(f) in audited_months]
+
+    audited = read_bronze(audited_files)
+    api_kept, api_replaced = read_bronze(kept), read_bronze(replaced)
+    frames = [f for f in (audited, api_kept) if not f.is_empty()]
+    merged = pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
+    sources = {
+        "filas_data_vision": audited.height,
+        "filas_api": api_kept.height,
+        "filas_api_reemplazadas": api_replaced.height,
+        **compare_sources(audited, api_replaced, dataset),
+    }
+    return merged, sources
 
 
 def silver_path(

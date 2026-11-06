@@ -17,13 +17,16 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import polars as pl
 
 from prometheus_platform.adapters.binance_data_vision import BinanceDataVisionSource
+from prometheus_platform.adapters.binance_rest import SOURCE_NAME as API_SOURCE_NAME
+from prometheus_platform.adapters.binance_rest import BinanceRestSource, day_refs
 from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.notifiers import notifier_from_settings
 from prometheus_platform.adapters.parquet_bronze import ParquetBronzeStore
@@ -36,15 +39,14 @@ from prometheus_platform.data_platform.ingest import (
 )
 from prometheus_platform.data_platform.silver import (
     SilverValidationError,
-    bronze_files,
     build_funding,
     build_klines,
-    read_bronze,
+    read_bronze_sources,
     silver_path,
     write_silver,
 )
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
-from prometheus_platform.domain.datasets import DatasetKind, Market
+from prometheus_platform.domain.datasets import ArchiveRef, DatasetKind, Granularity, Market
 from prometheus_platform.domain.ports import Notifier
 from prometheus_platform.ops.logging import configure_logging
 from prometheus_platform.ops.settings import load_settings
@@ -62,6 +64,13 @@ def _month(value: str) -> date:
         raise argparse.ArgumentTypeError(f"mes inválido {value!r}: usa AAAA-MM") from None
 
 
+def _day(value: str) -> date:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=UTC).date()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"día inválido {value!r}: usa AAAA-MM-DD") from None
+
+
 def last_complete_month(today: date) -> date:
     return date(today.year - 1, 12, 1) if today.month == 1 else date(today.year, today.month - 1, 1)
 
@@ -70,14 +79,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pq", description="Plataforma PrometheusQuant")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    ingest_cmd = commands.add_parser("ingest", help="Ingesta bronze desde Binance Data Vision")
+    ingest_cmd = commands.add_parser("ingest", help="Ingesta bronze desde Binance")
+    ingest_cmd.add_argument(
+        "--source",
+        choices=["data-vision", "api"],
+        default="data-vision",
+        help="data-vision: meses publicados (auditados); api: días recientes por la API pública",
+    )
     datasets = ingest_cmd.add_subparsers(dest="dataset", required=True)
 
     def add_range(sub: argparse.ArgumentParser) -> None:
         sub.add_argument("--symbol", required=True, type=str.upper, help="p. ej. BTCUSDT")
-        sub.add_argument("--start", required=True, type=_month, help="primer mes (AAAA-MM)")
+        sub.add_argument("--start", type=_month, help="data-vision: primer mes (AAAA-MM)")
         sub.add_argument(
-            "--end", type=_month, help="último mes (AAAA-MM); por defecto, el último completo"
+            "--end", type=_month, help="data-vision: último mes; por defecto, el último completo"
+        )
+        sub.add_argument(
+            "--since", type=_day, help="api: primer día (AAAA-MM-DD); por defecto, el día 1 del mes"
         )
 
     klines = datasets.add_parser("klines", help="Velas OHLCV")
@@ -142,6 +160,43 @@ def http_client() -> httpx.Client:
     return httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), follow_redirects=True)
 
 
+# Margen tras el cierre del día: la última vela y la liquidación de las 00:00 ya publicadas.
+SETTLE_MARGIN = timedelta(minutes=5)
+
+
+def _ingest_api(args: argparse.Namespace, bronze_root: Path, clock: SystemClock) -> int:
+    """Días recientes desde la API pública (PQ-65). Idempotente: no vuelve a pedir días que ya
+    están completos en bronze ni meses que Data Vision ya publicó."""
+    today = clock.now().date()
+    since = args.since or today.replace(day=1)
+    if args.dataset == "klines":
+        first = ArchiveRef(
+            Market(args.market),
+            DatasetKind.KLINES,
+            args.symbol,
+            since,
+            args.interval,
+            Granularity.DAILY,
+        )
+    else:
+        first = ArchiveRef(
+            Market.USDM, DatasetKind.FUNDING_RATE, args.symbol, since, None, Granularity.DAILY
+        )
+    store = ParquetBronzeStore(bronze_root, source=API_SOURCE_NAME, clock=clock)
+    audited = ParquetBronzeStore(bronze_root, source=SOURCE_NAME, clock=clock)
+
+    def settled(ref: ArchiveRef) -> bool:
+        month = replace(ref, period=ref.period.replace(day=1), granularity=Granularity.MONTHLY)
+        closed = datetime.combine(ref.period + timedelta(days=1), datetime.min.time(), UTC)
+        return audited.path_for(month).exists() or store.written_after(ref, closed + SETTLE_MARGIN)
+
+    refs = [r for r in day_refs(first, today) if not settled(r)]
+    with http_client() as client:
+        report = ingest(refs, BinanceRestSource(client, now=clock.now), store)
+    _print_report(report)
+    return 0 if report.ok else 1
+
+
 def _print_report(report: IngestReport) -> None:
     print(
         f"escritos={len(report.written)} ya_ingeridos={len(report.skipped)} "
@@ -150,21 +205,37 @@ def _print_report(report: IngestReport) -> None:
     )
 
 
+def _sources_line(sources: dict[str, int]) -> str:
+    line = f"api={sources['filas_api']}"
+    if sources["filas_api_reemplazadas"]:
+        line += (
+            f" api_reemplazada_por_data_vision={sources['filas_api_reemplazadas']}"
+            f" diferencias(solo_api={sources['solo_api']},"
+            f" solo_data_vision={sources['solo_data_vision']},"
+            f" valores={sources['valores_distintos']})"
+        )
+    return line
+
+
 def _silver_build(data_dir: Path, symbol: str, interval: str) -> int:
     bronze, silver = data_dir / "bronze", data_dir / "silver"
     quality = silver / "_quality"
     try:
         for market in (Market.SPOT, Market.USDM):
-            files = bronze_files(bronze, DatasetKind.KLINES, market, symbol, interval)
-            frame, report = build_klines(read_bronze(files), market, symbol, interval)
+            raw, sources = read_bronze_sources(bronze, DatasetKind.KLINES, market, symbol, interval)
+            frame, report = build_klines(raw, market, symbol, interval)
+            report.fuentes = sources
             path = silver_path(silver, DatasetKind.KLINES, symbol, market, interval)
             write_silver(frame, report, path, quality)
             print(f"{report.table}: filas={report.rows} huecos={report.gaps}", end=" ")
-            print(f"outliers={report.outliers}")
-        files = bronze_files(bronze, DatasetKind.FUNDING_RATE, Market.USDM, symbol, None)
-        frame, report = build_funding(read_bronze(files), symbol)
+            print(f"outliers={report.outliers} {_sources_line(sources)}")
+        raw, sources = read_bronze_sources(
+            bronze, DatasetKind.FUNDING_RATE, Market.USDM, symbol, None
+        )
+        frame, report = build_funding(raw, symbol)
+        report.fuentes = sources
         write_silver(frame, report, silver_path(silver, DatasetKind.FUNDING_RATE, symbol), quality)
-        print(f"{report.table}: filas={report.rows} huecos={report.gaps}")
+        print(f"{report.table}: filas={report.rows} huecos={report.gaps} {_sources_line(sources)}")
     except SilverValidationError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 1
@@ -396,6 +467,26 @@ def _alert_test(notifier: Notifier | None, environment: str) -> int:
     return 0 if delivered else 1
 
 
+def _ingest(args: argparse.Namespace, bronze_root: Path) -> int:
+    clock = SystemClock()
+    if args.source == "api":
+        return _ingest_api(args, bronze_root, clock)
+    if args.start is None:
+        print("ERROR --start (AAAA-MM) es obligatorio con --source data-vision", file=sys.stderr)
+        return 2
+    end = args.end or last_complete_month(clock.now().date())
+    if args.dataset == "klines":
+        refs = monthly_klines(Market(args.market), args.symbol, args.interval, args.start, end)
+    else:
+        refs = monthly_funding(args.symbol, args.start, end)
+
+    store = ParquetBronzeStore(bronze_root, source=SOURCE_NAME, clock=clock)
+    with http_client() as client:
+        report = ingest(refs, BinanceDataVisionSource(client), store)
+    _print_report(report)
+    return 0 if report.ok else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = load_settings()
@@ -412,18 +503,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "research":
         return _research(args, settings.data_dir)
 
-    clock = SystemClock()
-    end = args.end or last_complete_month(clock.now().date())
-    if args.dataset == "klines":
-        refs = monthly_klines(Market(args.market), args.symbol, args.interval, args.start, end)
-    else:
-        refs = monthly_funding(args.symbol, args.start, end)
-
-    store = ParquetBronzeStore(settings.data_dir / "bronze", source=SOURCE_NAME, clock=clock)
-    with http_client() as client:
-        report = ingest(refs, BinanceDataVisionSource(client), store)
-    _print_report(report)
-    return 0 if report.ok else 1
+    return _ingest(args, settings.data_dir / "bronze")
 
 
 if __name__ == "__main__":  # pragma: no cover

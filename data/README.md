@@ -34,6 +34,31 @@ bronze/_rejections.jsonl   # archivos rechazados (checksum inválido, CSV malfor
 - Linaje en cada fila: `_source_file`, `_source_sha256`, `_source_row`, `_ingested_at`.
 - Consulta rápida: `duckdb -c "select * from read_parquet('data/bronze/**/*.parquet', hive_partitioning=true) limit 5"`.
 
+### Días recientes desde la API (PQ-65)
+
+Data Vision publica por meses y con retraso. El mes en curso viene de la API pública de Binance,
+sin claves:
+
+```bash
+uv run pq ingest --source api klines --market um --symbol SOLUSDT --interval 1h   # desde el día 1 del mes
+uv run pq ingest --source api klines --market spot --symbol SOLUSDT --interval 1h --since 2026-11-05
+uv run pq ingest --source api funding --symbol SOLUSDT
+```
+
+```text
+bronze/source=binance_api/dataset=klines/market=um/symbol=SOLUSDT/interval=1h/year=2026/month=11/SOLUSDT-1h-2026-11-05.parquet
+```
+
+- **Un archivo por día UTC**, con las mismas columnas que Data Vision (texto) y el mismo linaje.
+  El `_source_sha256` es el del ZIP que se arma con la respuesta: mismos datos, mismo checksum.
+- **Solo velas cerradas.** El día en curso se vuelve a pedir en cada ejecución. Un día ya cerrado y
+  guardado no se vuelve a pedir, y tampoco un mes que Data Vision ya publicó.
+- **Precedencia en silver.** Si Data Vision tiene el mes, los días de la API de ese mes se descartan
+  y solo se comparan. El informe de calidad lo registra en `fuentes`: filas de cada fuente, filas
+  reemplazadas, solo API, solo Data Vision y valores distintos.
+- **Límites de tasa.** Se respetan HTTP 429 y 418 con `Retry-After`. Con el peso del minuto por
+  encima del 80 %, se pausa hasta el minuto siguiente.
+
 ## Gold
 
 Modelo en estrella para BI (PQ-46): 4 dimensiones y 9 hechos, construidos desde silver y los
