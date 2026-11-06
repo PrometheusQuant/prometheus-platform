@@ -114,4 +114,5 @@ nav:
   - Glosario: glosario.md
   - Académico:
       - academico/README.md
+      - Planteamiento del problema (cap. 1): academico/planteamiento-del-problema.md
       - Marco de referencia (cap. 2): academico/marco-de-referencia.md
