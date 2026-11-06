@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report e2e screenshots
+.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report e2e screenshots orquestador
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -36,6 +36,11 @@ e2e: ## Pruebas en navegador real contra el dashboard en Docker (Playwright)
 screenshots: ## Captura cada pestaña del dashboard en reports/storytelling/_img/dashboard/
 	docker compose up -d --build --wait
 	uv run --group e2e python scripts/capture_dashboard.py
+
+orquestador: ## Interfaz de Dagster en http://127.0.0.1:3000: assets del lakehouse y checks (PQ-22)
+	mkdir -p data/.dagster
+	DAGSTER_HOME=$(CURDIR)/data/.dagster uv run dagster dev \
+		-m prometheus_platform.api.orquestacion.definitions -h 127.0.0.1 -p 3000
 
 report: ## Genera el informe ejecutivo en PDF desde los resultados (Quarto + Typst)
 	@command -v quarto >/dev/null || { echo "Falta Quarto: https://quarto.org/docs/get-started/"; exit 1; }

@@ -37,14 +37,7 @@ from prometheus_platform.data_platform.ingest import (
     monthly_funding,
     monthly_klines,
 )
-from prometheus_platform.data_platform.silver import (
-    SilverValidationError,
-    build_funding,
-    build_klines,
-    read_bronze_sources,
-    silver_path,
-    write_silver,
-)
+from prometheus_platform.data_platform.silver import SilverValidationError, build_symbol
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
 from prometheus_platform.domain.datasets import ArchiveRef, DatasetKind, Granularity, Market
 from prometheus_platform.domain.ports import Notifier
@@ -218,27 +211,15 @@ def _sources_line(sources: dict[str, int]) -> str:
 
 
 def _silver_build(data_dir: Path, symbol: str, interval: str) -> int:
-    bronze, silver = data_dir / "bronze", data_dir / "silver"
-    quality = silver / "_quality"
     try:
-        for market in (Market.SPOT, Market.USDM):
-            raw, sources = read_bronze_sources(bronze, DatasetKind.KLINES, market, symbol, interval)
-            frame, report = build_klines(raw, market, symbol, interval)
-            report.fuentes = sources
-            path = silver_path(silver, DatasetKind.KLINES, symbol, market, interval)
-            write_silver(frame, report, path, quality)
-            print(f"{report.table}: filas={report.rows} huecos={report.gaps}", end=" ")
-            print(f"outliers={report.outliers} {_sources_line(sources)}")
-        raw, sources = read_bronze_sources(
-            bronze, DatasetKind.FUNDING_RATE, Market.USDM, symbol, None
-        )
-        frame, report = build_funding(raw, symbol)
-        report.fuentes = sources
-        write_silver(frame, report, silver_path(silver, DatasetKind.FUNDING_RATE, symbol), quality)
-        print(f"{report.table}: filas={report.rows} huecos={report.gaps} {_sources_line(sources)}")
+        reports = build_symbol(data_dir, symbol, interval)
     except SilverValidationError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 1
+    for report in reports:
+        extra = f" outliers={report.outliers}" if report.table.startswith("klines") else ""
+        sources = f" {_sources_line(report.fuentes)}" if report.fuentes else ""
+        print(f"{report.table}: filas={report.rows} huecos={report.gaps}{extra}{sources}")
     return 0
 
 
