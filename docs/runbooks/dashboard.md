@@ -11,7 +11,7 @@ funding y simulación. Decisión en [ADR-0009](../adr/0009-streamlit-y-docker-pa
 make dashboard          # http://localhost:8501
 ```
 
-**Con Docker** (Docker Desktop con integración WSL; verificado por el titular el 2026-11-06):
+**Con Docker** (Docker Desktop abierto y con la integración WSL, ver KE-008):
 
 ```bash
 docker compose up --build    # http://127.0.0.1:8501
@@ -35,3 +35,21 @@ Si falta un artefacto, la pestaña muestra el comando que lo genera.
 - Root filesystem en solo lectura, usuario `pq` (uid 10001), sin capacidades (`cap_drop: ALL`).
 - Puerto publicado solo en `127.0.0.1`: no queda expuesto a la red.
 - La imagen no contiene `.env` ni datos (`.dockerignore`).
+
+## Pruebas en navegador y capturas (PQ-41)
+
+[Playwright](https://playwright.dev/python/) abre el dashboard en un Chromium sin ventana, como lo vería
+un usuario. Complementa las pruebas de `AppTest` (que ejecutan el script sin navegador) y comprueba lo
+que ellas no ven: que el contenedor sirve la página, que las 4 pestañas se pueden abrir y que ninguna
+muestra un error.
+
+```bash
+make e2e            # levanta el contenedor, instala Chromium la primera vez y corre tests/e2e/
+make screenshots    # una imagen PNG por pestaña en reports/storytelling/_img/dashboard/
+```
+
+- Las pruebas aceptan datos reales o un lakehouse vacío: cada pestaña debe mostrar una tabla o el aviso
+  con el comando que genera el artefacto.
+- En la CI corren en el job *Imagen Docker del dashboard*, contra el contenedor recién construido.
+- Las capturas sirven para el informe y la presentación; quedan fuera de git porque se regeneran.
+- El grupo de dependencias `e2e` no se instala por defecto: `uv sync --group e2e`.
