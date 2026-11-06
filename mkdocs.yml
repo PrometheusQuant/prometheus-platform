@@ -101,6 +101,7 @@ nav:
       - Dashboard: runbooks/dashboard.md
       - Orquestación (Dagster): runbooks/orquestacion.md
       - Análisis de impacto (BIA): runbooks/analisis-de-impacto.md
+      - Kill-switch: runbooks/kill-switch.md
   - Investigación:
       - investigacion/README.md
       - "2026-10-16 Plataforma multiestrategia": investigacion/2026-10-16-plataforma-multiestrategia.md
