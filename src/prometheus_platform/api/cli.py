@@ -34,17 +34,9 @@ from prometheus_platform.data_platform.ingest import (
     monthly_funding,
     monthly_klines,
 )
-from prometheus_platform.data_platform.silver import (
-    SilverValidationError,
-    bronze_files,
-    build_funding,
-    build_klines,
-    read_bronze,
-    silver_path,
-    write_silver,
-)
+from prometheus_platform.data_platform.silver import SilverValidationError, build_symbol
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
-from prometheus_platform.domain.datasets import DatasetKind, Market
+from prometheus_platform.domain.datasets import Market
 from prometheus_platform.domain.ports import Notifier
 from prometheus_platform.ops.logging import configure_logging
 from prometheus_platform.ops.settings import load_settings
@@ -151,23 +143,14 @@ def _print_report(report: IngestReport) -> None:
 
 
 def _silver_build(data_dir: Path, symbol: str, interval: str) -> int:
-    bronze, silver = data_dir / "bronze", data_dir / "silver"
-    quality = silver / "_quality"
     try:
-        for market in (Market.SPOT, Market.USDM):
-            files = bronze_files(bronze, DatasetKind.KLINES, market, symbol, interval)
-            frame, report = build_klines(read_bronze(files), market, symbol, interval)
-            path = silver_path(silver, DatasetKind.KLINES, symbol, market, interval)
-            write_silver(frame, report, path, quality)
-            print(f"{report.table}: filas={report.rows} huecos={report.gaps}", end=" ")
-            print(f"outliers={report.outliers}")
-        files = bronze_files(bronze, DatasetKind.FUNDING_RATE, Market.USDM, symbol, None)
-        frame, report = build_funding(read_bronze(files), symbol)
-        write_silver(frame, report, silver_path(silver, DatasetKind.FUNDING_RATE, symbol), quality)
-        print(f"{report.table}: filas={report.rows} huecos={report.gaps}")
+        reports = build_symbol(data_dir, symbol, interval)
     except SilverValidationError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 1
+    for report in reports:
+        extra = f" outliers={report.outliers}" if report.table.startswith("klines") else ""
+        print(f"{report.table}: filas={report.rows} huecos={report.gaps}{extra}")
     return 0
 
 

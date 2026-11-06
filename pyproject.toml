@@ -52,9 +52,13 @@ docs = [
 e2e = [
     "pytest-playwright>=0.7",
 ]
+orquestacion = [
+    "dagster>=1.13",
+    "dagster-webserver>=1.13",
+]
 
 [tool.uv]
-default-groups = ["dev", "docs", "dashboard"]
+default-groups = ["dev", "docs", "dashboard", "orquestacion"]
 
 [build-system]
 requires = ["hatchling"]
@@ -133,6 +137,25 @@ name = "El dominio no depende de librerías de infraestructura"
 type = "forbidden"
 source_modules = ["prometheus_platform.domain"]
 forbidden_modules = ["structlog", "pydantic_settings", "httpx", "pyarrow"]
+
+[[tool.importlinter.contracts]]
+# PQ-22 / ADR-0010: Dagster solo orquesta. Ni el trading en vivo ni la lógica dependen de él.
+name = "Solo api.orquestacion importa Dagster"
+type = "forbidden"
+source_modules = [
+    "prometheus_platform.domain",
+    "prometheus_platform.ops",
+    "prometheus_platform.data_platform",
+    "prometheus_platform.research",
+    "prometheus_platform.strategies",
+    "prometheus_platform.portfolio_risk",
+    "prometheus_platform.execution",
+    "prometheus_platform.adapters",
+    "prometheus_platform.api.cli",
+    "prometheus_platform.api.dashboard",
+    "prometheus_platform.api.report",
+]
+forbidden_modules = ["dagster"]
 
 [[tool.importlinter.contracts]]
 name = "Las estrategias no conocen la ejecución ni el riesgo"

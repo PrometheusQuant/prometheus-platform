@@ -419,3 +419,29 @@ def write_silver(frame: pl.DataFrame, report: QualityReport, path: Path, quality
     tmp.replace(path)
     quality_dir.mkdir(parents=True, exist_ok=True)
     (quality_dir / f"{report.table.replace('/', '-')}.json").write_text(report.to_json())
+
+
+def build_symbol(data_dir: Path, symbol: str, interval: str = "1h") -> list[QualityReport]:
+    """Reconstruye las tres tablas silver de un símbolo (spot, perpetuo y funding) desde bronze.
+
+    Lo usan la CLI (``pq silver build``) y el orquestador (PQ-22). Lanza ``SilverValidationError``
+    si un check falla: en ese caso no se escribe la tabla que falló.
+    """
+    bronze, silver = data_dir / "bronze", data_dir / "silver"
+    quality = silver / "_quality"
+    reports = []
+    for market in (Market.SPOT, Market.USDM):
+        files = bronze_files(bronze, DatasetKind.KLINES, market, symbol, interval)
+        frame, report = build_klines(read_bronze(files), market, symbol, interval)
+        write_silver(
+            frame,
+            report,
+            silver_path(silver, DatasetKind.KLINES, symbol, market, interval),
+            quality,
+        )
+        reports.append(report)
+    files = bronze_files(bronze, DatasetKind.FUNDING_RATE, Market.USDM, symbol, None)
+    frame, report = build_funding(read_bronze(files), symbol)
+    write_silver(frame, report, silver_path(silver, DatasetKind.FUNDING_RATE, symbol), quality)
+    reports.append(report)
+    return reports
