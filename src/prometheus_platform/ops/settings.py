@@ -10,8 +10,9 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +46,21 @@ class Settings(BaseSettings):
 
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
+    # Zona horaria IANA en la que se muestran las alertas a las personas (los logs siguen en UTC).
+    alert_timezone: str = "America/La_Paz"
+
+    @field_validator("alert_timezone")
+    @classmethod
+    def _check_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"Zona horaria desconocida: {value!r} (usa un nombre IANA)") from exc
+        return value
+
+    @property
+    def alert_tz(self) -> ZoneInfo:
+        return ZoneInfo(self.alert_timezone)
 
     @model_validator(mode="after")
     def _check_environment_invariants(self) -> Self:

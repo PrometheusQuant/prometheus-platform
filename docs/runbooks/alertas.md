@@ -14,6 +14,7 @@ como alerta. El código está en `ops/alerting.py` y `adapters/notifiers.py` (pa
     ```
     PQ_TELEGRAM_BOT_TOKEN=123456:ABC...
     PQ_TELEGRAM_CHAT_ID=987654321
+    PQ_ALERT_TIMEZONE=America/La_Paz   # opcional; es el valor por defecto
     ```
 
 4. Probar: `uv run pq alert test`. Debe responder `canal=TelegramNotifier entregada=sí` y llegar
@@ -47,3 +48,10 @@ como alerta. El código está en `ops/alerting.py` y `adapters/notifiers.py` (pa
 
 La URL `api.telegram.org/bot<TOKEN>/...` queda en el historial del navegador: bórrala al terminar.
 Si el token se filtra, `/revoke` en @BotFather y actualiza `.env`.
+
+## Hora de las alertas
+
+Las alertas muestran primero la hora local y entre paréntesis la UTC:
+`hora=2026-11-06 13:27:37 -04 (17:27:37 UTC)`. Logs y datos siguen en UTC, que es la referencia
+para cruzar una alerta con los logs. La zona se cambia con `PQ_ALERT_TIMEZONE` (nombre IANA, por
+ejemplo `America/Bogota`); un nombre inválido hace fallar el arranque.

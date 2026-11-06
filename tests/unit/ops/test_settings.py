@@ -36,7 +36,9 @@ def test_reads_prefixed_environment_variables(monkeypatch: pytest.MonkeyPatch) -
     assert settings.data_dir == Path("/srv/lakehouse")
 
 
-def test_reads_dotenv_file(tmp_path: Path) -> None:
+def test_reads_dotenv_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # tests/conftest.py desactiva el .env para todos los tests; aquí se reactiva sobre tmp_path.
+    monkeypatch.setitem(Settings.model_config, "env_file", ".env")
     (tmp_path / ".env").write_text("PQ_ENVIRONMENT=paper\nPQ_TELEGRAM_CHAT_ID=42\n")
     settings = load_settings()
     assert settings.environment is Environment.PAPER
@@ -104,3 +106,10 @@ def test_settings_are_immutable() -> None:
     settings = load_settings()
     with pytest.raises(ValidationError):
         settings.environment = Environment.LIVE  # type: ignore[misc]
+
+
+def test_alert_timezone_defaults_to_bolivia_and_rejects_unknown_names() -> None:
+    assert Settings().alert_tz.key == "America/La_Paz"
+    assert Settings(alert_timezone="UTC").alert_tz.key == "UTC"
+    with pytest.raises(ValidationError, match="Zona horaria desconocida"):
+        Settings(alert_timezone="Bolivia/Santa_Cruz")
