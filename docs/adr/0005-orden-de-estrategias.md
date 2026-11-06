@@ -28,4 +28,4 @@ liquidez en Uniswap v3, martingala, copy trading. FinBERT se sustituye por Crypt
 - Pendiente de verificar en el Sprint 0: habilitación de futuros USDⓈ-M de Binance para Bolivia,
   comisiones oficiales y elegibilidad en Polymarket.
 
-Fuente: [`docs/investigacion/`](../investigacion/).
+Fuente: [`docs/investigacion/`](../investigacion/README.md).

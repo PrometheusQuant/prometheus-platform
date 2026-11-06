@@ -25,7 +25,8 @@ operación sin un beneficio que lo justifique.
 - **Dominio** (`domain`): value objects, eventos y puertos (`typing.Protocol`). Solo librería estándar.
 - **Aplicación**: `strategies`, `portfolio_risk`, `execution`, `data_platform`, `research`.
 - **Adaptadores** (`adapters`): Binance, paper, persistencia. Intercambiables.
-- **Entrada y operación**: `api`, `ops`.
+- **Entrada** (`api`): CLI y servicios de lectura.
+- **Transversal** (`ops`): configuración, logging y métricas. Lo usan todas las capas salvo el dominio.
 - **Journal append-only** de eventos (señal, orden, fill, riesgo) para auditoría y *replay*.
 - **CQRS** solo para vistas de lectura del dashboard.
 

@@ -2,3 +2,8 @@ PrometheusQuant Platform
 Copyright 2026 David Quintela y colaboradores de PrometheusQuant
 
 Este producto se distribuye bajo la Licencia Apache, versión 2.0 (ver LICENSE).
+
+Incluye material de terceros:
+
+- .claude/skills/: adaptado de addyosmani/agent-skills (https://github.com/addyosmani/agent-skills),
+  Copyright (c) 2025 Addy Osmani, licencia MIT (ver .claude/skills/LICENSE-agent-skills).

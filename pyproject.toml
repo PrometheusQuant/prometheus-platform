@@ -1,6 +1,6 @@
 [project]
 name = "prometheus-platform"
-version = "0.1.0"
+version = "0.2.0"
 description = "Plataforma de trading multiestrategia de PrometheusQuant: datos, investigación, backtesting, paper y ejecución en vivo."
 readme = "README.md"
 license = "Apache-2.0"
@@ -8,22 +8,52 @@ license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "David Quintela", email = "david.a.quintela@gmail.com" }]
 dependencies = [
+    "alembic>=1.20.1",
+    "httpx>=0.28",
+    "matplotlib>=3.9",
+    "mlflow-skinny>=3",
+    "numpy>=2",
+    "optuna>=4",
+    "pandera[polars]>=0.35.0",
+    "polars>=1",
+    "pyarrow>=26",
     "pydantic>=2.14",
     "pydantic-settings>=2.16",
+    "scikit-learn>=1.6",
+    "scipy>=1.14",
+    "sqlalchemy>=2.1.6",
     "structlog>=26.1",
 ]
 
+[project.scripts]
+pq = "prometheus_platform.api.cli:main"
+
 [dependency-groups]
+dashboard = [
+    "streamlit>=1.50",
+]
 dev = [
     "commitizen>=4.19",
     "hypothesis>=6.170",
     "import-linter>=2.15",
     "mypy>=2.4",
     "pre-commit>=4.7",
+    "pyarrow-stubs>=20.0.0.20260819",
     "pytest>=9.1",
     "pytest-cov>=7.0",
     "ruff>=0.17",
+    "scipy-stubs>=1.18.1.1",
 ]
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.7",
+]
+e2e = [
+    "pytest-playwright>=0.7",
+]
+
+[tool.uv]
+default-groups = ["dev", "docs", "dashboard"]
 
 [build-system]
 requires = ["hatchling"]
@@ -56,17 +86,22 @@ select = [
 ignore = ["PLR2004"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR2004"]
+"tests/**" = ["S101", "S105", "S106", "PLR2004"]  # S105/S106: secretos falsos en tests
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
+explicit_package_bases = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "mlflow.*", "optuna.*", "playwright.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
-addopts = "-ra --strict-markers --cov=prometheus_platform --cov-report=term-missing"
+addopts = "-ra --strict-markers --import-mode=importlib --cov=prometheus_platform --cov-report=term-missing"
 testpaths = ["tests"]
 
 [tool.coverage.report]
@@ -80,12 +115,15 @@ root_package = "prometheus_platform"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Capas: entrada/infra -> aplicación -> dominio"
+name = "Capas: entrada -> infraestructura -> aplicación -> transversal -> dominio"
 type = "layers"
 layers = [
-    "prometheus_platform.api | prometheus_platform.ops",
+    "prometheus_platform.api",
     "prometheus_platform.adapters",
-    "prometheus_platform.strategies | prometheus_platform.portfolio_risk | prometheus_platform.execution | prometheus_platform.data_platform | prometheus_platform.research",
+    "prometheus_platform.strategies | prometheus_platform.portfolio_risk | prometheus_platform.execution | prometheus_platform.research",
+    # research lee el lakehouse; data_platform nunca depende de research.
+    "prometheus_platform.data_platform",
+    "prometheus_platform.ops",
     "prometheus_platform.domain",
 ]
 
@@ -93,7 +131,7 @@ layers = [
 name = "El dominio no depende de librerías de infraestructura"
 type = "forbidden"
 source_modules = ["prometheus_platform.domain"]
-forbidden_modules = ["structlog", "pydantic_settings"]
+forbidden_modules = ["structlog", "pydantic_settings", "httpx", "pyarrow"]
 
 [[tool.importlinter.contracts]]
 name = "Las estrategias no conocen la ejecución ni el riesgo"
@@ -110,4 +148,5 @@ modules = [
 name = "cz_conventional_commits"
 tag_format = "v$version"
 version_provider = "pep621"
+version_files = ["src/prometheus_platform/__init__.py:__version__"]
 update_changelog_on_bump = true
