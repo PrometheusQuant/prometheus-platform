@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -38,6 +39,7 @@ from prometheus_platform.api.paper.compose import (
     PaperPaths,
     RunnerAlreadyRunningError,
     build,
+    build_watchdog,
     single_instance,
 )
 from prometheus_platform.api.paper.runner import RunnerConfig
@@ -192,6 +194,11 @@ def _add_operations(commands: Commands) -> None:
     run.add_argument("--symbols", default=",".join(HYPOTHESES["H2"]))
     run.add_argument("--k", type=int, default=H2_PARAMS.k)
     run.add_argument("--theta", type=float, default=H2_PARAMS.theta)
+    watchdog = paper_actions.add_parser(
+        "watchdog", help="Vigila el heartbeat del runner y alerta si deja de reportar (PQ-55)"
+    )
+    watchdog.add_argument("--once", action="store_true", help="una revisión y termina (cron)")
+    watchdog.add_argument("--interval", type=float, default=60.0, help="segundos entre revisiones")
 
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
@@ -481,14 +488,41 @@ def _report_inputs(data_dir: Path, out: Path) -> int:
     return 0
 
 
-def _paper_run(args: argparse.Namespace, settings: Settings) -> int:
+def _paper_watchdog(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:
+    if args.interval <= 0:
+        print("ERROR --interval debe ser positivo", file=sys.stderr)
+        return 2
+    dog = build_watchdog(
+        settings=settings,
+        notifier=notifier,
+        clock=SystemClock(),
+        paths=PaperPaths(settings.data_dir / PAPER_DIR),
+    )
+    try:
+        while True:
+            health = dog.check()
+            print(f"runner de paper: {health.value}")
+            if args.once:
+                return 0 if health.value == "ok" else 1
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        return 0
+
+
+def _paper_run(
+    args: argparse.Namespace, settings: Settings, notifier: Notifier | None = None
+) -> int:
     symbols = tuple(dict.fromkeys(s.strip().upper() for s in args.symbols.split(",") if s.strip()))
     paths = PaperPaths(settings.data_dir / PAPER_DIR)
     with http_client() as client:
         try:
             if not math.isfinite(args.theta) or args.interval <= 0:
                 raise ValueError("--theta debe ser finito y --interval positivo")
-            config = RunnerConfig(symbols=symbols, params=CarryParams(args.k, args.theta))
+            config = RunnerConfig(
+                symbols=symbols,
+                params=CarryParams(args.k, args.theta),
+                drawdown_alert=Decimal(str(settings.paper_drawdown_alert)),
+            )
             with single_instance(paths):
                 runner = build(
                     settings=settings,
@@ -497,6 +531,7 @@ def _paper_run(args: argparse.Namespace, settings: Settings) -> int:
                     clock=SystemClock(),
                     paths=paths,
                     capital=args.capital,
+                    notifier=notifier,
                 )
                 print(f"runner de paper: bróker simulado, {','.join(symbols)}, {config.describe()}")
                 healthy = runner.run(
@@ -521,9 +556,11 @@ def _decimal_arg(text: str) -> Decimal:
     return value
 
 
-def _paper(args: argparse.Namespace, settings: Settings) -> int:
+def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:
     if args.action == "run":
-        return _paper_run(args, settings)
+        return _paper_run(args, settings, notifier)
+    if args.action == "watchdog":
+        return _paper_watchdog(args, settings, notifier)
     paths = PaperPaths(settings.data_dir / PAPER_DIR)
     switch = KillSwitch(paths.kill_switch, SystemClock(), JsonlEventJournal(paths.journal))
     if args.action == "status":
@@ -597,7 +634,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "gold": lambda: _gold(args.action, data_dir, getattr(args, "out", GOLD_DOCS)),
         "research": lambda: _research(args, data_dir),
         "report": lambda: _report_inputs(data_dir, args.out),
-        "paper": lambda: _paper(args, settings),
+        "paper": lambda: _paper(args, settings, notifier),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
     }
     return handlers[args.command]()

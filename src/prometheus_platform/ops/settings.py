@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     risk_max_hedge_imbalance: float = Field(default=0.15, gt=0, lt=1, allow_inf_nan=False)
     risk_imbalance_grace_seconds: int = Field(default=300, ge=0)
 
+    # Monitoreo del paper trading (PQ-55).
+    paper_drawdown_alert: float = Field(default=0.03, gt=0, lt=1, allow_inf_nan=False)
+    paper_heartbeat_max_age_minutes: int = Field(default=10, ge=1)
+
     @field_validator("alert_timezone")
     @classmethod
     def _check_timezone(cls, value: str) -> str:

@@ -11,6 +11,7 @@ MAX_DETAIL_CHARS = 300
 
 
 class AlertSeverity(StrEnum):
+    INFO = "info"  # solo avisos explícitos (resumen diario, recuperación); los logs INFO no salen
     WARNING = "warning"
     ERROR = "error"
     CRITICAL = "critical"
