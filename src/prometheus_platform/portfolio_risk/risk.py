@@ -255,20 +255,8 @@ class RiskManager:
         return breaches
 
     def _hedge_breaches(self, book: PortfolioSnapshot) -> list[Breach]:
-        """Cobertura del carry: spot largo y perpetuo corto. Se mide la exposición **neta** con
-        signo, así dos largos (un error de signo en la ejecución) aparecen como un desbalance
-        del 200 % y no como una cobertura perfecta."""
-        legs: dict[str, dict[Leg, Decimal]] = {}
-        for p in book.positions:
-            by_leg = legs.setdefault(p.symbol, {})
-            by_leg[p.leg] = by_leg.get(p.leg, ZERO) + p.signed_notional
         breaches = []
-        for symbol, by_leg in sorted(legs.items()):
-            spot, perp = by_leg.get(Leg.SPOT, ZERO), by_leg.get(Leg.PERP, ZERO)
-            larger = max(abs(spot), abs(perp))
-            if larger == 0:
-                continue
-            imbalance = abs(spot + perp) / larger
+        for symbol, imbalance in sorted(hedge_imbalances(book.positions).items()):
             if imbalance <= self.limits.max_hedge_imbalance:
                 continue
             # Sin dato de antigüedad se asume lo peor: la gracia ya pasó.
@@ -281,6 +269,26 @@ class RiskManager:
                 )
             )
         return breaches
+
+
+def hedge_imbalances(positions: Sequence[Position]) -> dict[str, Decimal]:
+    """Desbalance de la cobertura del carry por símbolo: |spot + perp| / max(|spot|, |perp|).
+
+    Se mide la exposición **neta** con signo: dos largos (un error de signo en la ejecución)
+    aparecen como un desbalance del 200 % y no como una cobertura perfecta. Quien ejecuta lo usa
+    para medir desde cuándo dura un desbalance (``imbalance_age_seconds``).
+    """
+    legs: dict[str, dict[Leg, Decimal]] = {}
+    for p in positions:
+        by_leg = legs.setdefault(p.symbol, {})
+        by_leg[p.leg] = by_leg.get(p.leg, ZERO) + p.signed_notional
+    result = {}
+    for symbol, by_leg in legs.items():
+        spot, perp = by_leg.get(Leg.SPOT, ZERO), by_leg.get(Leg.PERP, ZERO)
+        larger = max(abs(spot), abs(perp))
+        if larger:
+            result[symbol] = abs(spot + perp) / larger
+    return result
 
 
 def flatten_orders(
