@@ -19,6 +19,7 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -41,11 +42,14 @@ from prometheus_platform.data_platform.ingest import (
 )
 from prometheus_platform.data_platform.silver import SilverValidationError, build_symbol
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
+from prometheus_platform.domain.carry_rules import CarryParams
 from prometheus_platform.domain.datasets import ArchiveRef, DatasetKind, Granularity, Market
 from prometheus_platform.domain.ports import Notifier
 from prometheus_platform.ops.logging import configure_logging
-from prometheus_platform.ops.settings import load_settings
+from prometheus_platform.ops.settings import Settings, load_settings
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch
+from prometheus_platform.research.carry_evaluation import HYPOTHESES
+from prometheus_platform.strategies.carry import H2_PARAMS
 
 SOURCE_NAME = "binance_data_vision"
 
@@ -173,6 +177,15 @@ def _add_operations(commands: Commands) -> None:
     kill.add_argument("--confirm", action="store_true", help="obligatorio con --reset")
     kill.add_argument("--by", default="", help="quién rearma (obligatorio con --reset)")
     paper_actions.add_parser("status", help="Estado del kill-switch")
+    run = paper_actions.add_parser(
+        "run", help="Runner del carry H2 con el bróker simulado y datos en vivo (PQ-54)"
+    )
+    run.add_argument("--once", action="store_true", help="un solo ciclo y termina")
+    run.add_argument("--interval", type=float, default=60.0, help="segundos entre ciclos")
+    run.add_argument("--capital", type=Decimal, default=Decimal(1000), help="USD iniciales")
+    run.add_argument("--symbols", default=",".join(HYPOTHESES["H2"]))
+    run.add_argument("--k", type=int, default=H2_PARAMS.k)
+    run.add_argument("--theta", type=float, default=H2_PARAMS.theta)
 
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
@@ -462,8 +475,37 @@ def _report_inputs(data_dir: Path, out: Path) -> int:
     return 0
 
 
-def _paper(args: argparse.Namespace, data_dir: Path) -> int:
-    paper_dir = data_dir / PAPER_DIR
+def _paper_run(args: argparse.Namespace, settings: Settings) -> int:
+    from prometheus_platform.api.paper.compose import PaperPaths, build  # noqa: PLC0415
+    from prometheus_platform.api.paper.runner import RunnerConfig  # noqa: PLC0415
+
+    symbols = tuple(s.strip().upper() for s in args.symbols.split(",") if s.strip())
+    with http_client() as client:
+        try:
+            config = RunnerConfig(symbols=symbols, params=CarryParams(args.k, args.theta))
+            runner = build(
+                settings=settings,
+                config=config,
+                client=client,
+                clock=SystemClock(),
+                paths=PaperPaths(settings.data_dir / PAPER_DIR),
+                capital=args.capital,
+            )
+        except ValueError as exc:
+            print(f"ERROR {exc}", file=sys.stderr)
+            return 2
+        print(f"runner de paper: bróker simulado, {','.join(symbols)}, k={args.k} θ={args.theta}")
+        try:
+            runner.run(interval_seconds=args.interval, max_ticks=1 if args.once else None)
+        except KeyboardInterrupt:
+            print("runner detenido a mano (el estado queda en el diario)")
+    return 0
+
+
+def _paper(args: argparse.Namespace, settings: Settings) -> int:
+    if args.action == "run":
+        return _paper_run(args, settings)
+    paper_dir = settings.data_dir / PAPER_DIR
     switch = KillSwitch(
         paper_dir / KILL_SWITCH_FLAG, SystemClock(), JsonlEventJournal(paper_dir / JOURNAL_FILE)
     )
@@ -538,7 +580,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "gold": lambda: _gold(args.action, data_dir, getattr(args, "out", GOLD_DOCS)),
         "research": lambda: _research(args, data_dir),
         "report": lambda: _report_inputs(data_dir, args.out),
-        "paper": lambda: _paper(args, data_dir),
+        "paper": lambda: _paper(args, settings),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
     }
     return handlers[args.command]()

@@ -25,7 +25,12 @@ from datetime import datetime, timedelta
 
 import polars as pl
 
-REBALANCE_DRIFT = 0.10
+from prometheus_platform.domain.carry_rules import (
+    CarryAction,
+    CarryParams,
+    decide,
+    needs_rebalance,
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,10 @@ class CarryConfig:
         return (
             "B1-siempre-activo" if self.always_on else f"k{self.k}-theta{round(self.theta * 100)}"
         )
+
+    @property
+    def params(self) -> CarryParams:
+        return CarryParams(self.k, self.theta, self.always_on)
 
 
 @dataclass
@@ -143,23 +152,18 @@ class _CarryBook:
             received = self.q_perp * self.perp_mark * rate
             self.cash += received
             self.result.funding_pnl += received
-        if s_k is None:  # ventana inicial de la señal
-            return
-        config = self.config
-        if not self.is_open and (config.always_on or s_k >= config.theta):
+        action = decide(is_open=self.is_open, s_k=s_k, last_rate=rate, params=self.config.params)
+        if action is CarryAction.ENTRAR:
             self.is_open = True
             self.result.cycles += 1
             self._order(self.equity / 2, "entrada", at)
-        elif self.is_open and not config.always_on and (s_k < config.theta / 2 or rate < 0):
+        elif action is CarryAction.SALIR:
             self.is_open = False
             self._order(0.0, "salida", at)
-        elif self.is_open and self.q_perp and self.q_spot:
+        elif s_k is not None and self.is_open and self.q_perp and self.q_spot:
             # Enmienda 2: cada pata vale capital/2 (1x); se rebalancea si una se desvía > 10 %.
             target = self.equity / 2
-            spot_value = self.q_spot * self.spot_mark
-            perp_value = self.q_perp * self.perp_mark
-            drift = max(abs(spot_value - target), abs(perp_value - target)) / target
-            if drift > REBALANCE_DRIFT:
+            if needs_rebalance(self.q_spot * self.spot_mark, self.q_perp * self.perp_mark, target):
                 self._order(target, "rebalanceo", at)
 
 

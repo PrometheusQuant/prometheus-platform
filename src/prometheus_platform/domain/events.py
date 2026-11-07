@@ -60,3 +60,35 @@ class KillSwitchReset(DomainEvent):
     """Se rearmó la operación, siempre a mano y con autor."""
 
     by: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunnerStarted(DomainEvent):
+    """Arranque del runner: con qué bróker opera (``simulado`` o ``binance-demo``) y qué opera."""
+
+    broker: str
+    strategy_id: str
+    symbols: str  # separados por coma: el diario solo guarda tipos simples
+    params: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FundingSettled(DomainEvent):
+    """Una liquidación de funding procesada (se haya cobrado o no): evita procesarla dos veces."""
+
+    symbol: str
+    funding_time: datetime
+    rate: Decimal
+    interval_hours: int
+    amount: Decimal  # cobrado (+) o pagado (-) por la posición perp abierta; 0 si no había
+    action: str  # decisión de la regla en esta liquidación: entrada, salida o mantener
+    s_k: str  # señal anualizada usada, en texto; vacía si aún no hay k liquidaciones
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PortfolioValued(DomainEvent):
+    """Valoración de la cartera: la curva de capital del paper trading."""
+
+    equity: Decimal
+    cash: Decimal
+    gross_notional: Decimal

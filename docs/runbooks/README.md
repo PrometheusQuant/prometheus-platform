@@ -12,12 +12,13 @@ Cada runbook indica: cuándo aplica, pasos exactos, cómo verificar que funcion�
 - [Alertas a Telegram](alertas.md): configurar el bot y probar el canal.
 - [Análisis de impacto (BIA)](analisis-de-impacto.md): MTPD y RTO por proceso, riesgos y mitigación.
 - [Kill-switch](kill-switch.md): detener toda la operación, verificar, rearmar y el simulacro.
+- [Paper trading](paper-trading.md): arrancar y detener el runner, leer su estado y reiniciarlo.
 
 ## Runbooks pendientes
 
 Previstos con la épica de riesgo y ejecución (PQ-7) y la de monitoreo (PQ-8):
 
-- Arrancar y detener el proceso de paper trading / live.
+- Arrancar y detener el proceso live.
 - Rotar una clave de API comprometida.
 - Responder a una desconexión del exchange o a datos desactualizados.
 - Restaurar desde backup.

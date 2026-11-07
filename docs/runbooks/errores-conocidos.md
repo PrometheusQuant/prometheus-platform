@@ -22,6 +22,7 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-012 | Dependencias de desarrollo con CVE (`filelock`, `virtualenv`) | Resuelto |
 | KE-013 | Los tests leían el `.env` real de quien los ejecuta | Resuelto |
 | KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Abierto |
+| KE-015 | `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS | Workaround |
 
 ---
 
@@ -137,3 +138,20 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
     al preparar la evaluación del holdout.
   - Sea como sea, la evaluación del holdout debe contar esa liquidación como suya, y la del
     desarrollo no.
+
+### KE-015: `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS
+
+- **Síntoma:** `pq paper run` o `pq ingest --source api` fallan con
+  `[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate`.
+  `curl` también falla. En otra red, el mismo comando funciona.
+- **Causa:** un cortafuegos de la red (visto el 2026-11-06: Fortinet) intercepta el TLS hacia
+  `*.binance.com` y presenta un certificado firmado por su propia CA, que no está en el almacén de
+  `certifi`. Se confirma mirando el emisor:
+  `openssl s_client -connect api.binance.com:443 -servername api.binance.com </dev/null | openssl x509 -noout -issuer`.
+  Si el emisor no es una CA pública, la red está inspeccionando el tráfico. Otros dominios (p. ej.
+  `github.com`) pueden no estar interceptados.
+- **Workaround:** **nunca desactivar la verificación de certificados.**
+  - Lo más simple: usar otra red (casa, datos móviles) o el servidor compartido (PQ-115).
+  - Si la red es de confianza y su CA está disponible: `export SSL_CERT_FILE=/ruta/ca-de-la-red.pem`.
+    `httpx` 0.28 la usa en lugar de `certifi` (`httpx/_config.py`). Sin esa variable, nada cambia.
+  - Los tests no se ven afectados: no salen a la red (`httpx.MockTransport`).
