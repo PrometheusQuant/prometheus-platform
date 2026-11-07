@@ -145,6 +145,7 @@ def app_labels() -> list[str]:
         "¿Qué riesgo hay? Simulación",
         "¿Y si invierto? Simula tu inversión",
         "¿Qué predice hoy? Funding en vivo",
+        "¿Cómo va en vivo? Paper trading",
     ]
 
 
@@ -171,7 +172,8 @@ def test_app_degrades_gracefully_without_artifacts(
 ) -> None:
     at = run_app(tmp_path / "vacio", monkeypatch)
     assert not at.exception
-    assert len(at.info) == 7  # 5 artefactos faltantes + simulador y predicción sin silver
+    # 5 artefactos faltantes + simulador y predicción sin silver + paper trading sin diario
+    assert len(at.info) == 8
     assert not at.dataframe
 
 
@@ -181,3 +183,92 @@ def test_model_falls_back_to_the_level_formulation(tmp_path: Path) -> None:
     art = load_artifacts(tmp_path)
     assert art.model_mode == "level"
     assert art.model == {"regression": []}
+
+
+def test_live_tab_shows_the_paper_trading_journal(
+    lake: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PQ-55: la pestaña en vivo lee el diario y el heartbeat que deja el runner."""
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
+
+    from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal  # noqa: PLC0415
+    from prometheus_platform.domain.events import (  # noqa: PLC0415
+        FundingSettled,
+        OrderFilled,
+        OrderSubmitted,
+        PortfolioValued,
+        RunnerStarted,
+    )
+    from prometheus_platform.domain.model import InstrumentId, Side, Venue  # noqa: PLC0415
+
+    now = datetime.now(UTC)
+    t0 = now - timedelta(days=1)
+    perp = InstrumentId("SOLUSDT-PERP", Venue.BINANCE)
+    journal = JsonlEventJournal(lake / "paper/diario.jsonl")
+    for event in (
+        RunnerStarted(
+            occurred_at=t0,
+            broker="simulado",
+            strategy_id="carry-h2",
+            symbols="SOLUSDT",
+            params="k=9",
+        ),
+        PortfolioValued(
+            occurred_at=t0, equity=Decimal(1000), cash=Decimal(1000), gross_notional=Decimal(0)
+        ),
+        OrderSubmitted(
+            occurred_at=t0,
+            client_order_id="20261101T1600-entrada-20261101T170100-SOLUSDT-PERP",
+            instrument=perp,
+            side=Side.SELL,
+            quantity=Decimal(2),
+        ),
+        OrderFilled(
+            occurred_at=t0,
+            client_order_id="20261101T1600-entrada-20261101T170100-SOLUSDT-PERP",
+            fill_price=Decimal(100),
+            fill_quantity=Decimal(2),
+            fee=Decimal("0.2"),
+        ),
+        FundingSettled(
+            occurred_at=now,
+            symbol="SOLUSDT",
+            funding_time=now,
+            rate=Decimal("0.0003"),
+            interval_hours=8,
+            amount=Decimal("0.06"),
+            action="mantener",
+            s_k="0.33",
+            target_open=True,
+            was_open=True,
+            rebalance=False,
+        ),
+        PortfolioValued(
+            occurred_at=now,
+            equity=Decimal("1001.5"),
+            cash=Decimal(800),
+            gross_notional=Decimal(400),
+        ),
+    ):
+        journal.append(event)
+    write(
+        lake / "paper/heartbeat.json",
+        {
+            "at": now.isoformat(),
+            "ok": True,
+            "detail": "",
+            "broker": "simulado",
+            "kill_switch": False,
+        },
+    )
+
+    at = run_app(lake, monkeypatch)
+
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Equity"] == "1,001.50 USD"
+    assert metrics["PnL acumulado"] == "+1.50 USD"
+    assert metrics["Funding neto"] == "+0.0600 USD"
+    assert any("Runner en marcha" in m.value for m in at.success)
+    assert any("Kill-switch armado" in m.value for m in at.success)
