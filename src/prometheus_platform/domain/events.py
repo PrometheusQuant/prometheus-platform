@@ -74,7 +74,11 @@ class RunnerStarted(DomainEvent):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FundingSettled(DomainEvent):
-    """Una liquidación de funding procesada (se haya cobrado o no): evita procesarla dos veces."""
+    """Una liquidación de funding procesada, con su decisión y el estado deseado que deja.
+
+    Se registra una vez por ``(symbol, funding_time)``: evita procesarla dos veces y, tras un
+    reinicio, dice al runner hacia qué estado reconciliar.
+    """
 
     symbol: str
     funding_time: datetime
@@ -83,6 +87,9 @@ class FundingSettled(DomainEvent):
     amount: Decimal  # cobrado (+) o pagado (-) por la posición perp abierta; 0 si no había
     action: str  # decisión de la regla en esta liquidación: entrada, salida o mantener
     s_k: str  # señal anualizada usada, en texto; vacía si aún no hay k liquidaciones
+    target_open: bool  # estado deseado tras la decisión: el runner reconcilia hacia él
+    was_open: bool  # estado deseado antes de la decisión: rige hasta t + 1 h (enmienda 1.1)
+    rebalance: bool  # la decisión pide rebalancear (enmienda 2), una sola vez
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

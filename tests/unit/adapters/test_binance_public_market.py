@@ -92,3 +92,26 @@ def test_bad_responses_raise_market_data_error(routes: dict[str, Any], status: i
 def test_funding_must_be_a_list() -> None:
     with pytest.raises(MarketDataError, match="lista"):
         market({"/fapi/v1/fundingRate": {"code": -1121}}).recent_funding("SOLUSDT", 5)
+
+
+def test_each_settlement_keeps_its_own_interval_and_rounds_to_the_hour() -> None:
+    """Revisión C3/K3: el intervalo sale de la distancia entre liquidaciones, como en el silver."""
+    times = [
+        datetime(2026, 11, 5, 16, tzinfo=UTC),
+        datetime(2026, 11, 6, 0, tzinfo=UTC),  # 8 h
+        datetime(2026, 11, 6, 4, tzinfo=UTC),  # 4 h: Binance acortó el intervalo
+        datetime(2026, 11, 6, 8, tzinfo=UTC),
+    ]
+    rows = [
+        {"symbol": "XRPUSDT", "fundingTime": ms(t) - 2, "fundingRate": "0.0001"}  # 07:59:59.998
+        for t in times
+    ]
+    m = market(
+        {
+            "/fapi/v1/fundingRate": rows,
+            "/fapi/v1/fundingInfo": [{"symbol": "XRPUSDT", "fundingIntervalHours": 4}],
+        }
+    )
+    got = m.recent_funding("XRPUSDT", 10)
+    assert [r.funding_time for r in got] == times
+    assert [r.interval_hours for r in got] == [4, 8, 4, 4]  # la primera usa el actual

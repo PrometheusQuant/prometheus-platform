@@ -13,15 +13,17 @@
 | Runner y CLI | `api` | `api/paper/runner.py` (raíz de composición) y `pq paper run` |
 
 **Ciclo (`tick`):**
-1. heartbeat;
-2. `observe()` del kill-switch y cierre si está activado;
-3. precios y valoración (`PortfolioValued`);
-4. `monitor` y `enforce`;
-5. por cada símbolo con una liquidación nueva: `FundingSettled`, decisión, órdenes (riesgo, bróker y
-   diario).
+1. `observe()` del kill-switch y cierre si está activado;
+2. precios y valoración;
+3. `monitor` y `enforce`;
+4. por símbolo: liquidaciones nuevas (`FundingSettled` con la decisión y el estado deseado) y
+   reconciliación con el estado deseado desde *t* + 1 h (riesgo, bróker y diario);
+5. `PortfolioValued` y heartbeat.
 
-**Reconstrucción:** el bróker simulado se rehace con `replay` del diario. Las liquidaciones
-procesadas salen de los `FundingSettled`.
+**Reconstrucción:** posiciones y efectivo, del estado del bróker simulado (JSON atómico con
+`fsync`). Liquidaciones procesadas, estado deseado y rebalanceos ya enviados, del diario.
+Cambio respecto al primer plan («el bróker se rehace con el diario»): un bróker real (PQ-52) es su
+propia fuente de verdad, así que el simulado se comporta igual.
 
 | Riesgo | Mitigación |
 |---|---|

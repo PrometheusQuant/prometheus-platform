@@ -15,6 +15,7 @@ mensuales una vez cerrado el mes.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
@@ -33,6 +34,13 @@ from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.notifiers import notifier_from_settings
 from prometheus_platform.adapters.parquet_bronze import ParquetBronzeStore
+from prometheus_platform.api.paper.compose import (
+    PaperPaths,
+    RunnerAlreadyRunningError,
+    build,
+    single_instance,
+)
+from prometheus_platform.api.paper.runner import RunnerConfig
 from prometheus_platform.data_platform.gold import GoldValidationError, build_gold, render_docs_page
 from prometheus_platform.data_platform.ingest import (
     IngestReport,
@@ -56,8 +64,6 @@ SOURCE_NAME = "binance_data_vision"
 
 GOLD_DOCS = Path("docs/arquitectura/modelo-gold.md")
 PAPER_DIR = "paper"
-KILL_SWITCH_FLAG = "KILL_SWITCH"
-JOURNAL_FILE = "diario.jsonl"
 
 
 def _month(value: str) -> date:
@@ -182,7 +188,7 @@ def _add_operations(commands: Commands) -> None:
     )
     run.add_argument("--once", action="store_true", help="un solo ciclo y termina")
     run.add_argument("--interval", type=float, default=60.0, help="segundos entre ciclos")
-    run.add_argument("--capital", type=Decimal, default=Decimal(1000), help="USD iniciales")
+    run.add_argument("--capital", type=_decimal_arg, default=Decimal(1000), help="USD iniciales")
     run.add_argument("--symbols", default=",".join(HYPOTHESES["H2"]))
     run.add_argument("--k", type=int, default=H2_PARAMS.k)
     run.add_argument("--theta", type=float, default=H2_PARAMS.theta)
@@ -476,39 +482,50 @@ def _report_inputs(data_dir: Path, out: Path) -> int:
 
 
 def _paper_run(args: argparse.Namespace, settings: Settings) -> int:
-    from prometheus_platform.api.paper.compose import PaperPaths, build  # noqa: PLC0415
-    from prometheus_platform.api.paper.runner import RunnerConfig  # noqa: PLC0415
-
-    symbols = tuple(s.strip().upper() for s in args.symbols.split(",") if s.strip())
+    symbols = tuple(dict.fromkeys(s.strip().upper() for s in args.symbols.split(",") if s.strip()))
+    paths = PaperPaths(settings.data_dir / PAPER_DIR)
     with http_client() as client:
         try:
+            if not math.isfinite(args.theta) or args.interval <= 0:
+                raise ValueError("--theta debe ser finito y --interval positivo")
             config = RunnerConfig(symbols=symbols, params=CarryParams(args.k, args.theta))
-            runner = build(
-                settings=settings,
-                config=config,
-                client=client,
-                clock=SystemClock(),
-                paths=PaperPaths(settings.data_dir / PAPER_DIR),
-                capital=args.capital,
-            )
-        except ValueError as exc:
+            with single_instance(paths):
+                runner = build(
+                    settings=settings,
+                    config=config,
+                    client=client,
+                    clock=SystemClock(),
+                    paths=paths,
+                    capital=args.capital,
+                )
+                print(f"runner de paper: bróker simulado, {','.join(symbols)}, {config.describe()}")
+                healthy = runner.run(
+                    interval_seconds=args.interval, max_ticks=1 if args.once else None
+                )
+        except (ValueError, RunnerAlreadyRunningError) as exc:
             print(f"ERROR {exc}", file=sys.stderr)
             return 2
-        print(f"runner de paper: bróker simulado, {','.join(symbols)}, k={args.k} θ={args.theta}")
-        try:
-            runner.run(interval_seconds=args.interval, max_ticks=1 if args.once else None)
         except KeyboardInterrupt:
-            print("runner detenido a mano (el estado queda en el diario)")
-    return 0
+            print("runner detenido a mano (el estado queda en el diario y en el bróker)")
+            return 0
+    return 0 if healthy else 1
+
+
+def _decimal_arg(text: str) -> Decimal:
+    try:
+        value = Decimal(text)
+    except ArithmeticError as exc:
+        raise argparse.ArgumentTypeError(f"no es un número: {text!r}") from exc
+    if not value.is_finite() or value <= 0:
+        raise argparse.ArgumentTypeError(f"debe ser positivo: {text!r}")
+    return value
 
 
 def _paper(args: argparse.Namespace, settings: Settings) -> int:
     if args.action == "run":
         return _paper_run(args, settings)
-    paper_dir = settings.data_dir / PAPER_DIR
-    switch = KillSwitch(
-        paper_dir / KILL_SWITCH_FLAG, SystemClock(), JsonlEventJournal(paper_dir / JOURNAL_FILE)
-    )
+    paths = PaperPaths(settings.data_dir / PAPER_DIR)
+    switch = KillSwitch(paths.kill_switch, SystemClock(), JsonlEventJournal(paths.journal))
     if args.action == "status":
         state = switch.state()
         print(

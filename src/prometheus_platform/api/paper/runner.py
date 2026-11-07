@@ -1,21 +1,29 @@
 """Runner del paper trading del carry H2 (PQ-54): raíz de composición del ciclo en vivo.
 
+**Por niveles, no por flancos.** Cada liquidación procesada deja en el diario un ``FundingSettled``
+con el **estado deseado** del símbolo (abierto o cerrado) y si toca rebalancear. Cada ciclo
+**reconcilia** las posiciones con ese estado. Así, un fallo entre dos patas, una excepción o una
+caída del proceso entre la decisión y las órdenes se corrigen solos en el ciclo siguiente: el
+estado deseado sigue en el diario y la reconciliación vuelve a intentarlo.
+
 Cada ciclo (``tick``), en este orden:
 
-1. ``KillSwitch.observe()``: si está activado, cancela y, más abajo, cierra todo sin abrir nada;
+1. ``KillSwitch.observe()``: si está activado, se cierra todo y no se abre nada;
 2. precios de mercado y valoración de la cartera;
 3. ``RiskManager.monitor`` y ``enforce`` (las violaciones graves activan el kill-switch);
-4. por símbolo, las liquidaciones nuevas: cobro o pago del funding, decisión con la **misma regla
-   que el backtest** (``domain/carry_rules``) y órdenes, cada una aprobada por ``pre_trade``;
+4. por símbolo:
+   - las liquidaciones nuevas: cobro o pago del funding y decisión con **la misma regla que el
+     backtest** (``domain/carry_rules``);
+   - la reconciliación con el estado deseado. Respeta la latencia de 1 h de la enmienda 1.1: la
+     orden de una decisión en *t* no se envía antes de *t + 1 h*;
 5. ``PortfolioValued`` en el diario y el heartbeat en disco.
 
 **Reinicio.** Las posiciones y el efectivo viven en el bróker (el simulado los guarda en disco).
-Las liquidaciones procesadas y la equity de inicio del día salen del diario (``replay``). El
-bróker aplica cada liquidación una sola vez (idempotente por ``funding_time``).
+Las liquidaciones procesadas, el estado deseado, los rebalanceos hechos y la equity de inicio del
+día salen del diario (``replay``).
 
 **Arranque en frío.** Sin liquidaciones previas en el diario, el estado de la histéresis se
-reconstruye recorriendo el historial reciente (``CarryStrategy.walk``) y se actúa sobre la última
-liquidación. Así el paper trading arranca en el mismo estado en que estaría el backtest.
+reconstruye recorriendo el historial reciente (``CarryStrategy.walk``).
 """
 
 from __future__ import annotations
@@ -24,7 +32,7 @@ import json
 import os
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -39,7 +47,7 @@ from prometheus_platform.domain.events import (
     RunnerStarted,
     SignalGenerated,
 )
-from prometheus_platform.domain.model import InstrumentId, Side, Signal
+from prometheus_platform.domain.model import FundingRate, InstrumentId, Side, Signal
 from prometheus_platform.domain.ports import Broker, Clock, EventJournal, LiveMarket
 from prometheus_platform.ops.logging import get_logger
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch, enforce
@@ -63,7 +71,10 @@ from prometheus_platform.strategies.carry import (
 )
 
 ZERO = Decimal(0)
+# Enmienda 1.1 del pre-registro: las órdenes se ejecutan en la vela que abre en t + 1 h.
+EXECUTION_DELAY = timedelta(hours=1)
 log = get_logger(component="paper_runner")
+Marks = dict[InstrumentId, Decimal]
 
 
 class MarketUnavailableError(RuntimeError):
@@ -78,18 +89,27 @@ class RunnerConfig:
     # Liquidaciones que se piden en cada ciclo: k para la señal y el resto para la histéresis.
     history_limit: int = 90
     # Margen bajo 1x al dimensionar: comisiones y redondeos no deben empujar el apalancamiento
-    # por encima del límite de riesgo (que es 1x en paper). Única diferencia de tamaño con el
-    # backtest; la paridad se exige en las decisiones.
+    # por encima del límite de riesgo (1x en paper). La paridad con el backtest se exige en las
+    # decisiones, no en el tamaño (ver el runbook).
     sizing_buffer: Decimal = Decimal("0.02")
     valuation_every: timedelta = timedelta(minutes=15)
 
     def __post_init__(self) -> None:
         if not self.symbols:
             raise ValueError("El runner necesita al menos un símbolo")
+        if len(set(self.symbols)) != len(self.symbols):
+            raise ValueError(f"Símbolos repetidos: {self.symbols}")
         if self.history_limit < self.params.k:
             raise ValueError("history_limit debe ser >= k")
         if not ZERO <= self.sizing_buffer < 1:
             raise ValueError("sizing_buffer debe estar en [0, 1)")
+
+    def describe(self) -> str:
+        p = self.params
+        return (
+            f"k={p.k} theta={p.theta} always_on={p.always_on} history_limit={self.history_limit} "
+            f"sizing_buffer={self.sizing_buffer} execution_delay={EXECUTION_DELAY}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,24 +123,58 @@ class TickReport:
 
 
 @dataclass
+class _Target:
+    """Estado deseado de un símbolo según la última liquidación procesada."""
+
+    funding_time: datetime
+    open: bool
+    previous_open: bool  # lo que valía antes de esta decisión: rige hasta t + 1 h
+
+    def desired(self, now: datetime) -> bool:
+        """Abierto o cerrado vigente en ``now``, con la latencia de la enmienda 1.1."""
+        return self.previous_open if now < self.funding_time + EXECUTION_DELAY else self.open
+
+    @property
+    def tag(self) -> str:
+        return f"{self.funding_time:%Y%m%dT%H%M}"
+
+
+@dataclass
 class _Recovered:
-    processed: dict[str, datetime]
-    day: date | None
-    day_start_equity: Decimal | None
+    processed: dict[str, datetime] = field(default_factory=dict)
+    targets: dict[str, _Target] = field(default_factory=dict)
+    # Rebalanceo pedido y aún no enviado, por símbolo: la hora de la decisión que lo pidió.
+    # Va aparte del estado deseado porque, con funding de 1 h, la liquidación siguiente llega
+    # antes de que pase la latencia y no debe borrarlo.
+    rebalance_due: dict[str, datetime] = field(default_factory=dict)
+    day: date | None = None
+    day_start_equity: Decimal | None = None
 
 
 def _recover(events: Iterable[DomainEvent]) -> _Recovered:
-    processed: dict[str, datetime] = {}
-    day: date | None = None
-    start: Decimal | None = None
+    state = _Recovered()
     for event in events:
         if isinstance(event, FundingSettled):
-            last = processed.get(event.symbol)
+            last = state.processed.get(event.symbol)
             if last is None or event.funding_time > last:
-                processed[event.symbol] = event.funding_time
-        elif isinstance(event, PortfolioValued) and event.occurred_at.date() != day:
-            day, start = event.occurred_at.date(), event.equity
-    return _Recovered(processed, day, start)
+                state.processed[event.symbol] = event.funding_time
+                state.targets[event.symbol] = _Target(
+                    event.funding_time, event.target_open, event.was_open
+                )
+                if event.rebalance:
+                    state.rebalance_due.setdefault(event.symbol, event.funding_time)
+                elif not event.target_open:
+                    state.rebalance_due.pop(event.symbol, None)
+        elif isinstance(event, OrderSubmitted):
+            symbol = symbol_of(event.instrument)
+            due = state.rebalance_due.get(symbol)
+            if due is not None and event.client_order_id.startswith(
+                f"{due:%Y%m%dT%H%M}-rebalanceo-"
+            ):
+                del state.rebalance_due[symbol]
+        elif isinstance(event, PortfolioValued) and event.occurred_at.date() != state.day:
+            state.day, state.day_start_equity = event.occurred_at.date(), event.equity
+    return state
 
 
 def _final_state(decisions: Iterable[CarryDecision], *, start: bool) -> bool:
@@ -167,25 +221,33 @@ class PaperRunner:
         self._clock = clock
         self._heartbeat = heartbeat_path
         self._strategy = CarryStrategy(config.symbols, config.params, config.strategy_id)
+        foreign = sorted({symbol_of(i) for i in broker.positions()} - set(config.symbols))
+        if foreign:  # no se podrían valorar ni cerrar, ni siquiera con el kill-switch
+            raise ValueError(
+                f"El bróker tiene posiciones en {', '.join(foreign)}, fuera de --symbols: "
+                "inclúyelos o ciérralos antes"
+            )
         recovered = _recover(journal.replay())
         self._processed = recovered.processed
+        self._targets = recovered.targets
+        self._rebalance_due = recovered.rebalance_due
         self._day = recovered.day
         self._day_start = recovered.day_start_equity
         self._last_valued: datetime | None = None
         self._imbalanced_since: dict[str, datetime] = {}
         self._warnings: set[str] = set()  # violaciones leves vigentes: se registran al aparecer
+        self._rejected: dict[str, str] = {}  # último rechazo por símbolo: se registra al cambiar
 
     # --- ciclo -----------------------------------------------------------------------------
 
     def start(self) -> None:
-        p = self.config.params
         self._journal.append(
             RunnerStarted(
                 occurred_at=self._clock.now(),
                 broker=self._broker.name,
                 strategy_id=self.config.strategy_id,
                 symbols=",".join(self.config.symbols),
-                params=f"k={p.k} theta={p.theta} always_on={p.always_on}",
+                params=self.config.describe(),
             )
         )
         log.info("paper_runner_started", broker=self._broker.name, symbols=self.config.symbols)
@@ -208,23 +270,21 @@ class PaperRunner:
             )
             killed = self._kill.active
 
+        problems: list[str] = []
         orders = 0
         if killed:
             orders += self._execute(flatten_orders(book), f"kill-{now:%Y%m%dT%H%M%S}", marks, now)
         settlements = 0
         for symbol in self.config.symbols:
-            try:
-                n_settled, n_orders = self._process_symbol(symbol, marks, now, trade=not killed)
-            except Exception as exc:  # un símbolo con problemas no detiene a los demás
-                log.error(
-                    "paper_symbol_skipped",
-                    symbol=symbol,
-                    error=type(exc).__name__,
-                    detail=str(exc)[:200],
+            # Por separado: sin liquidaciones nuevas (API de funding caída) se sigue
+            # reconciliando con el estado deseado que ya está en el diario, p. ej. una salida.
+            settlements += self._guarded(
+                symbol, "liquidar", problems, self._settle, symbol, marks, now, problems
+            )
+            if not killed:
+                orders += self._guarded(
+                    symbol, "reconciliar", problems, self._reconcile, symbol, marks, now
                 )
-                continue
-            settlements += n_settled
-            orders += n_orders
 
         equity = self._broker.equity(marks)
         if orders or settlements or self._valuation_due(now):
@@ -237,8 +297,9 @@ class PaperRunner:
                 )
             )
             self._last_valued = now
-        self._write_heartbeat(now, ok=True, detail="", killed=killed)
-        return TickReport(True, equity, killed, settlements, orders)
+        detail = "; ".join(problems)
+        self._write_heartbeat(now, ok=not problems, detail=detail, killed=killed)
+        return TickReport(not problems, equity, killed, settlements, orders, detail)
 
     def run(
         self,
@@ -246,14 +307,17 @@ class PaperRunner:
         interval_seconds: float,
         max_ticks: int | None = None,
         sleep: Callable[[float], None] = time.sleep,
-    ) -> int:
-        """Bucle del proceso. Un error inesperado se registra y el ciclo siguiente reintenta."""
+    ) -> bool:
+        """Bucle del proceso. Devuelve si el último ciclo fue sano (para ``--once``)."""
+        if interval_seconds <= 0:
+            raise ValueError(f"El intervalo debe ser positivo: {interval_seconds}")
         self.start()
-        ticks = 0
+        ticks, healthy = 0, False
         while max_ticks is None or ticks < max_ticks:
             try:
-                self.tick()
+                healthy = self.tick().ok
             except Exception as exc:  # el proceso no muere: el heartbeat refleja el fallo
+                healthy = False
                 log.error("paper_tick_failed", error=type(exc).__name__, detail=str(exc)[:200])
                 self._write_heartbeat(
                     self._clock.now(), ok=False, detail=type(exc).__name__, killed=self._kill.active
@@ -261,102 +325,194 @@ class PaperRunner:
             ticks += 1
             if max_ticks is None or ticks < max_ticks:
                 sleep(interval_seconds)
-        return ticks
+        return healthy
 
-    # --- por símbolo -----------------------------------------------------------------------
+    def _guarded(
+        self,
+        symbol: str,
+        step: str,
+        problems: list[str],
+        fn: Callable[..., int],
+        *args: object,
+    ) -> int:
+        """Un símbolo con problemas no detiene a los demás; el fallo queda en el heartbeat."""
+        try:
+            return fn(*args)
+        except Exception as exc:
+            problems.append(f"{symbol} ({step}): {type(exc).__name__}")
+            log.error(
+                "paper_symbol_failed",
+                symbol=symbol,
+                step=step,
+                error=type(exc).__name__,
+                detail=str(exc)[:200],
+            )
+            return 0
 
-    def _process_symbol(
-        self, symbol: str, marks: dict[InstrumentId, Decimal], now: datetime, *, trade: bool
-    ) -> tuple[int, int]:
-        """Liquidaciones nuevas del símbolo: cobro del funding, decisión y órdenes."""
+    # --- liquidaciones y decisiones --------------------------------------------------------
+
+    def _settle(self, symbol: str, marks: Marks, now: datetime, problems: list[str]) -> int:
+        """Liquidaciones nuevas del símbolo: cobro del funding y estado deseado en el diario."""
         history = self._market.recent_funding(symbol, self.config.history_limit)
         if not history:
             raise MarketUnavailableError(f"{symbol}: sin liquidaciones recientes")
         since = self._processed.get(symbol)
-        perp = perp_instrument(symbol)
-        is_open = self._broker.positions().get(perp, ZERO) != 0
+        target = self._targets.get(symbol)
         if since is None:  # arranque en frío: la histéresis se reconstruye con el historial
             walked = self._strategy.walk(history, since=None, is_open=False)
-            want_open = _final_state(walked, start=False)
+            start = _final_state(walked[:-1], start=False)
             decisions = walked[-1:]  # solo la última cuenta como procesada
         else:
-            decisions = self._strategy.walk(history, since=since, is_open=is_open)
-            want_open = _final_state(decisions, start=is_open)
-        if not decisions:
-            return 0, 0
-
+            if history[0].funding_time > since:
+                # Entre «since» y la ventana pudo haber liquidaciones que ya no se ven.
+                problems.append(f"{symbol}: hueco de liquidaciones desde {since.isoformat()}")
+                log.error("paper_funding_gap", symbol=symbol, since=since.isoformat())
+            start = target.open if target else False
+            decisions = self._strategy.walk(history, since=since, is_open=start)
         rates = {r.funding_time: r for r in history}
+        state = start
         for decision in decisions:
-            rate = rates[decision.funding_time]
-            amount = self._broker.settle_funding(perp, rate.funding_time, rate.rate, marks[perp])
-            self._journal.append(
-                FundingSettled(
-                    occurred_at=now,
-                    symbol=symbol,
-                    funding_time=rate.funding_time,
-                    rate=rate.rate,
-                    interval_hours=rate.interval_hours,
-                    amount=amount,
-                    action=decision.action.value,
-                    s_k="" if decision.s_k is None else repr(decision.s_k),
-                )
+            previous, state = state, _final_state([decision], start=state)
+            self._record(
+                symbol,
+                rates[decision.funding_time],
+                decision,
+                previous=previous,
+                state=state,
+                marks=marks,
+                now=now,
             )
-            self._processed[symbol] = rate.funding_time
-            log.info(
-                "paper_funding_settled",
-                symbol=symbol,
-                funding_time=rate.funding_time.isoformat(),
-                action=decision.action.value,
-                amount=str(amount),
-            )
-        if not trade:
-            return len(decisions), 0
-        return len(decisions), self._act(symbol, decisions[-1], want_open, marks, now)
+        return len(decisions)
 
-    def _act(
+    def _record(  # noqa: PLR0913 - una liquidación con su decisión y el estado que deja
         self,
         symbol: str,
-        last: CarryDecision,
-        want_open: bool,
-        marks: dict[InstrumentId, Decimal],
+        rate: FundingRate,
+        decision: CarryDecision,
+        *,
+        previous: bool,
+        state: bool,
+        marks: Marks,
         now: datetime,
-    ) -> int:
-        spot, perp = spot_instrument(symbol), perp_instrument(symbol)
-        leg = self._leg_target(marks) if want_open else ZERO
+    ) -> None:
+        perp = perp_instrument(symbol)
+        amount = self._broker.settle_funding(perp, rate.funding_time, rate.rate, marks[perp])
         held = self._broker.positions()
-        is_open = held.get(perp, ZERO) != 0
-        if want_open and is_open:
-            spot_value = held.get(spot, ZERO) * marks[spot]
-            perp_value = -held.get(perp, ZERO) * marks[perp]
-            rebalance = last.action is CarryAction.MANTENER and last.s_k is not None
-            if not (
-                rebalance and needs_rebalance(float(spot_value), float(perp_value), float(leg))
-            ):
-                return 0
-            label = "rebalanceo"
-        elif want_open == is_open:
-            return 0
-        else:
-            label = "entrada" if want_open else "salida"
+        hedged = held.get(spot_instrument(symbol), ZERO) > 0 > held.get(perp, ZERO)
+        rebalance = (  # enmienda 2: solo con la posición abierta (como el backtest)
+            state
+            and previous
+            and hedged
+            and decision.action is CarryAction.MANTENER
+            and decision.s_k is not None
+            and self._drifted(symbol, marks)
+        )
+        self._journal.append(
+            FundingSettled(
+                occurred_at=now,
+                symbol=symbol,
+                funding_time=rate.funding_time,
+                rate=rate.rate,
+                interval_hours=rate.interval_hours,
+                amount=amount,
+                action=decision.action.value,
+                s_k="" if decision.s_k is None else repr(decision.s_k),
+                target_open=state,
+                was_open=previous,
+                rebalance=rebalance,
+            )
+        )
+        self._processed[symbol] = rate.funding_time
+        self._targets[symbol] = _Target(rate.funding_time, state, previous)
+        if rebalance:  # el pendiente más antiguo manda: uno nuevo no lo aplaza
+            self._rebalance_due.setdefault(symbol, rate.funding_time)
+        elif not state:
+            self._rebalance_due.pop(symbol, None)
+        log.info(
+            "paper_funding_settled",
+            symbol=symbol,
+            funding_time=rate.funding_time.isoformat(),
+            action=decision.action.value,
+            target_open=state,
+            rebalance=rebalance,
+            amount=str(amount),
+        )
 
-        targets = {spot: leg / marks[spot], perp: -leg / marks[perp]}
-        orders = []
-        for instrument, target in targets.items():
-            delta = target - held.get(instrument, ZERO)
-            if delta:
-                orders.append(
-                    ProposedOrder(
-                        strategy_id=self.config.strategy_id,
-                        instrument=instrument,
-                        symbol=symbol,
-                        leg=Leg.PERP if is_perp(instrument) else Leg.SPOT,
-                        side=Side.BUY if delta > 0 else Side.SELL,
-                        quantity=abs(delta),
-                        price=marks[instrument],
-                    )
-                )
-        if not orders:
+    def _drifted(self, symbol: str, marks: Marks) -> bool:
+        """Enmienda 2: alguna pata se desvía más de un 10 % de su objetivo."""
+        held = self._broker.positions()
+        spot, perp = spot_instrument(symbol), perp_instrument(symbol)
+        spot_value = held.get(spot, ZERO) * marks[spot]
+        perp_value = -held.get(perp, ZERO) * marks[perp]
+        leg = self._leg_target(marks)
+        return needs_rebalance(float(spot_value), float(perp_value), float(leg))
+
+    # --- reconciliación --------------------------------------------------------------------
+
+    def _reconcile(self, symbol: str, marks: Marks, now: datetime) -> int:
+        """Lleva las posiciones del símbolo al estado deseado vigente."""
+        target = self._targets.get(symbol)
+        if target is None:
             return 0
+        spot, perp = spot_instrument(symbol), perp_instrument(symbol)
+        held = self._broker.positions()
+        q_spot, q_perp = held.get(spot, ZERO), held.get(perp, ZERO)
+        due = self._rebalance_due.get(symbol)
+        if not target.desired(now):
+            if not (q_spot or q_perp):
+                return 0
+            label, tag, leg = "salida", target.tag, ZERO
+        elif not self._hedged(q_spot * marks[spot], q_perp * marks[perp]):
+            # Sin posición, con una pata sola, con un signo cambiado o desbalanceada (p. ej. un
+            # rebalanceo que se quedó a medias): las dos patas al objetivo.
+            label = "entrada" if not (q_spot or q_perp) else "reparacion"
+            tag, leg = target.tag, self._leg_target(marks)
+        elif due is not None and now >= due + EXECUTION_DELAY:
+            label, tag, leg = "rebalanceo", f"{due:%Y%m%dT%H%M}", self._leg_target(marks)
+        else:
+            return 0
+        targets = {spot: leg / marks[spot], perp: -leg / marks[perp]}
+        orders = [
+            ProposedOrder(
+                strategy_id=self.config.strategy_id,
+                instrument=instrument,
+                symbol=symbol,
+                leg=Leg.PERP if is_perp(instrument) else Leg.SPOT,
+                side=Side.BUY if delta > 0 else Side.SELL,
+                quantity=abs(delta),
+                price=marks[instrument],
+            )
+            for instrument, goal in targets.items()
+            if (delta := goal - held.get(instrument, ZERO))
+        ]
+        sent = self._execute(orders, f"{tag}-{label}", marks, now, targets=targets)
+        if sent and label == "rebalanceo":
+            del self._rebalance_due[symbol]
+        return sent
+
+    def _hedged(self, spot_value: Decimal, perp_value: Decimal) -> bool:
+        """Spot largo, perpetuo corto y desbalance por debajo de la mitad del límite de riesgo.
+
+        La mitad deja margen: se repara antes de que ``monitor`` lo cuente como violación.
+        """
+        if not spot_value > 0 > perp_value:
+            return False
+        imbalance = abs(spot_value + perp_value) / max(spot_value, -perp_value)
+        return imbalance <= self._risk.limits.max_hedge_imbalance / 2
+
+    def _leg_target(self, marks: Marks) -> Decimal:
+        """Nocional por pata: equity / n / 2 (1x siempre, enmienda 2), acotado por los límites.
+
+        Sin la cota, al crecer la equity las entradas chocarían con el nocional máximo y se
+        rechazarían siempre. El margen ``sizing_buffer`` deja sitio a comisiones y redondeos.
+        """
+        n = len(self.config.symbols)
+        limits = self._risk.limits
+        equity = self._broker.equity(marks)
+        share = min(equity / n, limits.max_notional_symbol, limits.max_notional_total / n)
+        return share / 2 * (1 - self.config.sizing_buffer)
+
+    def _signal(self, targets: dict[InstrumentId, Decimal], marks: Marks, now: datetime) -> None:
         equity = self._broker.equity(marks)
         for instrument, target in targets.items():
             weight = target * marks[instrument] / equity if equity > 0 else ZERO
@@ -371,14 +527,6 @@ class PaperRunner:
                     ),
                 )
             )
-        log.info("paper_decision", symbol=symbol, label=label, s_k=last.s_k)
-        return self._execute(orders, f"{last.funding_time:%Y%m%dT%H%M}-{label}", marks, now)
-
-    def _leg_target(self, marks: dict[InstrumentId, Decimal]) -> Decimal:
-        """Nocional por pata: equity / n símbolos / 2 (1x, enmienda 2), menos el margen."""
-        equity = self._broker.equity(marks)
-        share = equity / len(self.config.symbols) / 2
-        return share * (1 - self.config.sizing_buffer)
 
     # --- órdenes ---------------------------------------------------------------------------
 
@@ -386,28 +534,42 @@ class PaperRunner:
         self,
         orders: Sequence[ProposedOrder],
         tag: str,
-        marks: dict[InstrumentId, Decimal],
+        marks: Marks,
         now: datetime,
+        *,
+        targets: dict[InstrumentId, Decimal] | None = None,
     ) -> int:
-        """Aprueba **todas** las patas antes de enviar ninguna: una pata sola es un desbalance."""
+        """Aprueba **todas** las patas antes de enviar ninguna: una pata sola es un desbalance.
+
+        Si una pata falla al enviarse, la otra queda sola. La reconciliación del ciclo siguiente
+        la completa o la cierra, dentro de la gracia de ``monitor``.
+        """
         if not orders:
             return 0
+        symbol = orders[0].symbol
         book = self._book(marks, now)
         for order in orders:
             decision = self._risk.pre_trade(order, book, kill_switch_active=self._kill.active)
             if not decision.approved:
                 detail = f"{order.instrument.symbol} {order.side.value}: {decision.detail}"
-                log.warning("paper_order_rejected", rule=decision.rule, detail=detail)
-                self._journal.append(
-                    RiskLimitBreached(occurred_at=now, rule=decision.rule, detail=detail)
-                )
+                if self._rejected.get(symbol) != decision.rule:  # una línea por rechazo nuevo
+                    log.warning("paper_order_rejected", rule=decision.rule, detail=detail)
+                    self._journal.append(
+                        RiskLimitBreached(occurred_at=now, rule=decision.rule, detail=detail)
+                    )
+                    self._rejected[symbol] = decision.rule
                 return 0
             # La pata aprobada cuenta como ejecutada para aprobar la siguiente: ``pre_trade`` usa
             # las órdenes pendientes para saber si una orden reduce, no para sumar exposición.
             book = _assume_filled(book, order)
+        self._rejected.pop(symbol, None)
+        if targets is not None:
+            self._signal(targets, marks, now)
+        log.info("paper_orders", symbol=symbol, tag=tag, orders=len(orders))
         sent = 0
         for order in orders:
-            client_order_id = f"{tag}-{order.instrument.symbol}"
+            # Único aunque la misma decisión se ejecute dos veces (reintento o rearme).
+            client_order_id = f"{tag}-{now:%Y%m%dT%H%M%S}-{order.instrument.symbol}"
             self._journal.append(
                 OrderSubmitted(
                     occurred_at=now,
@@ -425,8 +587,8 @@ class PaperRunner:
 
     # --- estado ----------------------------------------------------------------------------
 
-    def _marks(self) -> dict[InstrumentId, Decimal]:
-        marks: dict[InstrumentId, Decimal] = {}
+    def _marks(self) -> Marks:
+        marks: Marks = {}
         for symbol in self.config.symbols:
             try:
                 spot_price, mark = self._market.prices(symbol)
@@ -441,22 +603,18 @@ class PaperRunner:
                 marks[instrument] = price
         return marks
 
-    def _book(self, marks: dict[InstrumentId, Decimal], now: datetime) -> PortfolioSnapshot:
+    def _book(self, marks: Marks, now: datetime) -> PortfolioSnapshot:
         equity = self._broker.equity(marks)
-        positions = []
-        for instrument, quantity in self._broker.positions().items():
-            mark = marks.get(instrument)
-            if mark is None:  # posición fuera del universo configurado: no se puede valorar
-                raise MarketUnavailableError(f"{instrument.symbol}: posición sin precio")
-            positions.append(
-                Position(
-                    instrument=instrument,
-                    symbol=symbol_of(instrument),
-                    leg=Leg.PERP if is_perp(instrument) else Leg.SPOT,
-                    quantity=quantity,
-                    mark_price=mark,
-                )
+        positions = [
+            Position(
+                instrument=instrument,
+                symbol=symbol_of(instrument),
+                leg=Leg.PERP if is_perp(instrument) else Leg.SPOT,
+                quantity=quantity,
+                mark_price=marks[instrument],
             )
+            for instrument, quantity in self._broker.positions().items()
+        ]
         return PortfolioSnapshot(
             equity=equity,
             start_of_day_equity=self._day_start or equity,
