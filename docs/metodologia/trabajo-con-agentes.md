@@ -12,6 +12,10 @@ Esta página explica **cómo arrancar** y **cómo trabajar un ticket** de princi
 
 ## 1. Preparar la máquina (una vez)
 
+**Atajo para Boris:** el [prompt inicial para Codex](prompt-inicial-codex.md) hace todo esto y lo
+que sigue, fase por fase.
+
+
 Requisitos: Linux o WSL2 con Ubuntu, `git`, [`uv`](https://docs.astral.sh/uv/) 0.13 o superior,
 [`gh`](https://cli.github.com/) con sesión iniciada, y Codex CLI instalado según la documentación
 oficial de OpenAI. Docker Desktop es opcional (solo para `make e2e`).
