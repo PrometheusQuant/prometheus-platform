@@ -170,5 +170,6 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
   Es una latencia de 0 h en lugar de 1 h: el backtest opera una hora antes de lo pre-registrado.
 - **Impacto:** por medir. Hay que volver a ejecutar la evaluación, y esa ejecución cuenta en N
   (pre-registro §10).
-- **Solución pendiente:** se corrige junto con KE-014, en la misma reejecución (PQ-50 o la que
-  pida PQ-17). El runner de paper (PQ-54) ya aplica la latencia de 1 h.
+- **Decisión (titular, 2026-11-07):** el backtest no se toca en PQ-54. Se corrige junto con KE-014,
+  en la misma reejecución (PQ-50 o la que pida PQ-17), que cuenta en N. El runner de paper
+  (PQ-54) ya aplica la latencia de 1 h.
