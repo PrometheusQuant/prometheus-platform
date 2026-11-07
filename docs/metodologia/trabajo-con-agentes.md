@@ -24,6 +24,24 @@ cp .env.example .env       # tu configuración local; nunca se sube a git
 make check                 # debe pasar entero antes de empezar a programar
 ```
 
+### Conectar Codex con Jira
+
+Codex CLI puede leer y actualizar los tickets con el
+[servidor MCP oficial de Atlassian](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/):
+
+```bash
+codex mcp add atlassian --url https://mcp.atlassian.com/v2/mcp
+codex mcp login atlassian     # abre el navegador: inicia sesión con tu cuenta de Jira y autoriza
+codex mcp list                # debe mostrar «atlassian» autenticado
+```
+
+El endpoint `v2` es el que Atlassian recomienda en su
+[guía de migración](https://support.atlassian.com/atlassian-ai-gateway/docs/how-to-upgrade-from-atlassian-rovo-mcp-v1-to-atlassian-rovo-mcp-v2/).
+Si tu versión de Codex no lo acepta, usa el de la guía de inicio (`…/v1/mcp/authv2`).
+
+Prueba: pídele a Codex «lista mis tickets del sprint activo del proyecto PQ». Si no responde, la
+autorización de OAuth no se completó: repite `codex mcp login atlassian`.
+
 ## 2. Reconstruir el lakehouse (una vez, y cuando haga falta)
 
 `data/` no está en git. Los **tests no lo necesitan**: usan datos sintéticos. Sí lo necesitas para
@@ -52,21 +70,18 @@ También se puede hacer desde la interfaz de Dagster (`make orquestador`).
 
 ## 3. Trabajar un ticket con Codex
 
-1. **Toma un ticket de tu carril** en Jira (asignado a ti, en el sprint activo) y muévelo a
-   *In Progress*.
+1. **Toma un ticket de tu carril** (asignado a ti, en el sprint activo). Puedes pedírselo a Codex:
+   «lee PQ-<n> y muévelo a In Progress».
 2. **Crea la rama** desde `develop` actualizado:
    ```bash
    git switch develop && git pull
    git switch -c feature/PQ-<n>-descripcion-corta
    ```
-3. **Arranca Codex en la raíz del repo** y dale el ticket con este molde (Codex no ve Jira):
+3. **Arranca Codex en la raíz del repo** y dale el ticket con este molde:
 
    ```text
    Lee AGENTS.md antes de nada. Trabajas en el ticket PQ-<n> del carril de Boris.
-
-   Objetivo: <copia el resumen del ticket>
-   Criterios de aceptación:
-   <copia los criterios del ticket>
+   Lee el ticket en Jira (proyecto PQ) y cumple sus criterios de aceptación.
 
    Reglas: rama actual feature/PQ-<n>-…; commits Conventional Commits con la clave PQ-<n>;
    si es research, primero el pre-registro y nunca el holdout; si la historia es de 5 puntos o
@@ -78,7 +93,8 @@ También se puede hacer desde la interfaz de Dagster (`make orquestador`).
 4. **Revisa lo que hizo Codex** antes de commitear. Tú eres el responsable del PR, no el agente.
 5. **Abre el PR** a `develop` con la plantilla (`gh pr create`). Pide la revisión del carril de
    David. **No fusiones tu propio PR**: la regla de GitHub exige 1 aprobación y la CI en verde.
-6. Con la aprobación y la CI en verde, fusiona con **squash** y mueve el ticket a *Done*.
+6. Con la aprobación y la CI en verde, fusiona con **squash** y mueve el ticket a *Done* (Codex
+   puede hacerlo por ti).
 
 ## 4. Reglas que no se negocian (resumen de `AGENTS.md`)
 

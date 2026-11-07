@@ -118,7 +118,9 @@ Adaptadas de [addyosmani/agent-skills](https://github.com/addyosmani/agent-skill
 - **Ensayos:** cada ejecución de research cuenta en N. Mientras se termina el registro compartido
   (PQ-112), anota cada ejecución en la descripción del PR (hipótesis, configuración, commit y
   métricas) para que se pueda sumar a N.
-- **Jira:** Codex no tiene acceso a Jira. Boris lee el ticket y pega en la tarea sus criterios de
-  aceptación. La clave `PQ-<n>` va en la rama, en el commit y en el título del PR.
+- **Jira:** Codex se conecta a Jira con el servidor MCP oficial de Atlassian (pasos en la guía de
+  trabajo con agentes). Antes de programar, lee el ticket; al empezar, muévelo a *In Progress* y,
+  al fusionar el PR, a *Done*. Proyecto `PQ`, sitio `prometheusquant.atlassian.net`. La clave
+  `PQ-<n>` va en la rama, en el commit y en el título del PR.
 - **No inventes cifras.** Todo número en la documentación sale de un artefacto o de un comando.
   Lo que no se pueda verificar se marca «por verificar».
