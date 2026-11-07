@@ -77,6 +77,10 @@ conflictos. El responsable de cada ticket es el asignado en Jira.
 - **Pre-registro antes de mirar resultados** (`docs/estrategias/<n>/pre-registro.md`). Cambiarlo
   después exige una enmienda fechada y cuenta como ensayos nuevos en N.
 - **Cada ejecución cuenta en N** (Deflated Sharpe). No se descartan corridas «malas».
+- **Registro de ensayos compartido** (`docs/estrategias/ensayos/<carril>.jsonl`, PQ-112). Los
+  comandos `pq research *` escriben sus filas solos; N es la suma de todos los carriles
+  (`pq research registro resumen`). **Un PR con resultados nuevos sin sus filas no se fusiona.**
+  Las filas no se editan ni se borran.
 - **Costes reales siempre**: comisiones VIP0 y slippage (`research/backtest.py`, `CostModel`).
 - **Point-in-time**: ninguna feature usa datos posteriores a su `knowledge_time`.
 - **El holdout del carry (2024-07-01 → 2026-09-30) está cerrado** hasta que PQ-17 verifique las
@@ -115,9 +119,8 @@ Adaptadas de [addyosmani/agent-skills](https://github.com/addyosmani/agent-skill
 - **Datos:** `data/` no está en git. Reconstruye el lakehouse en tu máquina siguiendo
   [`docs/metodologia/trabajo-con-agentes.md`](docs/metodologia/trabajo-con-agentes.md). Los tests no
   necesitan `data/`: usan datos sintéticos.
-- **Ensayos:** cada ejecución de research cuenta en N. Mientras se termina el registro compartido
-  (PQ-112), anota cada ejecución en la descripción del PR (hipótesis, configuración, commit y
-  métricas) para que se pueda sumar a N.
+- **Ensayos:** pon `PQ_RESEARCH_LANE=boris` en tu `.env`. Cada `pq research *` agrega sus filas a
+  `docs/estrategias/ensayos/boris.jsonl` y esas filas van en el mismo PR que los resultados.
 - **Jira:** Codex se conecta a Jira con el servidor MCP oficial de Atlassian (pasos en la guía de
   trabajo con agentes). Antes de programar, lee el ticket; al empezar, muévelo a *In Progress* y,
   al fusionar el PR, a *Done*. Proyecto `PQ`, sitio `prometheusquant.atlassian.net`. La clave

@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     risk_max_hedge_imbalance: float = Field(default=0.15, gt=0, lt=1, allow_inf_nan=False)
     risk_imbalance_grace_seconds: int = Field(default=300, ge=0)
 
+    # Registro de ensayos compartido (PQ-112): cada carril escribe en su archivo.
+    research_lane: str = "david"
+    research_author: str = ""  # vacío: se toma de `git config user.name`
+    research_ledger_dir: Path = Path("docs/estrategias/ensayos")
+
     @field_validator("alert_timezone")
     @classmethod
     def _check_timezone(cls, value: str) -> str:
@@ -66,6 +71,15 @@ class Settings(BaseSettings):
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise ValueError(f"Zona horaria desconocida: {value!r} (usa un nombre IANA)") from exc
+        return value
+
+    @field_validator("research_lane")
+    @classmethod
+    def _check_lane(cls, value: str) -> str:
+        if not value.isidentifier():
+            raise ValueError(
+                f"PQ_RESEARCH_LANE debe ser un nombre simple (p. ej. david): {value!r}"
+            )
         return value
 
     @property

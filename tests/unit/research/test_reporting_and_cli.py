@@ -6,6 +6,7 @@ import polars as pl
 import pytest
 import structlog
 
+from prometheus_platform.adapters.trial_ledger import read_rows
 from prometheus_platform.api import cli
 from prometheus_platform.research import carry_evaluation as ce
 from prometheus_platform.research.reporting import plot_equity, write_outputs
@@ -50,6 +51,13 @@ def test_cli_runs_the_evaluation_and_writes_the_report(
     assert returns.width == 10  # fecha + 9 configuraciones
     assert (tmp_path / "img/h1-curvas.png").stat().st_size > 10_000
     assert (tmp_path / "lake/mlflow/mlflow.db").exists()
+
+    # PQ-112: el comando dejó una fila por ensayo en el registro compartido, y N sale de ahí.
+    rows = list(read_rows(tmp_path / "docs/estrategias/ensayos"))
+    assert len(rows) == 9
+    assert {r.familia for r in rows} == {"carry"}
+    assert all(r.cuenta_en_n for r in rows)
+    assert rows[0].comando.startswith("pq research carry --hypothesis H1")
 
 
 def test_reporting_helpers(market: HourlyFactory, tmp_path: Path) -> None:

@@ -103,8 +103,9 @@ También se puede hacer desde la interfaz de Dagster (`make orquestador`).
 ## 4. Reglas que no se negocian (resumen de `AGENTS.md`)
 
 - **Pre-registro antes de mirar resultados.** El holdout se abre una sola vez.
-- **Cada ejecución de research cuenta en N.** Anótala: hipótesis, configuración, commit y métricas,
-  en la descripción del PR. Cuando exista el registro compartido (PQ-112), en ese registro.
+- **Cada ejecución de research cuenta en N.** Con `PQ_RESEARCH_LANE=boris` en tu `.env`, los
+  comandos `pq research *` escriben sus filas en `docs/estrategias/ensayos/boris.jsonl`. Súbelas en
+  el mismo PR que los resultados ([registro de ensayos](../estrategias/registro-de-ensayos.md)).
 - **Costes reales** (`CostModel`) y **point-in-time** (`knowledge_time`) siempre.
 - **Secretos** solo en tu `.env`. Nunca en el código, en los logs ni en el chat con el agente.
 - **No toques el núcleo del otro carril.** Usa los puertos de `domain/ports.py`. Si te falta algo,
