@@ -164,8 +164,10 @@ REGLAS QUE NO SE NEGOCIAN
   * El pre-registro va ANTES de ver un solo resultado (docs/estrategias/<n>/pre-registro.md).
   * Si cambia después: enmienda fechada, y cuenta como ensayos nuevos.
   * CADA ejecución de un backtest o una evaluación cuenta en N, también las de depuración
-    («pruebas de humo»). Mientras no exista el registro compartido (PQ-112), lista cada
-    ejecución en la descripción del PR: fecha, hipótesis, configuración, commit y métricas.
+    («pruebas de humo»). Con PQ_RESEARCH_LANE=boris en tu .env, cada `pq research *` escribe
+    sus filas en docs/estrategias/ensayos/boris.jsonl: súbelas en el mismo PR que los
+    resultados, sin editarlas ni borrarlas. Una investigación tuya que no use `pq research`
+    agrega sus filas con el mismo formato (docs/estrategias/registro-de-ensayos.md).
   * Costes reales siempre (CostModel en research/backtest.py: comisiones VIP0 y slippage).
   * Point-in-time: ninguna variable usa datos posteriores a su knowledge_time.
   * El holdout (2024-07-01 → 2026-09-30) NO se toca. Las constantes están en
