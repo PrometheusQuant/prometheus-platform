@@ -7,15 +7,16 @@ paper trading o los tests, y son intercambiables entre sí (LSP).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
-from datetime import datetime
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
 from prometheus_platform.domain.alerts import Alert
 from prometheus_platform.domain.datasets import ArchiveRef, RawArchive
 from prometheus_platform.domain.events import DomainEvent, OrderFilled
-from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId, Side
+from prometheus_platform.domain.market import MarketSnapshot
+from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId, Side, Signal
 
 
 class Clock(Protocol):
@@ -86,6 +87,29 @@ class Notifier(Protocol):
     """
 
     def notify(self, alert: Alert) -> bool: ...
+
+
+class Strategy(Protocol):
+    """Contrato de una estrategia (PQ-113, ADR-0011): instantánea point-in-time → señales.
+
+    - Recibe solo una ``MarketSnapshot``: no ve la ejecución, el riesgo, el reloj ni la red.
+    - Devuelve ``Signal`` (peso objetivo por instrumento, en [-1, 1]). El tamaño y las órdenes los
+      deciden el runner, ``portfolio_risk`` y el bróker.
+    - Puede tener estado (por ejemplo, la histéresis del carry), pero debe ser **determinista**: la
+      misma secuencia de instantáneas da las mismas señales.
+    - ``lookback`` es cuánta historia necesita cada instantánea. En paper solo recibe esa ventana,
+      y la prueba de contrato verifica que con ella decide lo mismo que con todo el pasado.
+    """
+
+    strategy_id: str
+
+    @property
+    def instruments(self) -> Sequence[InstrumentId]: ...
+
+    @property
+    def lookback(self) -> timedelta: ...
+
+    def on_snapshot(self, snapshot: MarketSnapshot) -> list[Signal]: ...
 
 
 class LiveMarket(Protocol):
