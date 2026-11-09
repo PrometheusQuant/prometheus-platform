@@ -85,6 +85,7 @@ nav:
       - metodologia/README.md
       - Definición de Listo y Terminado: metodologia/definicion-de-listo-y-terminado.md
       - Trabajo en dos carriles con agentes: metodologia/trabajo-con-agentes.md
+      - Prompt inicial para Codex: metodologia/prompt-inicial-codex.md
   - Estrategias:
       - estrategias/README.md
       - "Carry · pre-registro": estrategias/01-carry/pre-registro.md
