@@ -15,10 +15,12 @@ mensuales una vez cerrado el mes.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,13 @@ from prometheus_platform.adapters.trial_ledger import (
     git_author,
     read_rows,
 )
+from prometheus_platform.api.paper.compose import (
+    PaperPaths,
+    RunnerAlreadyRunningError,
+    build,
+    single_instance,
+)
+from prometheus_platform.api.paper.runner import RunnerConfig
 from prometheus_platform.data_platform.gold import GoldValidationError, build_gold, render_docs_page
 from prometheus_platform.data_platform.ingest import (
     IngestReport,
@@ -48,19 +57,20 @@ from prometheus_platform.data_platform.ingest import (
 )
 from prometheus_platform.data_platform.silver import SilverValidationError, build_symbol
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
+from prometheus_platform.domain.carry_rules import CarryParams
 from prometheus_platform.domain.datasets import ArchiveRef, DatasetKind, Granularity, Market
 from prometheus_platform.domain.ports import Notifier
 from prometheus_platform.ops.logging import configure_logging
 from prometheus_platform.ops.settings import Settings, load_settings
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch
+from prometheus_platform.research.carry_evaluation import HYPOTHESES
+from prometheus_platform.strategies.carry import H2_PARAMS
 
 SOURCE_NAME = "binance_data_vision"
 
 
 GOLD_DOCS = Path("docs/arquitectura/modelo-gold.md")
 PAPER_DIR = "paper"
-KILL_SWITCH_FLAG = "KILL_SWITCH"
-JOURNAL_FILE = "diario.jsonl"
 
 
 def _month(value: str) -> date:
@@ -184,6 +194,15 @@ def _add_operations(commands: Commands) -> None:
     kill.add_argument("--confirm", action="store_true", help="obligatorio con --reset")
     kill.add_argument("--by", default="", help="quién rearma (obligatorio con --reset)")
     paper_actions.add_parser("status", help="Estado del kill-switch")
+    run = paper_actions.add_parser(
+        "run", help="Runner del carry H2 con el bróker simulado y datos en vivo (PQ-54)"
+    )
+    run.add_argument("--once", action="store_true", help="un solo ciclo y termina")
+    run.add_argument("--interval", type=float, default=60.0, help="segundos entre ciclos")
+    run.add_argument("--capital", type=_decimal_arg, default=Decimal(1000), help="USD iniciales")
+    run.add_argument("--symbols", default=",".join(HYPOTHESES["H2"]))
+    run.add_argument("--k", type=int, default=H2_PARAMS.k)
+    run.add_argument("--theta", type=float, default=H2_PARAMS.theta)
 
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
@@ -526,11 +545,51 @@ def _report_inputs(data_dir: Path, out: Path) -> int:
     return 0
 
 
-def _paper(args: argparse.Namespace, data_dir: Path) -> int:
-    paper_dir = data_dir / PAPER_DIR
-    switch = KillSwitch(
-        paper_dir / KILL_SWITCH_FLAG, SystemClock(), JsonlEventJournal(paper_dir / JOURNAL_FILE)
-    )
+def _paper_run(args: argparse.Namespace, settings: Settings) -> int:
+    symbols = tuple(dict.fromkeys(s.strip().upper() for s in args.symbols.split(",") if s.strip()))
+    paths = PaperPaths(settings.data_dir / PAPER_DIR)
+    with http_client() as client:
+        try:
+            if not math.isfinite(args.theta) or args.interval <= 0:
+                raise ValueError("--theta debe ser finito y --interval positivo")
+            config = RunnerConfig(symbols=symbols, params=CarryParams(args.k, args.theta))
+            with single_instance(paths):
+                runner = build(
+                    settings=settings,
+                    config=config,
+                    client=client,
+                    clock=SystemClock(),
+                    paths=paths,
+                    capital=args.capital,
+                )
+                print(f"runner de paper: bróker simulado, {','.join(symbols)}, {config.describe()}")
+                healthy = runner.run(
+                    interval_seconds=args.interval, max_ticks=1 if args.once else None
+                )
+        except (ValueError, RunnerAlreadyRunningError) as exc:
+            print(f"ERROR {exc}", file=sys.stderr)
+            return 2
+        except KeyboardInterrupt:
+            print("runner detenido a mano (el estado queda en el diario y en el bróker)")
+            return 0
+    return 0 if healthy else 1
+
+
+def _decimal_arg(text: str) -> Decimal:
+    try:
+        value = Decimal(text)
+    except ArithmeticError as exc:
+        raise argparse.ArgumentTypeError(f"no es un número: {text!r}") from exc
+    if not value.is_finite() or value <= 0:
+        raise argparse.ArgumentTypeError(f"debe ser positivo: {text!r}")
+    return value
+
+
+def _paper(args: argparse.Namespace, settings: Settings) -> int:
+    if args.action == "run":
+        return _paper_run(args, settings)
+    paths = PaperPaths(settings.data_dir / PAPER_DIR)
+    switch = KillSwitch(paths.kill_switch, SystemClock(), JsonlEventJournal(paths.journal))
     if args.action == "status":
         state = switch.state()
         print(
@@ -603,7 +662,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "gold": lambda: _gold(args.action, data_dir, getattr(args, "out", GOLD_DOCS)),
         "research": lambda: _research(args, settings, argv),
         "report": lambda: _report_inputs(data_dir, args.out),
-        "paper": lambda: _paper(args, data_dir),
+        "paper": lambda: _paper(args, settings),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
     }
     return handlers[args.command]()

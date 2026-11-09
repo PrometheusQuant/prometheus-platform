@@ -22,6 +22,8 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-012 | Dependencias de desarrollo con CVE (`filelock`, `virtualenv`) | Resuelto |
 | KE-013 | Los tests leían el `.env` real de quien los ejecuta | Resuelto |
 | KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Abierto |
+| KE-015 | `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS | Workaround |
+| KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Abierto |
 
 ---
 
@@ -137,3 +139,37 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
     al preparar la evaluación del holdout.
   - Sea como sea, la evaluación del holdout debe contar esa liquidación como suya, y la del
     desarrollo no.
+
+### KE-015: `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS
+
+- **Síntoma:** `pq paper run` o `pq ingest --source api` fallan con
+  `[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate`.
+  `curl` también falla. En otra red, el mismo comando funciona.
+- **Causa:** un cortafuegos de la red (visto el 2026-11-06: Fortinet) intercepta el TLS hacia
+  `*.binance.com` y presenta un certificado firmado por su propia CA, que no está en el almacén de
+  `certifi`. Se confirma mirando el emisor:
+  `openssl s_client -connect api.binance.com:443 -servername api.binance.com </dev/null | openssl x509 -noout -issuer`.
+  Si el emisor no es una CA pública, la red está inspeccionando el tráfico. Otros dominios (p. ej.
+  `github.com`) pueden no estar interceptados.
+- **Workaround:** **nunca desactivar la verificación de certificados.**
+  - Lo más simple: usar otra red (casa, datos móviles) o el servidor compartido (PQ-115).
+  - Si la red es de confianza y su CA está disponible: `export SSL_CERT_FILE=/ruta/ca-de-la-red.pem`.
+    `httpx` 0.28 la usa en lugar de `certifi` (`httpx/_config.py`). Sin esa variable, nada cambia.
+  - Los tests no se ven afectados: no salen a la red (`httpx.MockTransport`).
+
+### KE-016: el backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h
+
+- **Síntoma:** lo encontró la revisión adversarial de PQ-54 al comparar el runner con el backtest.
+  La enmienda 1.1 del pre-registro dice que las órdenes se ejecutan al `open` de la vela que
+  **abre en t + 1 h**. Con un precio que sube 1 por hora, una decisión a las 00:00 se ejecuta al
+  `open` de la vela de las 00:00 (124) y no al de la de las 01:00 (125).
+- **Causa:** `simulate_symbol` decide al cierre de la vela que termina en *t* y marca la orden
+  como pendiente. La ejecuta en la iteración siguiente, que es la vela que **abre** en *t*. Le
+  falta esperar una vela más.
+- **Qué no es:** no es look-ahead. La tasa liquidada en *t* se conoce en *t*, y se opera después.
+  Es una latencia de 0 h en lugar de 1 h: el backtest opera una hora antes de lo pre-registrado.
+- **Impacto:** por medir. Hay que volver a ejecutar la evaluación, y esa ejecución cuenta en N
+  (pre-registro §10).
+- **Decisión (titular, 2026-11-07):** el backtest no se toca en PQ-54. Se corrige junto con KE-014,
+  en la misma reejecución (PQ-50 o la que pida PQ-17), que cuenta en N. El runner de paper
+  (PQ-54) ya aplica la latencia de 1 h.

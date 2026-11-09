@@ -7,14 +7,14 @@ paper trading o los tests, y son intercambiables entre sí (LSP).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
 
 from prometheus_platform.domain.alerts import Alert
 from prometheus_platform.domain.datasets import ArchiveRef, RawArchive
-from prometheus_platform.domain.events import DomainEvent
+from prometheus_platform.domain.events import DomainEvent, OrderFilled
 from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId, Side
 
 
@@ -86,3 +86,44 @@ class Notifier(Protocol):
     """
 
     def notify(self, alert: Alert) -> bool: ...
+
+
+class LiveMarket(Protocol):
+    """Datos de mercado en vivo para el runner (PQ-54). Implementación: API pública de Binance."""
+
+    def prices(self, symbol: str) -> tuple[Decimal, Decimal]:
+        """Último precio spot y mark price del perpetuo."""
+        ...
+
+    def recent_funding(self, symbol: str, limit: int) -> list[FundingRate]:
+        """Últimas liquidaciones **ya ocurridas**, de la más antigua a la más reciente."""
+        ...
+
+
+class Broker(OrderGateway, Protocol):
+    """Bróker del paper trading: simulado (MVP) o Binance Demo (PQ-52), intercambiables."""
+
+    name: str
+
+    def positions(self) -> dict[InstrumentId, Decimal]:
+        """Cantidad con signo por instrumento (negativa en un corto)."""
+        ...
+
+    def cash(self) -> Decimal: ...
+
+    def drain_fills(self) -> list[OrderFilled]:
+        """Fills ocurridos desde la última llamada."""
+        ...
+
+    def settle_funding(
+        self, instrument: InstrumentId, funding_time: datetime, rate: Decimal, mark: Decimal
+    ) -> Decimal:
+        """Aplica una liquidación a la posición perp y devuelve el importe (+ cobrado, - pagado).
+
+        Idempotente por ``funding_time``: una liquidación ya aplicada devuelve 0 sin tocar nada.
+        """
+        ...
+
+    def equity(self, marks: Mapping[InstrumentId, Decimal]) -> Decimal:
+        """Valor de la cuenta a los precios dados (el simulado los usa; un exchange real, no)."""
+        ...

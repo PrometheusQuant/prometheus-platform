@@ -89,9 +89,12 @@ class FundingRate:
     instrument: InstrumentId
     funding_time: datetime
     rate: Decimal
+    interval_hours: int = 8  # varía por símbolo y en el tiempo (auditoría PQ-19)
 
     def __post_init__(self) -> None:
         _require_utc("funding_time", self.funding_time)
+        if self.interval_hours not in (1, 2, 4, 8):
+            raise DomainError(f"Intervalo de funding inválido: {self.interval_hours} h")
 
     @property
     def knowledge_time(self) -> datetime:
