@@ -12,7 +12,8 @@ alerta en cada **cambio** de estado, no en cada revisión.
 | ``sin_heartbeat`` | No existe o no se puede leer | CRITICAL |
 
 El último estado se guarda en disco, así que funciona igual en un bucle que con ``--once``
-desde cron. Un mismo estado malo no se repite antes de ``repeat_after``.
+desde cron. Un mismo estado malo no se repite antes de ``repeat_after``. Solo se guarda cuando el
+canal confirma la entrega: si Telegram falla, la revisión siguiente lo reintenta.
 """
 
 from __future__ import annotations
@@ -87,15 +88,19 @@ class Watchdog:
             and alerted_at is not None
             and now - alerted_at >= self._repeat_after
         )
+        if (changed or repeat) and not self._alert(health, previous, detail, now):
+            # No se entregó: el estado no avanza, así la próxima revisión lo reintenta en vez de
+            # esperar una hora creyendo que el aviso salió.
+            return health
         if changed or repeat:
-            self._alert(health, previous, detail, now)
             alerted_at = now
         self._save(health, alerted_at)
         return health
 
     def _alert(
         self, health: RunnerHealth, previous: RunnerHealth, detail: str, now: datetime
-    ) -> None:
+    ) -> bool:
+        """Avisa y devuelve si se entregó. Sin canal configurado, el log es el aviso."""
         title = (
             "el runner de paper volvió a reportar"
             if health is RunnerHealth.OK
@@ -106,9 +111,9 @@ class Watchdog:
             details["detalle"] = detail
         log.warning("paper_watchdog_alert", health=health.value, previous=previous.value)
         if self._notifier is None:
-            return
+            return True
         try:
-            self._notifier.notify(
+            delivered = self._notifier.notify(
                 Alert(
                     severity=SEVERITY[health],
                     title=title,
@@ -119,6 +124,10 @@ class Watchdog:
             )
         except Exception as exc:  # el canal de alertas nunca tumba el vigilante
             log.error("paper_watchdog_notify_failed", error=type(exc).__name__)
+            return False
+        if not delivered:
+            log.error("paper_watchdog_notify_failed", error="no entregada")
+        return delivered
 
     def _load(self) -> tuple[RunnerHealth, datetime | None]:
         try:

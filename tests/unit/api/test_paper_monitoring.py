@@ -227,3 +227,45 @@ def test_cli_watchdog_once_returns_the_health(
     beat(tmp_path / "paper/heartbeat.json", datetime.now(UTC))
     assert main(["paper", "watchdog", "--once"]) == 0
     assert main(["paper", "watchdog", "--interval", "0"]) == 2
+
+
+# --- revisión de Boris en #63 ---------------------------------------------------------------
+
+
+def test_costs_include_commissions_and_slippage_exactly(rig: Rig) -> None:
+    """A precio constante, lo que se pierde al entrar es exactamente comisiones + slippage."""
+    rig.runner.tick()
+    view = build_view(rig.journal.replay())
+
+    assert view.slippage > 0  # el CostModel del rig tiene 5 pb de slippage
+    assert view.costs == view.fees + view.slippage
+    assert (
+        Decimal(1000)
+        - rig.broker.cash()
+        - sum(
+            q * Decimal(100)
+            for i, q in rig.broker.positions().items()
+            if i == spot_instrument(SYMBOL)
+        )
+        == view.costs
+    )
+    summary = daily_summary(view, T0.date())
+    assert summary.details()["slippage"] == f"{view.slippage:.4f} USD"
+
+
+def test_watchdog_retries_until_the_alert_is_delivered(tmp_path: Path) -> None:
+    clock = FixedClock(NOW)
+    failing = RecordingNotifier(deliver=False)
+    beat(tmp_path / "heartbeat.json", NOW - timedelta(hours=1))  # caído
+
+    assert make_dog(tmp_path, clock, failing).check() is RunnerHealth.DOWN
+    clock.advance_to(NOW + timedelta(minutes=1))
+    make_dog(tmp_path, clock, failing).check()
+    assert len(failing.alerts) == 2  # no se entregó: se reintenta en la revisión siguiente
+
+    working = RecordingNotifier()
+    clock.advance_to(NOW + timedelta(minutes=2))
+    make_dog(tmp_path, clock, working).check()
+    clock.advance_to(NOW + timedelta(minutes=3))
+    make_dog(tmp_path, clock, working).check()
+    assert len(working.alerts) == 1  # entregada: ya no se repite hasta repeat_after

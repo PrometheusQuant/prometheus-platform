@@ -319,7 +319,8 @@ def _live_tables(view: PaperView) -> None:
                         "instrumento": [f.instrument.symbol for f in recent],
                         "lado": [f.side.value for f in recent],
                         "precio": [f"{f.price:.4f}" for f in recent],
-                        "coste": [f"{f.fee:.4f}" for f in recent],
+                        "comisión": [f"{f.fee:.4f}" for f in recent],
+                        "slippage": [f"{f.slippage:.4f}" for f in recent],
                     }
                 ),
                 hide_index=True,
@@ -367,7 +368,11 @@ def _tab_live(data_dir: Path, art: Artifacts, max_age_minutes: int) -> None:
     cols[0].metric("Equity", f"{equity:,.2f} USD")
     cols[1].metric("PnL acumulado", f"{equity - initial:+,.2f} USD")
     cols[2].metric("Funding neto", f"{view.funding:+,.4f} USD")
-    cols[3].metric("Comisiones y slippage", f"{view.fees:,.4f} USD")
+    cols[3].metric(
+        "Comisiones y slippage",
+        f"{view.costs:,.4f} USD",
+        help=f"Comisiones {view.fees:,.4f} USD + slippage {view.slippage:,.4f} USD",
+    )
     cols[4].metric("Drawdown", f"{view.drawdown:.2%}")
     _live_status(paths, max_age_minutes)
     _live_curve(view, _expected_cagr(art))

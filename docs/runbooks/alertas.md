@@ -63,7 +63,7 @@ por el navegador:
 | Runner caído o sin heartbeat | CRITICAL | `pq paper watchdog`: el heartbeat tiene más de `PQ_PAPER_HEARTBEAT_MAX_AGE_MINUTES` |
 | Ciclo con fallos (API, un símbolo, un hueco) | ERROR | `pq paper watchdog` y `paper_symbol_failed` |
 | Drawdown mayor que `PQ_PAPER_DRAWDOWN_ALERT` | ERROR | `paper_drawdown`, una vez por cruce; se rearma al recuperar la mitad |
-| Resumen diario: órdenes, funding, costes, equity | INFO | El runner, al cambiar el día UTC |
+| Resumen diario: órdenes, funding, comisiones, slippage, equity | INFO | El runner, al cambiar el día UTC |
 | El runner volvió a reportar | INFO | `pq paper watchdog` |
 
 Las alertas INFO no salen de los logs: el runner y el vigilante las envían directamente al canal.

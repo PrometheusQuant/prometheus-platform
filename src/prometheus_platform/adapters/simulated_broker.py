@@ -153,6 +153,7 @@ class SimulatedBroker:
                 fill_price=price,
                 fill_quantity=quantity,
                 fee=fee,
+                slippage=quantity * reference * slip,
             )
         )
         self._save()

@@ -40,6 +40,11 @@ class Fill:
     quantity: Decimal
     price: Decimal
     fee: Decimal
+    slippage: Decimal
+
+    @property
+    def cost(self) -> Decimal:
+        return self.fee + self.slippage
 
     @property
     def label(self) -> str:
@@ -67,7 +72,17 @@ class PaperView:
 
     @property
     def fees(self) -> Decimal:
+        """Comisiones cobradas."""
         return sum((f.fee for f in self.fills), ZERO)
+
+    @property
+    def slippage(self) -> Decimal:
+        return sum((f.slippage for f in self.fills), ZERO)
+
+    @property
+    def costs(self) -> Decimal:
+        """Coste total de ejecución: comisiones más slippage."""
+        return self.fees + self.slippage
 
     @property
     def initial_equity(self) -> Decimal | None:
@@ -111,6 +126,7 @@ def build_view(events: Iterable[DomainEvent]) -> PaperView:
                 event.fill_quantity,
                 event.fill_price,
                 event.fee,
+                event.slippage,
             )
             view.fills.append(fill)
             signed = fill.quantity if fill.side is Side.BUY else -fill.quantity
@@ -136,6 +152,7 @@ class DailySummary:
     orders: int
     funding: Decimal
     fees: Decimal
+    slippage: Decimal
     equity_start: Decimal | None
     equity_end: Decimal | None
     breaches: int
@@ -150,7 +167,8 @@ class DailySummary:
             "día (UTC)": self.day.isoformat(),
             "órdenes ejecutadas": str(self.orders),
             "funding neto": f"{self.funding:.4f} USD",
-            "comisiones y slippage": f"{self.fees:.4f} USD",
+            "comisiones": f"{self.fees:.4f} USD",
+            "slippage": f"{self.slippage:.4f} USD",
             "equity al cierre": f"{self.equity_end:.2f} USD" if self.equity_end else "n/d",
             "variación del día": change,
             "violaciones de riesgo": str(self.breaches),
@@ -164,6 +182,7 @@ def daily_summary(view: PaperView, day: date) -> DailySummary:
         orders=sum(1 for f in view.fills if f.at.date() == day),
         funding=sum((s.amount for s in view.settlements if s.funding_time.date() == day), ZERO),
         fees=sum((f.fee for f in view.fills if f.at.date() == day), ZERO),
+        slippage=sum((f.slippage for f in view.fills if f.at.date() == day), ZERO),
         equity_start=values[0] if values else None,
         equity_end=values[-1] if values else None,
         breaches=sum(1 for b in view.breaches if b.occurred_at.date() == day),
