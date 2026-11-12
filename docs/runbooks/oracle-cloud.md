@@ -57,6 +57,15 @@ cat ~/.ssh/prometheus_oci.pub
 
 ## 4. Crear la VM (≈ 10 min)
 
+!!! tip "Más fácil: el stack portable de `deploy/oci/`"
+    En lugar del formulario, puedes subir el stack de Terraform del repo a Resource Manager
+    ([`deploy/oci/README.md`](https://github.com/PrometheusQuant/prometheus-platform/tree/develop/deploy/oci)).
+    Crea la red con IP pública y solo el puerto 22, busca sola la imagen y permite crecer de 1/6 a
+    2/12 cambiando dos variables. Así se evita que el interruptor de IP pública salga gris cuando
+    la red se crea dentro del formulario (2026-11-12).
+
+Con el formulario:
+
 Menú ☰ → **Compute** → **Instances** → **Create instance**.
 
 | Campo | Valor |
