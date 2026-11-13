@@ -51,9 +51,12 @@ conflictos. El responsable de cada ticket es el asignado en Jira.
 | David | David con Claude Code | Núcleo de ejecución y paper trading (`execution/`, runner, `portfolio_risk/`), despliegue (`deploy/`, CI/CD), carry (H2, H3, H4), holdout, dashboard en vivo, release |
 | Boris | Boris con Codex | Estrategia 2 (tendencia), Polymarket, sentimiento, observabilidad (Prometheus, Grafana, Loki), Power BI y entregables académicos |
 
-- **Contratos primero.** Si tu trabajo necesita algo del otro carril (por ejemplo, conectar una
-  estrategia al runner), usa el puerto publicado en `domain/ports.py`. No cambies el núcleo ajeno:
-  abre un ticket o comenta en el del otro carril.
+- **Contratos primero.** Si tu trabajo necesita algo del otro carril, usa el puerto publicado en
+  `domain/ports.py`. No cambies el núcleo ajeno: abre un ticket o comenta en el del otro carril.
+- **Estrategias nuevas:** implementan el puerto `Strategy` (instantánea point-in-time → `Signal`,
+  [ADR-0011](docs/adr/0011-contrato-de-estrategia.md)) y se añaden a `STRATEGIES` en
+  `tests/unit/strategies/test_strategy_contract.py`: deben pasar la prueba de contrato
+  (validez, determinismo y paridad backtest ↔ paper).
 - **Revisión cruzada obligatoria.** Nadie fusiona su propio PR sin la aprobación del otro carril.
   La regla de GitHub exige 1 aprobación y la CI en verde. Revisa con la guía
   `.claude/skills/code-review-and-quality/SKILL.md`.
@@ -77,6 +80,10 @@ conflictos. El responsable de cada ticket es el asignado en Jira.
 - **Pre-registro antes de mirar resultados** (`docs/estrategias/<n>/pre-registro.md`). Cambiarlo
   después exige una enmienda fechada y cuenta como ensayos nuevos en N.
 - **Cada ejecución cuenta en N** (Deflated Sharpe). No se descartan corridas «malas».
+- **Registro de ensayos compartido** (`docs/estrategias/ensayos/<carril>.jsonl`, PQ-112). Los
+  comandos `pq research *` escriben sus filas solos; N es la suma de todos los carriles
+  (`pq research registro resumen`). **Un PR con resultados nuevos sin sus filas no se fusiona.**
+  Las filas no se editan ni se borran.
 - **Costes reales siempre**: comisiones VIP0 y slippage (`research/backtest.py`, `CostModel`).
 - **Point-in-time**: ninguna feature usa datos posteriores a su `knowledge_time`.
 - **El holdout del carry (2024-07-01 → 2026-09-30) está cerrado** hasta que PQ-17 verifique las
@@ -115,9 +122,8 @@ Adaptadas de [addyosmani/agent-skills](https://github.com/addyosmani/agent-skill
 - **Datos:** `data/` no está en git. Reconstruye el lakehouse en tu máquina siguiendo
   [`docs/metodologia/trabajo-con-agentes.md`](docs/metodologia/trabajo-con-agentes.md). Los tests no
   necesitan `data/`: usan datos sintéticos.
-- **Ensayos:** cada ejecución de research cuenta en N. Mientras se termina el registro compartido
-  (PQ-112), anota cada ejecución en la descripción del PR (hipótesis, configuración, commit y
-  métricas) para que se pueda sumar a N.
+- **Ensayos:** pon `PQ_RESEARCH_LANE=boris` en tu `.env`. Cada `pq research *` agrega sus filas a
+  `docs/estrategias/ensayos/boris.jsonl` y esas filas van en el mismo PR que los resultados.
 - **Jira:** Codex se conecta a Jira con el servidor MCP oficial de Atlassian (pasos en la guía de
   trabajo con agentes). Antes de programar, lee el ticket; al empezar, muévelo a *In Progress* y,
   al fusionar el PR, a *Done*. Proyecto `PQ`, sitio `prometheusquant.atlassian.net`. La clave

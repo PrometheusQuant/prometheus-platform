@@ -35,6 +35,13 @@ from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.notifiers import notifier_from_settings
 from prometheus_platform.adapters.parquet_bronze import ParquetBronzeStore
+from prometheus_platform.adapters.trial_ledger import (
+    RegistryTee,
+    TrialLedger,
+    counts,
+    git_author,
+    read_rows,
+)
 from prometheus_platform.api.paper.compose import (
     PaperPaths,
     RunnerAlreadyRunningError,
@@ -167,6 +174,10 @@ def _add_research(commands: Commands) -> None:
     finance.add_argument(
         "--update-doc", type=Path, help="reescribe el bloque PQ-49 de este documento Markdown"
     )
+    ledger = studies.add_parser(
+        "registro", help="Registro de ensayos compartido: N por familia (PQ-112)"
+    )
+    ledger.add_argument("action", choices=["resumen", "importar-mlflow", "verificar"])
 
 
 def _add_operations(commands: Commands) -> None:
@@ -297,15 +308,18 @@ def _gold(action: str, data_dir: Path, out: Path) -> int:
     return 0
 
 
-def _research_carry(data_dir: Path, hypothesis: str, figures: Path | None) -> int:
+def _research_carry(
+    data_dir: Path, hypothesis: str, figures: Path | None, ledger: TrialLedger
+) -> int:
     # Importación diferida: MLflow, Optuna y matplotlib solo se cargan para investigar.
     from prometheus_platform.adapters.mlflow_registry import MlflowRegistry  # noqa: PLC0415
     from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
     from prometheus_platform.research.reporting import plot_equity, write_outputs  # noqa: PLC0415
 
     data = [ce.load_symbol(data_dir / "silver", s) for s in ce.HYPOTHESES[hypothesis]]
-    registry = MlflowRegistry(data_dir / "mlflow" / "mlflow.db", "carry-funding")
-    evaluation = ce.evaluate_hypothesis(hypothesis, data, registry)
+    mlflow = MlflowRegistry(data_dir / "mlflow" / "mlflow.db", "carry-funding")
+    # N sale del registro compartido (todos los carriles); MLflow recibe una copia.
+    evaluation = ce.evaluate_hypothesis(hypothesis, data, RegistryTee(ledger, mlflow))
     path = write_outputs(evaluation, data_dir / "research" / "carry" / hypothesis)
     if figures is not None:
         plot_equity(
@@ -334,7 +348,7 @@ def _development_panel(data_dir: Path) -> pl.DataFrame:
     )
 
 
-def _research_model(data_dir: Path, figures: Path, target_mode: str) -> int:
+def _research_model(data_dir: Path, figures: Path, target_mode: str, ledger: TrialLedger) -> int:
     from prometheus_platform.adapters.mlflow_registry import MlflowRegistry  # noqa: PLC0415
     from prometheus_platform.research.carry_evaluation import TrialRecord  # noqa: PLC0415
     from prometheus_platform.research.funding_model import run_study  # noqa: PLC0415
@@ -342,7 +356,9 @@ def _research_model(data_dir: Path, figures: Path, target_mode: str) -> int:
 
     study = run_study(_development_panel(data_dir), target_mode=target_mode)
     tags = {"target_mode": target_mode, "period": "desarrollo"}
-    registry = MlflowRegistry(data_dir / "mlflow" / "mlflow.db", "funding-model")
+    registry = RegistryTee(
+        ledger, MlflowRegistry(data_dir / "mlflow" / "mlflow.db", "funding-model")
+    )
     for r in study.regression:
         registry.log_trial(
             TrialRecord(
@@ -464,18 +480,66 @@ def _research_finance(data_dir: Path, doc: Path | None) -> int:
     return 0
 
 
-def _research(args: argparse.Namespace, data_dir: Path) -> int:
-    if args.study == "finance":
-        return _research_finance(data_dir, args.update_doc)
-    if args.study == "stats":
-        return _research_stats(data_dir)
-    if args.study == "eda":
-        return _research_eda(data_dir, args.figures)
-    if args.study == "simulate":
-        return _research_simulate(data_dir, args.figures, args.paths)
+def _ledger(settings: Settings, familia: str, comando: str) -> TrialLedger:
+    return TrialLedger(
+        settings.research_ledger_dir,
+        familia=familia,
+        carril=settings.research_lane,
+        autor=settings.research_author or git_author(),
+        comando=comando,
+    )
+
+
+def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str]) -> int:
+    """Cada ejecución deja su fila en el registro compartido **antes** de investigar (PQ-112)."""
+    data_dir = settings.data_dir
+    if args.study == "registro":
+        return _research_ledger(args.action, settings)
+    command = " ".join(["pq", *argv])
+    if args.study == "carry":
+        ledger = _ledger(settings, "carry", command)
+        return _research_carry(data_dir, args.hypothesis, args.figures, ledger)
     if args.study == "funding-model":
-        return _research_model(data_dir, args.figures, args.target_mode)
-    return _research_carry(data_dir, args.hypothesis, args.figures)
+        ledger = _ledger(settings, "modelo-funding", command)
+        return _research_model(data_dir, args.figures, args.target_mode, ledger)
+    # Descriptivos: no son ensayos (no eligen nada), pero la ejecución queda registrada.
+    descriptive: dict[str, Callable[[], int]] = {
+        "finance": lambda: _research_finance(data_dir, args.update_doc),
+        "stats": lambda: _research_stats(data_dir),
+        "eda": lambda: _research_eda(data_dir, args.figures),
+        "simulate": lambda: _research_simulate(data_dir, args.figures, args.paths),
+    }
+    _ledger(settings, "descriptivo", command).log_execution(args.study)
+    return descriptive[args.study]()
+
+
+def _research_ledger(action: str, settings: Settings) -> int:
+    from prometheus_platform.adapters.mlflow_registry import historical_rows  # noqa: PLC0415
+
+    directory = settings.research_ledger_dir
+    if action == "resumen":
+        for familia, n in sorted(counts(directory).items()):
+            print(f"{familia}: N = {n}")
+        return 0
+    database = settings.data_dir / "mlflow" / "mlflow.db"
+    if not database.exists():
+        print(f"ERROR no hay MLflow local en {database}", file=sys.stderr)
+        return 2
+    autor = settings.research_author or git_author()
+    history = historical_rows(database, carril=settings.research_lane, autor=autor)
+    known = {r.etiquetas.get("mlflow_run_id") for r in read_rows(directory)} - {None}
+    if action == "importar-mlflow":
+        ledger = _ledger(settings, "", "importar-mlflow")
+        new = [r for r in history if r.etiquetas["mlflow_run_id"] not in known]
+        for row in new:
+            ledger.append(row)
+        print(f"importadas {len(new)} filas; ya estaban {len(history) - len(new)}")
+        return 0
+    missing = [r for r in history if r.etiquetas["mlflow_run_id"] not in known]
+    for row in missing:
+        print(f"falta en el registro: {row.familia} {row.hipotesis} {row.nombre} ({row.fecha})")
+    print("registro y MLflow cuadran" if not missing else f"faltan {len(missing)} ensayos")
+    return 0 if not missing else 1
 
 
 def _report_inputs(data_dir: Path, out: Path) -> int:
@@ -623,6 +687,7 @@ def _ingest(args: argparse.Namespace, bronze_root: Path) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(argv)
     settings = load_settings()
     notifier = notifier_from_settings(settings)
@@ -632,7 +697,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "ingest": lambda: _ingest(args, data_dir / "bronze"),
         "silver": lambda: _silver_build(data_dir, args.symbol, args.interval),
         "gold": lambda: _gold(args.action, data_dir, getattr(args, "out", GOLD_DOCS)),
-        "research": lambda: _research(args, data_dir),
+        "research": lambda: _research(args, settings, argv),
         "report": lambda: _report_inputs(data_dir, args.out),
         "paper": lambda: _paper(args, settings, notifier),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
