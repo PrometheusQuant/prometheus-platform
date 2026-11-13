@@ -22,6 +22,12 @@ locals {
   is_flex = length(regexall("Flex$", var.shape)) > 0
   is_arm  = length(regexall("^VM\\.Standard\\.A", var.shape)) > 0
   tags    = { proyecto = "prometheusquant", ticket = "PQ-56" }
+  # La consola de Resource Manager no permite saltos de línea: las claves van separadas por comas
+  # (una clave SSH nunca lleva comas). También se aceptan una por línea.
+  ssh_keys = [
+    for key in split(",", replace(var.ssh_public_keys, "\n", ",")) : trimspace(key)
+    if trimspace(key) != ""
+  ]
 }
 
 data "oci_identity_availability_domains" "ads" {
@@ -145,7 +151,7 @@ resource "oci_core_instance" "paper" {
   }
 
   metadata = {
-    ssh_authorized_keys = trimspace(var.ssh_public_keys)
+    ssh_authorized_keys = join("\n", local.ssh_keys)
   }
 
   instance_options {

@@ -18,7 +18,12 @@ variable "region" {
 
 variable "ssh_public_keys" {
   type        = string
-  description = "Claves SSH públicas con acceso, una por línea (la tuya y la de tu compañero)."
+  description = "Claves SSH públicas con acceso, separadas por comas: la tuya,la de tu compañero."
+
+  validation {
+    condition     = length(regexall("ssh-(ed25519|rsa) ", var.ssh_public_keys)) >= 1
+    error_message = "Pega al menos una clave pública que empiece por ssh-ed25519 o ssh-rsa."
+  }
 }
 
 variable "shape" {

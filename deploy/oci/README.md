@@ -22,7 +22,7 @@ Guía completa, con las reglas de Oracle, en [`docs/runbooks/oracle-cloud.md`](.
 
     | Variable | Qué poner |
     |---|---|
-    | `ssh_public_keys` | Tu clave pública y la de tu compañero, **una por línea** |
+    | `ssh_public_keys` | Tu clave pública y la de tu compañero, **separadas por una coma** (la consola no admite saltos de línea) |
     | `shape` | `VM.Standard.A1.Flex`, o `VM.Standard.E2.1.Micro` si A1 no tiene capacidad |
     | `ocpus` / `memory_gbs` | `2` / `12` (todo el cupo); `1` / `6` si 2/12 no tiene capacidad |
     | El resto | Como viene |
