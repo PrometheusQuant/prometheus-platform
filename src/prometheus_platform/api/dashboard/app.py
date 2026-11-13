@@ -29,7 +29,7 @@ from prometheus_platform.api.paper.compose import PaperPaths
 from prometheus_platform.api.paper.report import PaperView, build_view, read_heartbeat
 from prometheus_platform.ops.settings import load_settings
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch
-from prometheus_platform.research import nowcast, what_if
+from prometheus_platform.research import explain, nowcast, what_if
 from prometheus_platform.research.simulation import WeeklyRegimeModel
 
 # Patrón F de storytelling: cada pestaña responde una pregunta del jurado, en orden.
@@ -215,20 +215,51 @@ def _tab_nowcast(data_dir: Path) -> None:
         }
     )
     st.dataframe(table, hide_index=True, width="stretch")
-    st.markdown("**Qué variables pesan más en el modelo** (importancia por impureza)")
-    top = result.importance[:5]
+    st.markdown("**Por qué predice esto hoy**")
+    for row in result.rows:
+        st.markdown(
+            "- "
+            + explain.explain_in_words(
+                row.symbol, row.probability_high, result.explanations[row.symbol]
+            )
+        )
+    st.caption(
+        "Para cada símbolo se prueba qué pasaría si una variable tuviera su valor habitual (la"
+        " mediana del periodo de desarrollo) y todo lo demás quedara igual."
+    )
+    _nowcast_importance(data_dir)
+    st.caption("Es una predicción estadística, no una recomendación de inversión.")
+
+
+@st.cache_resource(show_spinner="Calculando la importancia en validación (walk-forward)…")
+def _validation_importance(data_dir: str) -> list[explain.FeatureImportance]:
+    params = nowcast.tuned_params(Path(data_dir))
+    return explain.validation_importance(nowcast.development_panel(Path(data_dir)), params)
+
+
+def _nowcast_importance(data_dir: Path) -> None:
+    st.markdown("**Qué variables importan de verdad al modelo** (fuera de muestra)")
+    try:
+        ranked = _validation_importance(str(data_dir))
+    except (ValueError, OSError, KeyError, pl.exceptions.PolarsError):
+        st.info("No se pudo calcular la importancia en validación con los datos disponibles.")
+        return
+    top = ranked[:5]
     st.bar_chart(
         # El número delante conserva el orden por importancia (el gráfico ordena por nombre).
         pl.DataFrame(
             {
-                "variable": [f"{i}. {n}" for i, (n, _) in enumerate(top, start=1)],
-                "importancia": [v for _, v in top],
+                "variable": [f"{i}. {imp.label}" for i, imp in enumerate(top, start=1)],
+                "caída del AUC": [imp.mean for imp in top],
             }
         ),
         x="variable",
-        y="importancia",
+        y="caída del AUC",
     )
-    st.caption("Es una predicción estadística, no una recomendación de inversión.")
+    st.caption(
+        "Importancia por permutación en los pliegues de validación del walk-forward, nunca en el"
+        " entrenamiento: cuánto empeora el acierto fuera de muestra (AUC) si se baraja la variable."
+    )
 
 
 def _expected_cagr(art: Artifacts) -> float | None:

@@ -6,8 +6,10 @@
 - **Predicción:** la última liquidación de cada símbolo. **Solo** si es posterior al fin del
   holdout: mostrar predicciones sobre fechas del holdout sería mirarlo. Con datos viejos se pide la
   ingesta de la API (PQ-65) en lugar de predecir.
-- **Explicación:** importancia de las variables del bosque (impureza). La explicación por
-  predicción (SHAP o permutación) es PQ-74.
+- **Explicación (PQ-74):** por cada predicción, cuánto cambia la probabilidad si cada variable
+  tuviera su valor típico del desarrollo (``research/explain.py``). La importancia global, por
+  permutación sobre los pliegues de validación, se calcula aparte
+  (``explain.validation_importance``).
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 from prometheus_platform.domain.protocol import HOLDOUT_END
 from prometheus_platform.research import carry_evaluation as ce
+from prometheus_platform.research.explain import Contribution, local_contributions
 from prometheus_platform.research.funding_model import (
     FEATURES,
     SEED,
@@ -57,6 +60,7 @@ class TrainedModel:
     low: np.ndarray
     high: np.ndarray
     params: dict[str, int]
+    reference: np.ndarray  # mediana de cada variable en el desarrollo: el valor «típico»
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,7 @@ class Forecast:
     rows: list[Nowcast]
     importance: list[tuple[str, float]]
     params: dict[str, int]
+    explanations: dict[str, list[Contribution]]  # por símbolo, de mayor a menor efecto
 
 
 def tuned_params(data_dir: Path) -> dict[str, int]:
@@ -100,9 +105,10 @@ def latest_rows(data_dir: Path) -> pl.DataFrame:
 def train(panel: pl.DataFrame, params: dict[str, int]) -> TrainedModel:
     x, y, _ = prepare(panel)
     lo, hi = np.quantile(x, WINSOR[0], axis=0), np.quantile(x, WINSOR[1], axis=0)
+    clipped = np.clip(x, lo, hi)
     model = RandomForestClassifier(n_estimators=100, random_state=SEED, n_jobs=-1, **params)
-    model.fit(np.clip(x, lo, hi), y >= THRESHOLD)
-    return TrainedModel(model, lo, hi, params)
+    model.fit(clipped, y >= THRESHOLD)
+    return TrainedModel(model, lo, hi, params, np.median(clipped, axis=0))
 
 
 def forecast(trained: TrainedModel, latest: pl.DataFrame) -> Forecast:
@@ -123,4 +129,8 @@ def forecast(trained: TrainedModel, latest: pl.DataFrame) -> Forecast:
         )
     ]
     ranked = sorted(zip(FEATURES, model.feature_importances_, strict=True), key=lambda kv: -kv[1])
-    return Forecast(rows, [(name, float(v)) for name, v in ranked], trained.params)
+    explanations = {
+        symbol: local_contributions(model, row, trained.reference)
+        for symbol, row in zip(fresh["symbol"], x, strict=True)
+    }
+    return Forecast(rows, [(name, float(v)) for name, v in ranked], trained.params, explanations)
