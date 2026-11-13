@@ -66,7 +66,13 @@ variable "availability_domain_number" {
   description = "Déjalo en 1. São Paulo y Bogotá tienen un solo dominio; solo las regiones grandes tienen 2 o 3."
 }
 
-variable "instance_name" {
-  type    = string
-  default = "prometheus-paper"
+variable "variant" {
+  type        = string
+  default     = "a12"
+  description = "Sufijo corto de esta variante (a12, a11, micro): nombra la VM y su red para que no choquen."
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]{0,9}$", var.variant))
+    error_message = "Solo minúsculas y números, empezando por letra (máx. 10)."
+  }
 }

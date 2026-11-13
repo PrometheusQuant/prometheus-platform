@@ -37,8 +37,12 @@ entre intentos: Oracle limita las peticiones («Too many requests»). Mientras t
 el stack con `ocpus = 1` y `memory_gbs = 6`, o con la micro.
 
 **Crecer después:** cambia `ocpus` y `memory_gbs` en el stack y pulsa **Apply**. Es la misma VM:
-Oracle la reinicia y conserva el disco y la IP. **Nunca** crees una segunda A1 si la suma supera
-2 OCPU y 12 GB.
+Oracle la reinicia y conserva el disco y la IP.
+
+**Guardia del límite:** antes de crear una A1, el stack suma las A1 que ya hay en la cuenta. Si se
+superarían 2 OCPU o 12 GB, se niega con un mensaje claro (Oracle desactivaría todas). La micro
+(E2.1.Micro) tiene su propio cupo y puede convivir con una A1. Cada variante (`variant`) tiene
+nombre y red propios.
 
 ## Validación local (opcional)
 

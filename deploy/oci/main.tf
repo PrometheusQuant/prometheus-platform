@@ -21,6 +21,7 @@ provider "oci" {
 locals {
   is_flex = length(regexall("Flex$", var.shape)) > 0
   is_arm  = length(regexall("^VM\\.Standard\\.A", var.shape)) > 0
+  name    = "prometheus-paper-${var.variant}"
   tags    = { proyecto = "prometheusquant", ticket = "PQ-56" }
   # La consola de Resource Manager no permite saltos de línea: las claves van separadas por comas
   # (una clave SSH nunca lleva comas). También se aceptan una por línea.
@@ -28,6 +29,21 @@ locals {
     for key in split(",", replace(var.ssh_public_keys, "\n", ",")) : trimspace(key)
     if trimspace(key) != ""
   ]
+}
+
+# Guardia del límite Always Free: las A1 que ya hay en la cuenta (sin contar esta misma VM).
+data "oci_core_instances" "existing" {
+  compartment_id = var.compartment_ocid
+}
+
+locals {
+  live_states = ["PROVISIONING", "STARTING", "RUNNING", "STOPPING", "STOPPED"]
+  other_a1 = [
+    for i in data.oci_core_instances.existing.instances : i
+    if i.shape == "VM.Standard.A1.Flex" && i.display_name != local.name && contains(local.live_states, i.state)
+  ]
+  other_a1_ocpus  = sum(concat([0], [for i in local.other_a1 : i.shape_config[0].ocpus]))
+  other_a1_memory = sum(concat([0], [for i in local.other_a1 : i.shape_config[0].memory_in_gbs]))
 }
 
 data "oci_identity_availability_domains" "ads" {
@@ -53,15 +69,15 @@ data "oci_core_images" "ubuntu" {
 resource "oci_core_vcn" "main" {
   compartment_id = var.compartment_ocid
   cidr_blocks    = ["10.0.0.0/16"]
-  display_name   = "prometheus-vcn"
-  dns_label      = "prometheus"
+  display_name   = "prometheus-vcn-${var.variant}"
+  dns_label      = "pq${var.variant}"
   freeform_tags  = local.tags
 }
 
 resource "oci_core_internet_gateway" "main" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.main.id
-  display_name   = "prometheus-igw"
+  display_name   = "prometheus-igw-${var.variant}"
   enabled        = true
   freeform_tags  = local.tags
 }
@@ -69,7 +85,7 @@ resource "oci_core_internet_gateway" "main" {
 resource "oci_core_route_table" "public" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.main.id
-  display_name   = "prometheus-public-rt"
+  display_name   = "prometheus-public-rt-${var.variant}"
   freeform_tags  = local.tags
 
   route_rules {
@@ -83,7 +99,7 @@ resource "oci_core_route_table" "public" {
 resource "oci_core_security_list" "ssh_only" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.main.id
-  display_name   = "prometheus-ssh-only"
+  display_name   = "prometheus-ssh-only-${var.variant}"
   freeform_tags  = local.tags
 
   egress_security_rules {
@@ -114,7 +130,7 @@ resource "oci_core_subnet" "public" {
   compartment_id             = var.compartment_ocid
   vcn_id                     = oci_core_vcn.main.id
   cidr_block                 = "10.0.0.0/24"
-  display_name               = "prometheus-public-subnet"
+  display_name               = "prometheus-public-subnet-${var.variant}"
   dns_label                  = "public"
   route_table_id             = oci_core_route_table.public.id
   security_list_ids          = [oci_core_security_list.ssh_only.id]
@@ -125,7 +141,7 @@ resource "oci_core_subnet" "public" {
 resource "oci_core_instance" "paper" {
   compartment_id      = var.compartment_ocid
   availability_domain = data.oci_identity_availability_domains.ads.availability_domains[var.availability_domain_number - 1].name
-  display_name        = var.instance_name
+  display_name        = local.name
   shape               = var.shape
   freeform_tags       = local.tags
 
@@ -164,4 +180,13 @@ resource "oci_core_instance" "paper" {
   }
 
   is_pv_encryption_in_transit_enabled = true
+
+  lifecycle {
+    precondition {
+      condition = !local.is_flex || (
+        local.other_a1_ocpus + var.ocpus <= 2 && local.other_a1_memory + var.memory_gbs <= 12
+      )
+      error_message = "Superaría el límite Always Free de A1 (2 OCPU y 12 GB en total): ya hay otra A1 en la cuenta. Bórrala o haz crecer esa misma en lugar de crear otra."
+    }
+  }
 }
