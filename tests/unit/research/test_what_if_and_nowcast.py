@@ -110,6 +110,8 @@ def test_forecast_predicts_only_fresh_rows_with_explanations() -> None:
     assert by_symbol["BTCUSDT"].probability_high < 0.5
     assert len(result.importance) == len(FEATURES)
     assert result.params == {"max_depth": 4}
+    assert set(result.explanations) == {"SOLUSDT", "BTCUSDT"}  # PQ-74: una por predicción
+    assert len(result.explanations["SOLUSDT"]) == len(FEATURES)
 
 
 def test_tuned_params_come_from_the_study_artifact(tmp_path: Path) -> None:
