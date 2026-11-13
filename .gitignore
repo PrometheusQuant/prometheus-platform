@@ -48,3 +48,10 @@ notebooklm/
 
 # Worktrees temporales de los agentes de Claude Code
 .claude/worktrees/
+
+# Terraform (deploy/oci): el estado lo guarda Resource Manager, nunca el repo
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+deploy/oci/*.zip

@@ -106,6 +106,7 @@ nav:
       - Orquestación (Dagster): runbooks/orquestacion.md
       - Análisis de impacto (BIA): runbooks/analisis-de-impacto.md
       - Kill-switch: runbooks/kill-switch.md
+      - Oracle Cloud (VM del paper trading): runbooks/oracle-cloud.md
       - Paper trading: runbooks/paper-trading.md
   - Investigación:
       - investigacion/README.md

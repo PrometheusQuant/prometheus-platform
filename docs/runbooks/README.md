@@ -12,6 +12,7 @@ Cada runbook indica: cuándo aplica, pasos exactos, cómo verificar que funcion�
 - [Alertas a Telegram](alertas.md): configurar el bot y probar el canal.
 - [Análisis de impacto (BIA)](analisis-de-impacto.md): MTPD y RTO por proceso, riesgos y mitigación.
 - [Kill-switch](kill-switch.md): detener toda la operación, verificar, rearmar y el simulacro.
+- [Oracle Cloud](oracle-cloud.md): crear la cuenta Always Free y la VM del paper trading.
 - [Paper trading](paper-trading.md): arrancar y detener el runner, leer su estado y reiniciarlo.
 
 ## Runbooks pendientes
