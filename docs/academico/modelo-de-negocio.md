@@ -50,6 +50,46 @@ La comparación se hace por **función**, no como afirmación de cuota de mercad
 
 **Posicionamiento recomendado para la defensa:** presentar el proyecto como una plataforma científica de decisión y control de riesgo, no como un producto que garantiza rentabilidad superior.
 
+### 4.1 Matriz competitiva con datos de mercado (PQ-75, cap. 8.1)
+
+**Qué se compara.** Lo que podría hacer hoy con su capital alguien que quiere rentabilizar cripto
+de forma sistemática. Los precios, las comisiones y los rendimientos llevan su fuente y la fecha en
+que se consultaron (**2026-11-13**). Los rendimientos de los productos de ahorro son **variables** y
+se deben verificar de nuevo antes de la feria.
+
+| Alternativa | Coste para el usuario (dato y fuente) | Rendimiento de referencia | Transparencia del backtest | Control del sobreajuste | Riesgo de contraparte | Custodia | Facilidad |
+|---|---|---|---|---|---|---|---|
+| **Bots del exchange** (grid y DCA de Binance; Pionex) | Sin cuota de bot: se pagan las comisiones normales del spot ([Binance, Spot DCA](https://www.binance.com/en/support/faq/what-is-spot-dca-and-how-does-it-work-27713d3ddb3c406da52f36b9aaaa1360); [Binance, Spot Grid](https://www.binance.com/en/support/faq/binance-spot-grid-trading-parameters-688ff6ff08734848915de76a07b953dd)). Pionex: bots gratis y comisión estándar; Futures Grid al 0,02 % maker ([Pionex](https://intercom.help/pionex/en/articles/14993683-pionex-trading-fee-overview)) | No publicado: depende del mercado lateral | Muy baja: simulación del proveedor, sin costes ni hipótesis auditables | Ninguno: el usuario elige parámetros mirando el pasado | Alto: todo el capital en el exchange | Del exchange | Muy alta |
+| **3Commas** (SaaS de bots) | Starter 20, Pro 50 y Expert 140 USD/mes; el plan gratuito solo permite paper ([Altrady, consultado el 2026-11-03](https://www.altrady.com/3commas-alternative); [ComparEdge, 2026-07-08](https://comparedge.com/tools/3commas/pricing)) | No publicado | Baja: backtest del proveedor | Ninguno | Alto: claves API en un tercero y fondos en el exchange | Del exchange | Alta |
+| **Freqtrade / Hummingbot** (código abierto) | Gratis, salvo la infraestructura propia; hyperopt con Optuna sobre backtests locales ([documentación de Freqtrade](https://codeclimate.com/github/freqtrade/freqtrade/docs/hyperopt.md/source); [Hummingbot](https://docs.hummingbot.org/academy-content/using-dashboard-to-deploy-and-backtest-strategies---part-6/)) | Depende de la estrategia del usuario | Alta: el código es visible | Bajo: el hyperopt **facilita** el sobreajuste y no cuenta los ensayos | Alto: fondos en el exchange | Del exchange | Baja |
+| **Basis tokenizado** (Ethena sUSDe) | Sin comisión de gestión explícita; riesgo de contrato inteligente | Media de 30 días del 4,74 % y de 90 días del 4,53 % al 2026-10-14 ([eco.com](https://eco.com/support/en/articles/14798653-susde-explained-ethena-s-yield-bearing-stablecoin)); **por verificar** en el panel de transparencia de Ethena | Baja: no se ve la cartera en tiempo real | No aplica: la estrategia es fija | Muy alto: emisor, custodios, exchanges y depeg. Si el funding se vuelve negativo, el rendimiento cae a cero o menos | Del protocolo | Alta |
+| **Simple Earn en stablecoin** (Binance, USDT flexible) | Sin comisión | ≈ 1,5 % APR base más una bonificación del 3 % para los primeros 200 USDT, según un anuncio de Binance de julio de 2026 ([Binance Earn USDT](https://www.binance.com/en-BH/earn/USDT)); **variable, por verificar** | No aplica | No aplica | Alto: el exchange | Del exchange | Muy alta |
+| **No hacer nada** (efectivo o stablecoin sin rendimiento) | 0 | 0 % nominal | No aplica | No aplica | Solo el emisor de la stablecoin | Propia | Total |
+| **PrometheusQuant** | Infraestructura de 0 a 6,69 USD/mes (§6.2) más comisiones VIP0 reales en cada pata | H2 en desarrollo: CAGR neto del 5,03 % en backtest; **no es un rendimiento realizado**. Holdout pendiente (PQ-50) ([evaluación](../estrategias/01-carry/evaluacion.md)) | Máxima: pre-registro, código, commits y cada cifra con su fuente | Máximo: CPCV, Deflated Sharpe y PBO, con **todos** los ensayos contados (PQ-112) | Alto: el exchange; se modela en la simulación (cap. 6) | Del exchange | Baja: requiere el equipo |
+
+**Lectura.**
+
+- Las alternativas pasivas (Simple Earn, sUSDe) rinden algo parecido al carry de H2, pero con un
+  riesgo que el usuario no ve.
+- Los bots baratos o gratuitos no controlan el sobreajuste: el usuario puede «descubrir» una
+  estrategia que solo funcionó en el pasado.
+- **PrometheusQuant no compite en facilidad ni en rendimiento prometido.** Compite en **decidir
+  con evidencia** si una estrategia vale la pena frente a esas alternativas, empezando por el
+  benchmark del 4 % de una stablecoin. Lo hace con los costes reales, y antes de arriesgar capital.
+
+#### Curva de valor
+
+![Curva de valor de PrometheusQuant frente a las alternativas](img/curva-de-valor.png)
+
+Las puntuaciones de 1 a 5 son una **valoración cualitativa del equipo** que resume la matriz
+anterior: más alto es mejor en cada criterio. No son datos de mercado. En los criterios que no
+aplican a una alternativa se asigna un 3 neutral. El gráfico se regenera con
+`uv run python scripts/curva_de_valor.py`.
+
+**Propuesta de valor única.** Es la única opción de la matriz que **cuenta cada intento**, descuenta
+los costes reales y **dice cuándo una estrategia no sirve**, antes de poner dinero. Es coherente con
+el bloque 2 del Business Model Canvas (§3) y con la [visión de producto](../producto/vision.md).
+
 ## 5. Estructura económica y supuestos de evaluación
 
 ### 5.1 Costes observables y costes por estimar
