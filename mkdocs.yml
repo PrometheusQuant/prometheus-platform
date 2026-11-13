@@ -87,6 +87,7 @@ nav:
       - Prompt inicial para Codex: metodologia/prompt-inicial-codex.md
   - Estrategias:
       - estrategias/README.md
+      - Registro de ensayos (N): estrategias/registro-de-ensayos.md
       - "Carry · pre-registro": estrategias/01-carry/pre-registro.md
       - "Carry · evaluación": estrategias/01-carry/evaluacion.md
       - "Carry · decisión": estrategias/01-carry/decision.md
