@@ -79,6 +79,7 @@ nav:
       - "0008 Spec Kit solo para historias grandes": adr/0008-spec-kit-solo-para-historias-grandes.md
       - "0009 Streamlit y Docker para el dashboard": adr/0009-streamlit-y-docker-para-el-dashboard.md
       - "0010 Dagster para orquestar el lakehouse": adr/0010-dagster-para-orquestar-el-lakehouse.md
+      - "0011 Contrato de estrategia": adr/0011-contrato-de-estrategia.md
       - Plantilla: adr/0000-plantilla.md
   - Metodología:
       - metodologia/README.md

@@ -51,9 +51,12 @@ conflictos. El responsable de cada ticket es el asignado en Jira.
 | David | David con Claude Code | Núcleo de ejecución y paper trading (`execution/`, runner, `portfolio_risk/`), despliegue (`deploy/`, CI/CD), carry (H2, H3, H4), holdout, dashboard en vivo, release |
 | Boris | Boris con Codex | Estrategia 2 (tendencia), Polymarket, sentimiento, observabilidad (Prometheus, Grafana, Loki), Power BI y entregables académicos |
 
-- **Contratos primero.** Si tu trabajo necesita algo del otro carril (por ejemplo, conectar una
-  estrategia al runner), usa el puerto publicado en `domain/ports.py`. No cambies el núcleo ajeno:
-  abre un ticket o comenta en el del otro carril.
+- **Contratos primero.** Si tu trabajo necesita algo del otro carril, usa el puerto publicado en
+  `domain/ports.py`. No cambies el núcleo ajeno: abre un ticket o comenta en el del otro carril.
+- **Estrategias nuevas:** implementan el puerto `Strategy` (instantánea point-in-time → `Signal`,
+  [ADR-0011](docs/adr/0011-contrato-de-estrategia.md)) y se añaden a `STRATEGIES` en
+  `tests/unit/strategies/test_strategy_contract.py`: deben pasar la prueba de contrato
+  (validez, determinismo y paridad backtest ↔ paper).
 - **Revisión cruzada obligatoria.** Nadie fusiona su propio PR sin la aprobación del otro carril.
   La regla de GitHub exige 1 aprobación y la CI en verde. Revisa con la guía
   `.claude/skills/code-review-and-quality/SKILL.md`.

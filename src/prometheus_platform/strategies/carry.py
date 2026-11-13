@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
 
 from prometheus_platform.domain.carry_rules import (
     CarryAction,
@@ -18,9 +19,11 @@ from prometheus_platform.domain.carry_rules import (
     decide,
     signal,
 )
-from prometheus_platform.domain.model import FundingRate, InstrumentId, Venue
+from prometheus_platform.domain.market import MarketSnapshot
+from prometheus_platform.domain.model import FundingRate, InstrumentId, Signal, Venue
 
 PERP_SUFFIX = "-PERP"
+MAX_INTERVAL_HOURS = 8
 # Configuración de H2 elegida en la evaluación (docs/estrategias/01-carry/evaluacion.md).
 H2_PARAMS = CarryParams(k=9, theta=0.20)
 
@@ -51,7 +54,11 @@ class CarryDecision:
 
 
 class CarryStrategy:
-    """Carry delta-neutral: spot largo y perpetuo corto. H2 usa ``H2_PARAMS``."""
+    """Carry delta-neutral: spot largo y perpetuo corto. H2 usa ``H2_PARAMS``.
+
+    Cumple el puerto ``Strategy`` (``on_snapshot``) y además expone ``evaluate`` y ``walk``, que
+    usa el runner del carry para ponerse al día liquidación por liquidación.
+    """
 
     def __init__(self, symbols: Sequence[str], params: CarryParams, strategy_id: str) -> None:
         if not symbols:
@@ -59,6 +66,53 @@ class CarryStrategy:
         self.symbols = tuple(symbols)
         self.params = params
         self.strategy_id = strategy_id
+        self._open: dict[str, bool] = {}
+        self._last: dict[str, datetime] = {}
+
+    # --- puerto Strategy -------------------------------------------------------------------
+
+    @property
+    def instruments(self) -> tuple[InstrumentId, ...]:
+        return tuple(i for s in self.symbols for i in (spot_instrument(s), perp_instrument(s)))
+
+    @property
+    def lookback(self) -> timedelta:
+        """k liquidaciones con el intervalo más largo (8 h); con intervalos cortos entran más."""
+        return timedelta(hours=MAX_INTERVAL_HOURS * self.params.k)
+
+    def on_snapshot(self, snapshot: MarketSnapshot) -> list[Signal]:
+        """Peso objetivo por pata: ±1/(2n) dentro y 0 fuera (1x, enmienda 2).
+
+        La histéresis avanza con cada liquidación nueva de la instantánea, en orden. Sin ninguna
+        liquidación todavía, el símbolo queda fuera.
+        """
+        weight = Decimal(1) / (2 * len(self.symbols))
+        signals = []
+        for symbol in self.symbols:
+            history = snapshot.funding.get(perp_instrument(symbol), ())
+            if history:
+                decisions = self.walk(
+                    history, since=self._last.get(symbol), is_open=self._open.get(symbol, False)
+                )
+                for d in decisions:
+                    if d.action is CarryAction.ENTRAR:
+                        self._open[symbol] = True
+                    elif d.action is CarryAction.SALIR:
+                        self._open[symbol] = False
+                    self._last[symbol] = d.funding_time
+            w = weight if self._open.get(symbol, False) else Decimal(0)
+            for instrument, target in ((spot_instrument(symbol), w), (perp_instrument(symbol), -w)):
+                signals.append(
+                    Signal(
+                        strategy_id=self.strategy_id,
+                        instrument=instrument,
+                        generated_at=snapshot.as_of,
+                        target_weight=target,
+                    )
+                )
+        return signals
+
+    # --- uso directo del runner ------------------------------------------------------------
 
     def evaluate(self, history: Sequence[FundingRate], *, is_open: bool) -> CarryDecision:
         """Decisión en la última liquidación de ``history`` (ordenada de antigua a reciente)."""
