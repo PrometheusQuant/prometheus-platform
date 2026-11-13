@@ -63,7 +63,7 @@ variable "boot_volume_gbs" {
 variable "availability_domain_number" {
   type        = number
   default     = 1
-  description = "Dominio de disponibilidad (1, 2 o 3). Si una región tiene varios, prueba otro cuando no haya capacidad."
+  description = "Déjalo en 1. São Paulo y Bogotá tienen un solo dominio; solo las regiones grandes tienen 2 o 3."
 }
 
 variable "instance_name" {
