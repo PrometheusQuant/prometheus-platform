@@ -199,11 +199,25 @@ def test_watchdog_alerts_on_changes_not_on_every_check(tmp_path: Path) -> None:
 def test_watchdog_reports_failing_cycles_and_missing_heartbeats(tmp_path: Path) -> None:
     clock, notifier = FixedClock(NOW), RecordingNotifier()
     assert make_dog(tmp_path, clock, notifier).check() is RunnerHealth.MISSING
-    beat(tmp_path / "heartbeat.json", NOW, ok=False, detail="SOLUSDT (liquidar): ConnectionError")
+    assert notifier.alerts == []  # gracia: el runner puede no haber escrito aún su heartbeat
+    clock.advance_to(NOW + timedelta(minutes=11))
+    assert make_dog(tmp_path, clock, notifier).check() is RunnerHealth.MISSING
+    beat(tmp_path / "heartbeat.json", clock.now(), ok=False, detail="SOLUSDT: ConnectionError")
     assert make_dog(tmp_path, clock, notifier).check() is RunnerHealth.FAILING
 
     assert [a.severity for a in notifier.alerts] == [AlertSeverity.CRITICAL, AlertSeverity.ERROR]
     assert "ConnectionError" in notifier.alerts[-1].details["detalle"]
+
+
+def test_watchdog_started_before_the_runner_does_not_raise_a_false_alarm(tmp_path: Path) -> None:
+    """Pasó el 2026-11-13: el vigilante leyó dos segundos antes del primer heartbeat."""
+    clock, notifier = FixedClock(NOW), RecordingNotifier()
+    make_dog(tmp_path, clock, notifier).check()  # todavía no hay heartbeat
+    clock.advance_to(NOW + timedelta(seconds=30))
+    beat(tmp_path / "heartbeat.json", clock.now())
+    assert make_dog(tmp_path, clock, notifier).check() is RunnerHealth.OK
+
+    assert notifier.alerts == []
 
 
 def test_watchdog_repeats_a_long_outage_every_hour(tmp_path: Path) -> None:

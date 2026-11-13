@@ -9,7 +9,7 @@ alerta en cada **cambio** de estado, no en cada revisión.
 | ``ok`` | Heartbeat reciente y sano | INFO de recuperación, si antes no lo estaba |
 | ``con_fallos`` | Heartbeat reciente con ``ok: false`` | ERROR |
 | ``caido`` | Heartbeat más viejo que el máximo | CRITICAL |
-| ``sin_heartbeat`` | No existe o no se puede leer | CRITICAL |
+| ``sin_heartbeat`` | No existe o no se puede leer durante más que el máximo | CRITICAL |
 
 El último estado se guarda en disco, así que funciona igual en un bucle que con ``--once``
 desde cron. Un mismo estado malo no se repite antes de ``repeat_after``. Solo se guarda cuando el
@@ -81,7 +81,16 @@ class Watchdog:
             detail = str(beat.get("detail", ""))
         else:
             health = RunnerHealth.OK
-        previous, alerted_at = self._load()
+        previous, alerted_at, missing_since = self._load()
+        if health is RunnerHealth.MISSING:
+            # Gracia: al arrancar, el vigilante puede leer antes de que el runner escriba su primer
+            # heartbeat. Solo se alerta si la falta dura más que la antigüedad máxima permitida.
+            missing_since = missing_since or now
+            if now - missing_since < self._max_age:
+                self._save(previous, alerted_at, missing_since)
+                return health
+        else:
+            missing_since = None
         changed = health is not previous
         repeat = (
             health is not RunnerHealth.OK
@@ -94,7 +103,7 @@ class Watchdog:
             return health
         if changed or repeat:
             alerted_at = now
-        self._save(health, alerted_at)
+        self._save(health, alerted_at, missing_since)
         return health
 
     def _alert(
@@ -129,18 +138,25 @@ class Watchdog:
             log.error("paper_watchdog_notify_failed", error="no entregada")
         return delivered
 
-    def _load(self) -> tuple[RunnerHealth, datetime | None]:
+    def _load(self) -> tuple[RunnerHealth, datetime | None, datetime | None]:
         try:
             data = json.loads(self._state.read_text(encoding="utf-8"))
-            at = data.get("alerted_at")
-            return RunnerHealth(data["health"]), datetime.fromisoformat(at) if at else None
+            at, since = data.get("alerted_at"), data.get("missing_since")
+            return (
+                RunnerHealth(data["health"]),
+                datetime.fromisoformat(at) if at else None,
+                datetime.fromisoformat(since) if since else None,
+            )
         except (OSError, ValueError, KeyError, TypeError):
-            return RunnerHealth.OK, None  # primera vez: se asume sano, así una caída avisa
+            return RunnerHealth.OK, None, None  # primera vez: se asume sano, así una caída avisa
 
-    def _save(self, health: RunnerHealth, alerted_at: datetime | None) -> None:
+    def _save(
+        self, health: RunnerHealth, alerted_at: datetime | None, missing_since: datetime | None
+    ) -> None:
         payload = {
             "health": health.value,
             "alerted_at": alerted_at.isoformat() if alerted_at else None,
+            "missing_since": missing_since.isoformat() if missing_since else None,
         }
         self._state.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._state.with_name(f"{self._state.name}.tmp")
