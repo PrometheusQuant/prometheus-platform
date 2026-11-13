@@ -38,7 +38,10 @@ class OrderFilled(DomainEvent):
     client_order_id: str
     fill_price: Decimal
     fill_quantity: Decimal
-    fee: Decimal
+    fee: Decimal  # comisión cobrada
+    # Coste del slippage frente al precio de referencia (ya incluido en fill_price). Va aparte
+    # para que los informes muestren el coste total sin reconstruir el precio de referencia.
+    slippage: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

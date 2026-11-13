@@ -28,6 +28,7 @@ docker compose down
 | ¿Qué riesgo hay? | ¿Qué puede salir mal? | `data/research/simulation/summary.json` | `uv run pq research simulate --figures <dir>` |
 | ¿Y si invierto? | ¿Qué me pasaría con mi capital? | Silver de H2 (desarrollo): Monte Carlo del cap. 6 con tu capital, horizonte y riesgo de quiebra; θ solo pre-registrado | `uv run pq silver build --symbol <S>` |
 | ¿Qué predice hoy? | ¿Habrá funding alto en la próxima liquidación? | Clasificador del cap. 5 entrenado con el desarrollo; predice solo con datos **posteriores** al holdout | `uv run pq ingest --source api ...` + `pq silver build` |
+| ¿Cómo va en vivo? | ¿Cómo va el paper trading ahora? | `data/paper/diario.jsonl` y `heartbeat.json`: equity frente a lo esperado según el backtest, funding, costes, posiciones, órdenes, decisiones, heartbeat y kill-switch | `uv run pq paper run` ([runbook](paper-trading.md)) |
 
 Si falta un artefacto, la pestaña muestra el comando que lo genera.
 
@@ -42,7 +43,7 @@ Si falta un artefacto, la pestaña muestra el comando que lo genera.
 
 [Playwright](https://playwright.dev/python/) abre el dashboard en un Chromium sin ventana, como lo vería
 un usuario. Complementa las pruebas de `AppTest` (que ejecutan el script sin navegador) y comprueba lo
-que ellas no ven: que el contenedor sirve la página, que las 4 pestañas se pueden abrir y que ninguna
+que ellas no ven: que el contenedor sirve la página, que todas las pestañas se pueden abrir y que ninguna
 muestra un error.
 
 ```bash

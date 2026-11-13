@@ -1,4 +1,4 @@
-"""El dashboard, tal como lo ve un usuario: abre, muestra las 4 pestañas y ninguna falla.
+"""El dashboard, tal como lo ve un usuario: abre, muestra todas las pestañas y ninguna falla.
 
 Funciona con o sin artefactos: cada pestaña debe mostrar datos o el aviso con el comando que
 los genera (la CI lo prueba con un lakehouse vacío; en local, con los datos reales).
@@ -17,6 +17,7 @@ TABS = {
     "¿Qué riesgo hay? Simulación": "Simulación de Markov y Monte Carlo (cap. 6)",
     "¿Y si invierto? Simula tu inversión": "Simula tu inversión en el carry (H2)",
     "¿Qué predice hoy? Funding en vivo": "¿Habrá funding alto en la próxima liquidación?",
+    "¿Cómo va en vivo? Paper trading": "Paper trading del carry H2 en vivo",
 }
 TIMEOUT_MS = 30_000
 
@@ -29,7 +30,7 @@ def dashboard(page: Page, base_url: str) -> Page:
     return page
 
 
-def test_opens_with_title_and_the_four_tabs(dashboard: Page) -> None:
+def test_opens_with_title_and_all_the_tabs(dashboard: Page) -> None:
     expect(dashboard).to_have_title("PrometheusQuant")
     expect(dashboard.get_by_role("heading", level=1)).to_contain_text("tablero de investigación")
     expect(dashboard.get_by_role("tab")).to_have_text(list(TABS))

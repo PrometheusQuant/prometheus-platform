@@ -21,6 +21,21 @@ uv run pq paper run --capital 1000 --interval 60 --symbols SOLUSDT,BNBUSDT,XRPUS
   [KE-015](errores-conocidos.md).
 - El capital solo se usa la primera vez. Después manda el estado guardado del bróker.
 
+## Vigilarlo
+
+- **Dashboard:** pestaña «¿Cómo va en vivo?» (`make dashboard`).
+- **Telegram:** kill-switch, pata sin cubrir, drawdown y resumen diario. Ver
+  [alertas del paper trading](alertas.md#alertas-del-paper-trading-pq-55).
+- **Vigilante:** un proceso caído no puede avisar de su propia caída. Junto al runner, corre:
+
+    ```bash
+    uv run pq paper watchdog            # bucle: revisa el heartbeat cada 60 s
+    uv run pq paper watchdog --once     # una revisión, para cron (código 1 si no está sano)
+    ```
+
+    Alerta en cada **cambio** de estado (caído, con fallos, de vuelta) y repite cada hora mientras
+    siga mal. El estado se guarda en `data/paper/watchdog.json`.
+
 ## Qué hace cada ciclo
 
 El runner trabaja **por niveles**. Cada decisión deja en el diario el **estado deseado** del símbolo

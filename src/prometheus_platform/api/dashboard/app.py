@@ -11,6 +11,8 @@ from pathlib import Path
 import polars as pl
 import streamlit as st
 
+from prometheus_platform.adapters.clock import SystemClock
+from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.api.dashboard.artifacts import (
     Artifacts,
     equity_curves,
@@ -23,7 +25,10 @@ from prometheus_platform.api.dashboard.artifacts import (
     transition_table,
     validation_table,
 )
+from prometheus_platform.api.paper.compose import PaperPaths
+from prometheus_platform.api.paper.report import PaperView, build_view, read_heartbeat
 from prometheus_platform.ops.settings import load_settings
+from prometheus_platform.portfolio_risk.kill_switch import KillSwitch
 from prometheus_platform.research import nowcast, what_if
 from prometheus_platform.research.simulation import WeeklyRegimeModel
 
@@ -35,6 +40,7 @@ LABELS = [
     "¿Qué riesgo hay? Simulación",
     "¿Y si invierto? Simula tu inversión",
     "¿Qué predice hoy? Funding en vivo",
+    "¿Cómo va en vivo? Paper trading",
 ]
 
 
@@ -225,10 +231,160 @@ def _tab_nowcast(data_dir: Path) -> None:
     st.caption("Es una predicción estadística, no una recomendación de inversión.")
 
 
+def _expected_cagr(art: Artifacts) -> float | None:
+    """CAGR de la configuración elegida de H2 en el periodo de desarrollo (no es una predicción)."""
+    cagr = art.carry.get("H2", {}).get("selected_performance", {}).get("cagr")
+    return float(cagr) if isinstance(cagr, int | float) else None
+
+
+def _live_status(paths: PaperPaths, max_age_minutes: int) -> None:
+    beat = read_heartbeat(paths.heartbeat)
+    if beat is None:
+        st.warning("Sin heartbeat: el runner no se ha ejecutado aún en esta carpeta.")
+    else:
+        age = (SystemClock().now() - beat["at"]).total_seconds() / 60
+        text = f"Último ciclo hace {age:.0f} min ({beat['at']:%Y-%m-%d %H:%M} UTC)."
+        if age > max_age_minutes:
+            st.error(f"Runner caído o detenido. {text}")
+        elif not beat.get("ok", False):
+            st.warning(f"Último ciclo con fallos: {beat.get('detail', '')}. {text}")
+        else:
+            st.success(f"Runner en marcha. {text}")
+    switch = KillSwitch(paths.kill_switch, SystemClock(), JsonlEventJournal(paths.journal))
+    state = switch.state()
+    if state is None:
+        st.success("Kill-switch armado: la operación está permitida.")
+    else:
+        st.error(
+            f"Kill-switch ACTIVADO: {state.get('reason', '')} (vía {state.get('source', '')})."
+        )
+
+
+def _live_curve(view: PaperView, cagr: float | None) -> None:
+    start = view.valuations[0]
+    curve = pl.DataFrame(
+        {
+            "hora (UTC)": [v.occurred_at for v in view.valuations],
+            "paper trading": [float(v.equity) for v in view.valuations],
+        }
+    )
+    if cagr is not None:
+        days = [
+            (v.occurred_at - start.occurred_at).total_seconds() / 86_400 for v in view.valuations
+        ]
+        curve = curve.with_columns(
+            pl.Series(
+                "esperado según el backtest",
+                [float(start.equity) * (1 + cagr) ** (d / 365.25) for d in days],
+            )
+        )
+    st.line_chart(curve, x="hora (UTC)")
+    if cagr is not None:
+        st.caption(
+            f"«Esperado» es el CAGR de la configuración elegida en el periodo de desarrollo "
+            f"({cagr:.2%} anual) aplicado al capital inicial. No es una predicción."
+        )
+
+
+def _live_tables(view: PaperView) -> None:
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**Posiciones por pata**")
+        if view.positions:
+            st.dataframe(
+                pl.DataFrame(
+                    {
+                        "instrumento": [i.symbol for i in view.positions],
+                        "pata": [
+                            "perpetuo" if i.symbol.endswith("-PERP") else "spot"
+                            for i in view.positions
+                        ],
+                        "cantidad": [str(q) for q in view.positions.values()],
+                    }
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+        else:
+            st.caption("Sin posiciones abiertas.")
+    with right:
+        st.markdown("**Últimas órdenes ejecutadas**")
+        recent = view.fills[-10:][::-1]
+        if recent:
+            st.dataframe(
+                pl.DataFrame(
+                    {
+                        "hora (UTC)": [f.at.strftime("%Y-%m-%d %H:%M") for f in recent],
+                        "tipo": [f.label for f in recent],
+                        "instrumento": [f.instrument.symbol for f in recent],
+                        "lado": [f.side.value for f in recent],
+                        "precio": [f"{f.price:.4f}" for f in recent],
+                        "comisión": [f"{f.fee:.4f}" for f in recent],
+                        "slippage": [f"{f.slippage:.4f}" for f in recent],
+                    }
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+        else:
+            st.caption("Aún no hay órdenes.")
+    st.markdown("**Últimas liquidaciones y decisiones**")
+    decisions = view.settlements[-12:][::-1]
+    st.dataframe(
+        pl.DataFrame(
+            {
+                "liquidación (UTC)": [d.funding_time.strftime("%Y-%m-%d %H:%M") for d in decisions],
+                "símbolo": [d.symbol for d in decisions],
+                "tasa": [f"{d.rate:.6f}" for d in decisions],
+                "S_k anualizada": [f"{float(d.s_k):.1%}" if d.s_k else "n/d" for d in decisions],
+                "decisión": [d.action for d in decisions],
+                "estado deseado": ["dentro" if d.target_open else "fuera" for d in decisions],
+                "funding (USD)": [f"{d.amount:.4f}" for d in decisions],
+            }
+        ),
+        hide_index=True,
+        width="stretch",
+    )
+
+
+def _tab_live(data_dir: Path, art: Artifacts, max_age_minutes: int) -> None:
+    st.subheader("Paper trading del carry H2 en vivo")
+    paths = PaperPaths(data_dir / "paper")
+    view = build_view(JsonlEventJournal(paths.journal).replay())
+    if not view.valuations:
+        st.info(
+            "Aún no hay paper trading en esta carpeta. Se arranca con `uv run pq paper run` "
+            "(runbook de paper trading)."
+        )
+        _live_status(paths, max_age_minutes)
+        return
+    if view.broker == "simulado":
+        st.caption(
+            "Bróker **simulado** sobre precios y funding reales de Binance: no es Binance Demo "
+            "ni dinero real."
+        )
+    equity, initial = view.equity or 0, view.initial_equity or 0
+    cols = st.columns(5)
+    cols[0].metric("Equity", f"{equity:,.2f} USD")
+    cols[1].metric("PnL acumulado", f"{equity - initial:+,.2f} USD")
+    cols[2].metric("Funding neto", f"{view.funding:+,.4f} USD")
+    cols[3].metric(
+        "Comisiones y slippage",
+        f"{view.costs:,.4f} USD",
+        help=f"Comisiones {view.fees:,.4f} USD + slippage {view.slippage:,.4f} USD",
+    )
+    cols[4].metric("Drawdown", f"{view.drawdown:.2%}")
+    _live_status(paths, max_age_minutes)
+    _live_curve(view, _expected_cagr(art))
+    _live_tables(view)
+    st.caption("Recarga la página para ver el último ciclo.")
+
+
 def main() -> None:
     st.set_page_config(page_title="PrometheusQuant", layout="wide")
     st.title("PrometheusQuant: tablero de investigación")
-    data_dir = load_settings().data_dir
+    settings = load_settings()
+    data_dir = settings.data_dir
     art = load_artifacts(data_dir)
     st.caption(f"Artefactos leídos de `{data_dir}` (solo lectura).")
     tabs = st.tabs(LABELS)
@@ -241,6 +397,8 @@ def main() -> None:
         _tab_what_if(data_dir)
     with tabs[5]:
         _tab_nowcast(data_dir)
+    with tabs[6]:
+        _tab_live(data_dir, art, settings.paper_heartbeat_max_age_minutes)
 
 
 main()

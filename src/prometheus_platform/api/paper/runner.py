@@ -37,6 +37,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+from prometheus_platform.api.paper.report import build_view, daily_summary
+from prometheus_platform.domain.alerts import Alert, AlertSeverity
 from prometheus_platform.domain.carry_rules import CarryAction, CarryParams, needs_rebalance
 from prometheus_platform.domain.events import (
     DomainEvent,
@@ -48,7 +50,7 @@ from prometheus_platform.domain.events import (
     SignalGenerated,
 )
 from prometheus_platform.domain.model import FundingRate, InstrumentId, Side, Signal
-from prometheus_platform.domain.ports import Broker, Clock, EventJournal, LiveMarket
+from prometheus_platform.domain.ports import Broker, Clock, EventJournal, LiveMarket, Notifier
 from prometheus_platform.ops.logging import get_logger
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch, enforce
 from prometheus_platform.portfolio_risk.risk import (
@@ -93,6 +95,8 @@ class RunnerConfig:
     # decisiones, no en el tamaño (ver el runbook).
     sizing_buffer: Decimal = Decimal("0.02")
     valuation_every: timedelta = timedelta(minutes=15)
+    # Caída desde el máximo de la curva que dispara una alerta ERROR (PQ-55).
+    drawdown_alert: Decimal = Decimal("0.03")
 
     def __post_init__(self) -> None:
         if not self.symbols:
@@ -103,12 +107,15 @@ class RunnerConfig:
             raise ValueError("history_limit debe ser >= k")
         if not ZERO <= self.sizing_buffer < 1:
             raise ValueError("sizing_buffer debe estar en [0, 1)")
+        if not ZERO < self.drawdown_alert < 1:
+            raise ValueError("drawdown_alert debe estar en (0, 1)")
 
     def describe(self) -> str:
         p = self.params
         return (
             f"k={p.k} theta={p.theta} always_on={p.always_on} history_limit={self.history_limit} "
-            f"sizing_buffer={self.sizing_buffer} execution_delay={EXECUTION_DELAY}"
+            f"sizing_buffer={self.sizing_buffer} execution_delay={EXECUTION_DELAY} "
+            f"drawdown_alert={self.drawdown_alert}"
         )
 
 
@@ -149,6 +156,7 @@ class _Recovered:
     rebalance_due: dict[str, datetime] = field(default_factory=dict)
     day: date | None = None
     day_start_equity: Decimal | None = None
+    peak_equity: Decimal | None = None
 
 
 def _recover(events: Iterable[DomainEvent]) -> _Recovered:
@@ -172,8 +180,10 @@ def _recover(events: Iterable[DomainEvent]) -> _Recovered:
                 f"{due:%Y%m%dT%H%M}-rebalanceo-"
             ):
                 del state.rebalance_due[symbol]
-        elif isinstance(event, PortfolioValued) and event.occurred_at.date() != state.day:
-            state.day, state.day_start_equity = event.occurred_at.date(), event.equity
+        elif isinstance(event, PortfolioValued):
+            if event.occurred_at.date() != state.day:
+                state.day, state.day_start_equity = event.occurred_at.date(), event.equity
+            state.peak_equity = max(state.peak_equity or event.equity, event.equity)
     return state
 
 
@@ -211,8 +221,12 @@ class PaperRunner:
         risk: RiskManager,
         clock: Clock,
         heartbeat_path: Path,
+        notifier: Notifier | None = None,
+        environment: str = "paper",
     ) -> None:
         self.config = config
+        self._notifier = notifier
+        self._environment = environment
         self._market = market
         self._broker = broker
         self._journal = journal
@@ -233,6 +247,8 @@ class PaperRunner:
         self._rebalance_due = recovered.rebalance_due
         self._day = recovered.day
         self._day_start = recovered.day_start_equity
+        self._peak = recovered.peak_equity
+        self._drawdown_alerted = False
         self._last_valued: datetime | None = None
         self._imbalanced_since: dict[str, datetime] = {}
         self._warnings: set[str] = set()  # violaciones leves vigentes: se registran al aparecer
@@ -265,9 +281,11 @@ class PaperRunner:
         self._roll_day(now, self._broker.equity(marks))
         book = self._book(marks, now)
         if not killed:
-            enforce(
-                self._to_record(self._risk.monitor(book)), self._kill, self._journal, self._clock
-            )
+            recorded = self._to_record(self._risk.monitor(book))
+            for breach in recorded:
+                if breach.rule == "pata_sin_cubrir":  # alerta CRITICAL por Telegram (PQ-55)
+                    log.critical("paper_unhedged_leg", detail=breach.detail)
+            enforce(recorded, self._kill, self._journal, self._clock)
             killed = self._kill.active
 
         problems: list[str] = []
@@ -287,6 +305,7 @@ class PaperRunner:
                 )
 
         equity = self._broker.equity(marks)
+        self._watch_drawdown(equity)
         if orders or settlements or self._valuation_due(now):
             self._journal.append(
                 PortfolioValued(
@@ -637,9 +656,48 @@ class PaperRunner:
         return ages
 
     def _roll_day(self, now: datetime, equity: Decimal) -> None:
-        """Equity de referencia de la pérdida diaria: la primera valoración del día UTC."""
+        """Equity de referencia de la pérdida diaria: la primera valoración del día UTC.
+
+        Al cambiar de día se envía el resumen del día anterior (alerta INFO, PQ-55).
+        """
         if self._day != now.date() or self._day_start is None:
+            finished = self._day
             self._day, self._day_start = now.date(), equity
+            if finished is not None and finished < now.date():
+                self._send_daily_summary(finished, now)
+
+    def _send_daily_summary(self, day: date, now: datetime) -> None:
+        if self._notifier is None:
+            return
+        try:
+            summary = daily_summary(build_view(self._journal.replay()), day)
+            self._notifier.notify(
+                Alert(
+                    severity=AlertSeverity.INFO,
+                    title=f"resumen diario del paper trading ({self._broker.name})",
+                    occurred_at=now,
+                    environment=self._environment,
+                    details=summary.details(),
+                )
+            )
+        except Exception as exc:  # el resumen nunca detiene el ciclo
+            log.error("paper_daily_summary_failed", error=type(exc).__name__)
+
+    def _watch_drawdown(self, equity: Decimal) -> None:
+        """Alerta ERROR al cruzar el umbral; se rearma al recuperar la mitad (sin repetirla)."""
+        self._peak = max(self._peak or equity, equity)
+        drawdown = 1 - equity / self._peak if self._peak > 0 else ZERO
+        if drawdown > self.config.drawdown_alert and not self._drawdown_alerted:
+            log.error(
+                "paper_drawdown",
+                drawdown=f"{drawdown:.2%}",
+                threshold=f"{self.config.drawdown_alert:.2%}",
+                equity=f"{equity:.2f}",
+                peak=f"{self._peak:.2f}",
+            )
+            self._drawdown_alerted = True
+        elif drawdown < self.config.drawdown_alert / 2:
+            self._drawdown_alerted = False
 
     def _to_record(self, breaches: Sequence[Breach]) -> list[Breach]:
         """Las graves siempre; las leves, solo al aparecer (no una línea por ciclo)."""
