@@ -9,8 +9,10 @@ from typing import Any
 import httpx
 import pytest
 
+from prometheus_platform.adapters import binance_public_market as module
 from prometheus_platform.adapters.binance_public_market import BinancePublicMarket, MarketDataError
 from prometheus_platform.adapters.in_memory import FixedClock
+from prometheus_platform.domain.model import InstrumentId, Venue
 
 NOW = datetime(2026, 11, 6, 9, 30, tzinfo=UTC)
 MS = 1000
@@ -115,3 +117,82 @@ def test_each_settlement_keeps_its_own_interval_and_rounds_to_the_hour() -> None
     got = m.recent_funding("XRPUSDT", 10)
     assert [r.funding_time for r in got] == times
     assert [r.interval_hours for r in got] == [4, 8, 4, 4]  # la primera usa el actual
+
+
+# --- MarketDataFeed para el ejecutor genérico (PQ-116) --------------------------------------
+
+HOUR_MS = 3_600_000
+
+
+def kline(open_ms: int, close: str = "101") -> list[object]:
+    return [open_ms, "100", "102", "99", close, "5", open_ms + HOUR_MS - 1, "0", 1, "0", "0", "0"]
+
+
+def paged_market(rows: list[list[object]], seen: list[dict[str, str]]) -> BinancePublicMarket:
+    """Responde a klines como Binance: desde ``startTime``, hasta ``limit`` filas."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        seen.append({"path": request.url.path, **params})
+        start, limit = int(params["startTime"]), int(params["limit"])
+        page = [r for r in rows if int(str(r[0])) >= start][:limit]
+        return httpx.Response(200, json=page)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return BinancePublicMarket(client, FixedClock(NOW))
+
+
+def test_bars_are_closed_hourly_candles_known_at_their_close() -> None:
+    start = datetime(2026, 11, 6, 6, tzinfo=UTC)
+    rows = [kline(ms(start) + i * HOUR_MS) for i in range(4)]  # 06, 07, 08 y 09 (en curso)
+    seen: list[dict[str, str]] = []
+    btc = InstrumentId("BTCUSDT", Venue.BINANCE)
+    bars = paged_market(rows, seen).bars(btc, start, NOW)
+    assert [b.open_time.hour for b in bars] == [6, 7, 8]  # la de las 09:00 cierra a las 10:00
+    assert bars[0].close_time == datetime(2026, 11, 6, 7, tzinfo=UTC)
+    assert bars[0].close == Decimal("101")
+    assert seen[0]["path"] == "/api/v3/klines"
+    assert seen[0]["interval"] == "1h"
+
+    perp = InstrumentId("BTCUSDT-PERP", Venue.BINANCE)
+    seen.clear()
+    paged_market(rows, seen).bars(perp, start, NOW)
+    assert seen[0]["path"] == "/fapi/v1/klines"
+    assert seen[0]["symbol"] == "BTCUSDT"
+
+
+def test_bars_follow_the_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(module, "PAGE", 2)
+    start = datetime(2026, 11, 6, 3, tzinfo=UTC)
+    rows = [kline(ms(start) + i * HOUR_MS) for i in range(5)]
+    seen: list[dict[str, str]] = []
+    bars = paged_market(rows, seen).bars(InstrumentId("BTCUSDT", Venue.BINANCE), start, NOW)
+    assert [b.open_time.hour for b in bars] == [3, 4, 5, 6, 7]
+    assert len(seen) == 3
+
+
+def test_endless_pagination_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(module, "PAGE", 1)
+    monkeypatch.setattr(module, "MAX_PAGES", 2)
+    start = datetime(2026, 11, 6, 3, tzinfo=UTC)
+    rows = [kline(ms(start) + i * HOUR_MS) for i in range(5)]
+    with pytest.raises(MarketDataError, match="páginas"):
+        paged_market(rows, []).bars(InstrumentId("BTCUSDT", Venue.BINANCE), start, NOW)
+
+
+def test_funding_rates_cover_a_range_and_spot_has_none() -> None:
+    times = [datetime(2026, 11, 5, h, tzinfo=UTC) for h in (0, 8, 16)]
+    m = market(
+        {
+            "/fapi/v1/fundingRate": [
+                {"symbol": "SOLUSDT", "fundingTime": ms(t) + 3, "fundingRate": "0.0001"}
+                for t in times
+            ],
+            "/fapi/v1/fundingInfo": [{"symbol": "SOLUSDT", "fundingIntervalHours": 8}],
+        }
+    )
+    perp = InstrumentId("SOLUSDT-PERP", Venue.BINANCE)
+    rates = m.funding_rates(perp, times[1], NOW)
+    assert [r.funding_time for r in rates] == times[1:]
+    assert all(r.interval_hours == 8 for r in rates)
+    assert m.funding_rates(InstrumentId("SOLUSDT", Venue.BINANCE), times[0], NOW) == []

@@ -24,6 +24,11 @@ día salen del diario (``replay``).
 
 **Arranque en frío.** Sin liquidaciones previas en el diario, el estado de la histéresis se
 reconstruye recorriendo el historial reciente (``CarryStrategy.walk``).
+
+**Otras estrategias (PQ-116).** Además del carry, el runner opera una lista de ``Strategy``
+(ADR-0011), cada una con su parte del capital (``StrategyAllocation``), mediante el ejecutor
+genérico de ``executor.py``. El carry usa el resto del capital. Cada instrumento tiene un solo
+dueño, y la cobertura spot/perpetuo solo se vigila en los símbolos del carry.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+from prometheus_platform.api.paper.executor import Account, StrategyExecutor
 from prometheus_platform.api.paper.report import build_view, daily_summary
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
 from prometheus_platform.domain.carry_rules import CarryAction, CarryParams, needs_rebalance
@@ -50,7 +56,15 @@ from prometheus_platform.domain.events import (
     SignalGenerated,
 )
 from prometheus_platform.domain.model import FundingRate, InstrumentId, Side, Signal
-from prometheus_platform.domain.ports import Broker, Clock, EventJournal, LiveMarket, Notifier
+from prometheus_platform.domain.ports import (
+    Broker,
+    Clock,
+    EventJournal,
+    LiveMarket,
+    MarketDataFeed,
+    Notifier,
+)
+from prometheus_platform.execution.allocation import StrategyAllocation, validate_allocations
 from prometheus_platform.ops.logging import get_logger
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch, enforce
 from prometheus_platform.portfolio_risk.risk import (
@@ -223,6 +237,8 @@ class PaperRunner:
         heartbeat_path: Path,
         notifier: Notifier | None = None,
         environment: str = "paper",
+        strategies: Sequence[StrategyAllocation] = (),
+        feed: MarketDataFeed | None = None,
     ) -> None:
         self.config = config
         self._notifier = notifier
@@ -235,13 +251,28 @@ class PaperRunner:
         self._clock = clock
         self._heartbeat = heartbeat_path
         self._strategy = CarryStrategy(config.symbols, config.params, config.strategy_id)
-        foreign = sorted({symbol_of(i) for i in broker.positions()} - set(config.symbols))
+        self._allocations = tuple(strategies)
+        allocated = validate_allocations(self._allocations)
+        if allocated >= 1:
+            raise ValueError(f"Las estrategias se asignan {allocated}: no queda capital al carry")
+        self._carry_share = 1 - allocated
+        history = list(journal.replay())
+        self._executor: StrategyExecutor | None = None
+        if self._allocations:
+            if feed is None:
+                raise ValueError("Las estrategias necesitan un MarketDataFeed para sus velas")
+            self._executor = StrategyExecutor(self._allocations, feed, journal, history)
+            shared = sorted(self._executor.symbols & set(config.symbols))
+            if shared:  # la cobertura del carry y la estrategia se pisarían en el mismo símbolo
+                raise ValueError(f"{', '.join(shared)} es del carry y de otra estrategia")
+        self._symbols = (*config.symbols, *sorted(self._executor.symbols if self._executor else ()))
+        foreign = sorted({symbol_of(i) for i in broker.positions()} - set(self._symbols))
         if foreign:  # no se podrían valorar ni cerrar, ni siquiera con el kill-switch
             raise ValueError(
                 f"El bróker tiene posiciones en {', '.join(foreign)}, fuera de --symbols: "
                 "inclúyelos o ciérralos antes"
             )
-        recovered = _recover(journal.replay())
+        recovered = _recover(history)
         self._processed = recovered.processed
         self._targets = recovered.targets
         self._rebalance_due = recovered.rebalance_due
@@ -262,8 +293,9 @@ class PaperRunner:
                 occurred_at=self._clock.now(),
                 broker=self._broker.name,
                 strategy_id=self.config.strategy_id,
-                symbols=",".join(self.config.symbols),
-                params=self.config.describe(),
+                symbols=",".join(self._symbols),
+                params=self.config.describe()
+                + (f" estrategias={self._executor.describe()}" if self._executor else ""),
             )
         )
         log.info("paper_runner_started", broker=self._broker.name, symbols=self.config.symbols)
@@ -303,6 +335,8 @@ class PaperRunner:
                 orders += self._guarded(
                     symbol, "reconciliar", problems, self._reconcile, symbol, marks, now
                 )
+        if self._executor is not None:
+            orders += self._run_strategies(self._executor, marks, now, problems, killed=killed)
 
         equity = self._broker.equity(marks)
         self._watch_drawdown(equity)
@@ -367,6 +401,41 @@ class PaperRunner:
                 detail=str(exc)[:200],
             )
             return 0
+
+    def _run_strategies(
+        self,
+        executor: StrategyExecutor,
+        marks: Marks,
+        now: datetime,
+        problems: list[str],
+        *,
+        killed: bool,
+    ) -> int:
+        """Las otras estrategias: decidir siempre; operar solo sin el kill-switch activado."""
+        orders = 0
+        for allocation in self._allocations:
+            name = allocation.strategy_id
+            self._guarded(name, "decidir", problems, executor.decide, allocation, now, problems)
+            if killed:
+                continue
+            account = Account(
+                equity=self._broker.equity(marks),
+                held=self._broker.positions(),
+                marks=marks,
+                limits=self._risk.limits,
+                sizing_buffer=self.config.sizing_buffer,
+            )
+            orders += self._guarded(
+                name,
+                "reconciliar",
+                problems,
+                executor.reconcile,
+                allocation,
+                account,
+                now,
+                lambda batch, tag: self._execute(batch, tag, marks, now),
+            )
+        return orders
 
     # --- liquidaciones y decisiones --------------------------------------------------------
 
@@ -527,8 +596,10 @@ class PaperRunner:
         """
         n = len(self.config.symbols)
         limits = self._risk.limits
-        equity = self._broker.equity(marks)
-        share = min(equity / n, limits.max_notional_symbol, limits.max_notional_total / n)
+        # Con otras estrategias (PQ-116), el carry opera solo su parte del capital.
+        equity = self._broker.equity(marks) * self._carry_share
+        total = limits.max_notional_total * self._carry_share
+        share = min(equity / n, limits.max_notional_symbol, total / n)
         return share / 2 * (1 - self.config.sizing_buffer)
 
     def _signal(self, targets: dict[InstrumentId, Decimal], marks: Marks, now: datetime) -> None:
@@ -608,7 +679,7 @@ class PaperRunner:
 
     def _marks(self) -> Marks:
         marks: Marks = {}
-        for symbol in self.config.symbols:
+        for symbol in self._symbols:
             try:
                 spot_price, mark = self._market.prices(symbol)
             except Exception as exc:
@@ -639,6 +710,7 @@ class PaperRunner:
             start_of_day_equity=self._day_start or equity,
             positions=positions,
             imbalance_age_seconds=self._imbalance_ages(positions, now),
+            hedged_symbols=frozenset(self.config.symbols),
         )
 
     def _imbalance_ages(self, positions: Sequence[Position], now: datetime) -> dict[str, float]:

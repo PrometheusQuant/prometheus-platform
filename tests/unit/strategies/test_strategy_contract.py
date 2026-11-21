@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from tests.contract.example_strategies import BTC, SmaTrend, hourly_bars
 from tests.contract.strategy_contract import History, check_strategy_contract
 
 from prometheus_platform.domain.market import MarketSnapshot, snapshot_at
@@ -45,6 +46,12 @@ def funding_history(symbols: tuple[str, ...], n: int = 240) -> History:
     return History(funding=funding)
 
 
+def bar_history(n: int = 200) -> History:
+    """Cierres que suben y bajan: la media móvil se cruza en los dos sentidos."""
+    closes = [Decimal(repr(round(100 + 10 * math.sin(i / 9), 4))) for i in range(n)]
+    return History(bars={BTC: hourly_bars(BTC, T0, closes)})
+
+
 H2 = ("SOLUSDT", "BNBUSDT", "XRPUSDT")
 STRATEGIES: list[tuple[str, Callable[[], Strategy], History]] = [
     ("carry-h2", lambda: CarryStrategy(H2, H2_PARAMS, "carry-h2"), funding_history(H2)),
@@ -53,6 +60,8 @@ STRATEGIES: list[tuple[str, Callable[[], Strategy], History]] = [
         lambda: CarryStrategy(("SOLUSDT",), H2_PARAMS.__class__(3, 0.10), "carry-k3"),
         funding_history(("SOLUSDT",)),
     ),
+    # Ejemplo de una sola pata del ejecutor genérico (PQ-116).
+    ("sma-ejemplo", SmaTrend, bar_history()),
 ]
 
 

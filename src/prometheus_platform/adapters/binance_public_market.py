@@ -7,20 +7,28 @@
   ``GET /fapi/v1/fundingInfo`` (8 h si el símbolo no aparece, igual que en la ingesta, PQ-65).
 
 Solo devuelve liquidaciones **ya ocurridas** (``fundingTime <= ahora``): nunca una tasa estimada.
+
+También implementa ``MarketDataFeed`` para el ejecutor genérico de señales (PQ-116):
+
+- ``bars``: velas de **1 h** ya cerradas (``GET /api/v3/klines`` o ``/fapi/v1/klines``). Como en el
+  silver, la vela se conoce al cerrar: ``close_time = open_time + 1 h``.
+- ``funding_rates``: liquidaciones de un rango, con el mismo intervalo por fila que
+  ``recent_funding``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 import httpx
 
-from prometheus_platform.domain.model import FundingRate
+from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId
 from prometheus_platform.domain.ports import Clock
 from prometheus_platform.ops.logging import get_logger
-from prometheus_platform.strategies.carry import perp_instrument
+from prometheus_platform.strategies.carry import is_perp, perp_instrument, symbol_of
 
 SPOT_API = "https://api.binance.com"
 FUTURES_API = "https://fapi.binance.com"
@@ -28,6 +36,8 @@ DEFAULT_INTERVAL_HOURS = 8
 VALID_INTERVALS = (1, 2, 4, 8)
 INTERVALS_TTL = timedelta(hours=1)
 HOUR_MS = 3_600_000
+PAGE = 1000  # filas por petición de klines y fundingRate
+MAX_PAGES = 20  # tope de seguridad: 20 000 velas son más de 2 años de historia horaria
 log = get_logger(component="binance_public_market")
 
 
@@ -62,6 +72,76 @@ class BinancePublicMarket:
         hueco), usa el intervalo actual de ``fundingInfo``.
         """
         rows = self._get_list(f"{FUTURES_API}/fapi/v1/fundingRate", symbol=symbol, limit=limit)
+        return self._settlements(symbol, rows)
+
+    def funding_rates(
+        self, instrument: InstrumentId, start: datetime, end: datetime
+    ) -> list[FundingRate]:
+        """Liquidaciones ya ocurridas con ``start <= funding_time <= end``."""
+        if not is_perp(instrument):
+            return []
+        symbol = symbol_of(instrument)
+        rows = self._pages(
+            f"{FUTURES_API}/fapi/v1/fundingRate",
+            symbol,
+            start,
+            end,
+            lambda row: int(row["fundingTime"]),
+        )
+        return [r for r in self._settlements(symbol, rows) if start <= r.funding_time <= end]
+
+    def bars(self, instrument: InstrumentId, start: datetime, end: datetime) -> list[Bar]:
+        """Velas de 1 h **ya cerradas** que abren en ``[start, end)``."""
+        symbol = symbol_of(instrument)
+        url = (
+            f"{FUTURES_API}/fapi/v1/klines" if is_perp(instrument) else f"{SPOT_API}/api/v3/klines"
+        )
+        now = self._clock.now()
+        rows = self._pages(url, symbol, start, end, lambda row: int(row[0]), interval="1h")
+        bars: dict[datetime, Bar] = {}
+        for row in rows:
+            opened = datetime.fromtimestamp(int(row[0]) / 1000, tz=UTC)
+            closed = opened + timedelta(hours=1)
+            if not start <= opened < end or closed > now:
+                continue  # fuera del rango, o la vela en curso: aún no se conoce
+            bars[opened] = Bar(
+                instrument=instrument,
+                open_time=opened,
+                close_time=closed,
+                open=Decimal(str(row[1])),
+                high=Decimal(str(row[2])),
+                low=Decimal(str(row[3])),
+                close=Decimal(str(row[4])),
+                volume=Decimal(str(row[5])),
+            )
+        return [bars[t] for t in sorted(bars)]
+
+    def _pages(
+        self,
+        url: str,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        time_of: Callable[[Any], int],
+        **extra: str,
+    ) -> list[Any]:
+        """Pide el rango por páginas de ``PAGE`` filas, avanzando desde la última fila recibida."""
+        cursor, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+        rows: list[Any] = []
+        for _ in range(MAX_PAGES):
+            page = self._get_list(
+                url, symbol=symbol, startTime=cursor, endTime=end_ms, limit=PAGE, **extra
+            )
+            rows += page
+            if len(page) < PAGE:
+                return rows
+            last = time_of(page[-1])
+            if last < cursor:  # la API no avanza: mejor fallar que pedir en bucle
+                raise MarketDataError(f"{url}: la paginación no avanza")
+            cursor = last + 1
+        raise MarketDataError(f"{url}: el rango pide más de {MAX_PAGES} páginas")
+
+    def _settlements(self, symbol: str, rows: list[Any]) -> list[FundingRate]:
         now = self._clock.now()
         current = self._interval(symbol)
         parsed = sorted(
@@ -117,7 +197,7 @@ class BinancePublicMarket:
             raise MarketDataError(f"{url}: se esperaba un objeto")
         return data
 
-    def _get_list(self, url: str, **params: str | int) -> list[dict[str, Any]]:
+    def _get_list(self, url: str, **params: str | int) -> list[Any]:
         data = self._get(url, **params)
         if not isinstance(data, list):
             raise MarketDataError(f"{url}: se esperaba una lista")

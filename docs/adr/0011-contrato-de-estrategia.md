@@ -59,7 +59,8 @@ Opción 1.
   - Boris escribe su estrategia contra el puerto y la prueba sin tocar el runner.
   - El look-ahead y las divergencias por ventana se detectan en la CI, no en paper trading.
 - **Negativas y riesgos:**
-  - **El runner todavía no ejecuta cualquier `Strategy`.** Sabe operar el carry: dos patas,
+  - **El runner todavía no ejecuta cualquier `Strategy`** *(resuelto el 2026-11-21 en PQ-116; ver
+    abajo)*. Sabe operar el carry: dos patas,
     funding y su reconciliación (PQ-54). Para conectar otra estrategia falta un ejecutor genérico
     que convierta los pesos objetivo de `Signal` en órdenes, pasando por `pre_trade`, el
     kill-switch y el diario. Es PQ-116, del carril de David, previo a PQ-82.
@@ -67,3 +68,14 @@ Opción 1.
     los límites de riesgo.
 - **Qué la revertiría:** adoptar NautilusTrader como motor también de paper. Entonces el puerto se
   adaptaría a su API de estrategias, y la prueba de contrato seguiría valiendo.
+
+## Actualización (2026-11-21, PQ-116): ejecutor genérico de señales
+
+El runner acepta una lista de `StrategyAllocation` (`execution/allocation.py`): la estrategia, su
+parte del capital, la banda de no operación y la latencia. El ejecutor (`api/paper/executor.py`)
+construye la instantánea con la ventana `lookback` en cada cierre de vela de 1 h y valida las
+señales como la prueba de contrato. Convierte los pesos vigentes en órdenes por niveles, con el
+mismo `pre_trade`, el kill-switch y el diario del carry. El carry sigue por su camino y usa el resto
+del capital. Para que una estrategia direccional de una pata no cuente como una pata del carry sin
+cubrir, `PortfolioSnapshot.hedged_symbols` limita esa vigilancia a los símbolos del carry. Detalle
+operativo en el [runbook de paper trading](../runbooks/paper-trading.md).
