@@ -86,6 +86,41 @@ Pulsa **Create**. En 1–2 minutos el estado pasa a *Running*; copia la **Public
 - mientras tanto se puede usar **VM.Standard.E2.1.Micro** (AMD, 1/8 OCPU, 1 GB, también gratuita).
   Alcanza para el runner y el vigilante, pero no para Dagster ni para el dashboard.
 
+**Lo que pasó en `sa-bogota-1` (21-nov-2026):** A1 (1 OCPU, 6 GB) respondió
+`500 Out of host capacity`, y E2.1.Micro respondió `404 NotAuthorizedOrNotFound`, que no es un error
+de capacidad. Lo más probable es que E2.1.Micro no se ofrezca en esa región (*por verificar*: en
+*Change shape → AMD* no debería aparecer). Bogotá tiene un solo dominio de disponibilidad y la región
+de origen no se puede cambiar, así que lo que queda es **reintentar A1 de forma automática**.
+
+### Reintento automático de A1 (≈ 10 min de configuración)
+
+`deploy/oci/reintentar-a1.sh` lanza un *apply* del stack de Resource Manager cada 5 minutos y se
+detiene en cuanto la VM existe; si el `.env` tiene Telegram, avisa al grupo de alertas.
+
+1. Instala el OCI CLI, aislado con `uv`: `uv tool install oci-cli`.
+2. Configúralo: `oci setup config`. Te pide:
+    - el OCID de tu usuario (consola → icono de perfil → *My profile* → OCID);
+    - el OCID de la tenancy (*Tenancy details*);
+    - la región: `sa-bogota-1`;
+    - generar una clave de API nueva: acepta. Queda en `~/.oci/`; **la privada no se comparte con
+      nadie ni se pega en el chat**.
+3. Sube la clave **pública** (`~/.oci/oci_api_key_public.pem`) en *My profile → API keys → Add API key
+   → Paste a public key*.
+4. Comprueba la conexión: `oci iam region list --output table`.
+5. Copia el OCID del stack de A1 (*Developer Services → Resource Manager → Stacks*). Borra el stack que
+   no se use (por ejemplo, el de E2.1.Micro) con *Destroy* y luego *Delete stack*, para no dejar redes
+   sueltas.
+6. Lanza el reintento en segundo plano, desde la raíz del repo:
+
+    ```bash
+    nohup deploy/oci/reintentar-a1.sh <OCID_DEL_STACK> > ~/reintento-a1.log 2>&1 &
+    tail -f ~/reintento-a1.log     # Ctrl+C solo deja de mirar; el reintento sigue
+    pkill -f reintentar-a1.sh      # para detenerlo
+    ```
+
+El reintento solo corre mientras la laptop y WSL están encendidos. Si se detiene por un error
+distinto de la capacidad, el log muestra la causa y no vuelve a intentar.
+
 ## 5. Comprobar que solo está abierto el 22
 
 Instancia → enlace de la **subnet** → **Security Lists** → *Default Security List*.

@@ -36,6 +36,9 @@ No hay capacidad de esa forma en ese momento. Vuelve a pulsar **Apply** más tar
 entre intentos: Oracle limita las peticiones («Too many requests»). Mientras tanto se puede editar
 el stack con `ocpus = 1` y `memory_gbs = 6`, o con la micro.
 
+Para no pulsar **Apply** a mano, `reintentar-a1.sh` lo hace cada 5 minutos con el OCI CLI hasta que
+la VM existe (configuración en el [runbook de Oracle Cloud](../../docs/runbooks/oracle-cloud.md)).
+
 **Crecer después:** cambia `ocpus` y `memory_gbs` en el stack y pulsa **Apply**. Es la misma VM:
 Oracle la reinicia y conserva el disco y la IP.
 
