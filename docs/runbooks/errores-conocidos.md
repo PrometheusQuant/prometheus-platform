@@ -173,3 +173,19 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 - **Decisión (titular, 2026-11-07):** el backtest no se toca en PQ-54. Se corrige junto con KE-014,
   en la misma reejecución (PQ-50 o la que pida PQ-17), que cuenta en N. El runner de paper
   (PQ-54) ya aplica la latencia de 1 h.
+
+### KE-017: los logs no enmascaraban secretos dentro de textos libres
+
+- **Síntoma:** lo encontró el code review final (PQ-61). Un token con el formato de Telegram dentro
+  de `detail=` (por ejemplo, la URL de un error HTTP) salía tal cual en el log y en la alerta
+  reenviada a Telegram.
+- **Causa:** dos defectos juntos. El procesador `redact_secrets` solo enmascaraba `SecretStr` y
+  campos con nombre sensible: los **valores** de texto no pasaban por `redact_text`, aunque
+  `AGENTS.md` decía que sí. Y el patrón de Telegram de `redact_text` exigía un límite de palabra
+  antes de los dígitos, así que no reconocía el token en su forma real, dentro de la URL
+  (`/bot<token>/sendMessage`).
+- **Impacto:** no hay constancia de una fuga. Los adaptadores registran el tipo de la excepción y no
+  la URL; el riesgo estaba en el `str(exc)` que el runner registra de cualquier excepción.
+- **Solución:** `_redact` aplica `redact_text` a todo valor `str`, también dentro de listas y tuplas,
+  y el patrón acepta el prefijo `bot`. Pruebas en `tests/unit/ops/` (log, alerta y URL).
+  **Resuelto** (PQ-118).
