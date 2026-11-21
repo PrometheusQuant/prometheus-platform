@@ -7,7 +7,7 @@ en disco) con la configuración del proceso. La CLI (`pq paper run`) solo llama 
 from __future__ import annotations
 
 import fcntl
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -22,6 +22,7 @@ from prometheus_platform.adapters.simulated_broker import SimulatedBroker
 from prometheus_platform.api.paper.runner import PaperRunner, RunnerConfig
 from prometheus_platform.api.paper.watchdog import Watchdog
 from prometheus_platform.domain.ports import Clock, Notifier
+from prometheus_platform.execution.allocation import StrategyAllocation
 from prometheus_platform.ops.logging import get_logger
 from prometheus_platform.ops.settings import Environment, Settings
 from prometheus_platform.portfolio_risk.kill_switch import FLAG_NAME, KillSwitch
@@ -95,6 +96,7 @@ def build(  # noqa: PLR0913 - keyword-only: cada argumento es una pieza de la co
     paths: PaperPaths,
     capital: Decimal,
     notifier: Notifier | None = None,
+    strategies: Sequence[StrategyAllocation] = (),
 ) -> PaperRunner:
     if settings.environment is Environment.LIVE:
         raise ValueError("El runner de paper no opera en PQ_ENVIRONMENT=live")
@@ -129,6 +131,8 @@ def build(  # noqa: PLR0913 - keyword-only: cada argumento es una pieza de la co
         heartbeat_path=paths.heartbeat,
         notifier=notifier,
         environment=settings.environment.value,
+        strategies=strategies,
+        feed=market,  # la API pública también da las velas de las otras estrategias (PQ-116)
     )
 
 

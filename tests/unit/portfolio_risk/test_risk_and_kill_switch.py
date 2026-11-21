@@ -425,6 +425,22 @@ def test_missing_imbalance_age_assumes_the_worst() -> None:
     assert RISK.monitor(book)[0].trips_kill_switch
 
 
+def test_only_the_hedged_symbols_are_checked_for_an_unhedged_leg() -> None:
+    """PQ-116: una estrategia direccional de una pata no es una pata del carry sin cubrir."""
+    btc = InstrumentId("BTCUSDT", Venue.BINANCE)
+    positions = (
+        Position(SPOT, "SOLUSDT", Leg.SPOT, D(2), D(100)),
+        Position(btc, "BTCUSDT", Leg.SPOT, D(1), D(200)),
+    )
+    book = PortfolioSnapshot(
+        equity=D(1000),
+        start_of_day_equity=D(1000),
+        positions=positions,
+        hedged_symbols=frozenset({"SOLUSDT"}),
+    )
+    assert [b.detail.split(":")[0] for b in RISK.monitor(book)] == ["SOLUSDT"]
+
+
 def test_pending_orders_count_so_two_closes_cannot_open_a_short() -> None:
     book = hedged(qty="10", equity="10000", sod="10000")
     close = order(Side.SELL, "10")

@@ -94,6 +94,9 @@ class PortfolioSnapshot:
     pending: Mapping[InstrumentId, Decimal] = field(default_factory=dict)
     # Segundos que lleva cada símbolo con las patas desbalanceadas (lo mide quien ejecuta).
     imbalance_age_seconds: Mapping[str, float] = field(default_factory=dict)
+    # Símbolos que deben ir cubiertos (spot largo contra perpetuo corto): los del carry. ``None``
+    # los vigila todos. Una estrategia direccional de una pata (PQ-116) no es un desbalance.
+    hedged_symbols: frozenset[str] | None = None
 
     def notional_by_symbol(self) -> dict[str, Decimal]:
         totals: dict[str, Decimal] = {}
@@ -258,6 +261,8 @@ class RiskManager:
         breaches = []
         for symbol, imbalance in sorted(hedge_imbalances(book.positions).items()):
             if imbalance <= self.limits.max_hedge_imbalance:
+                continue
+            if book.hedged_symbols is not None and symbol not in book.hedged_symbols:
                 continue
             # Sin dato de antigüedad se asume lo peor: la gracia ya pasó.
             age = book.imbalance_age_seconds.get(symbol, math.inf)

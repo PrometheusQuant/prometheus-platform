@@ -130,6 +130,27 @@ funding o las pérdidas de un símbolo mueven el objetivo de los demás. Por eso
 entradas y salidas, no en rebalanceos ni en tamaño. El paper trading no es una evaluación del
 pre-registro y no cuenta en N.
 
+## Otras estrategias en el mismo runner (PQ-116)
+
+Además del carry, el runner opera cualquier estrategia que cumpla el puerto `Strategy`
+([ADR-0011](../adr/0011-contrato-de-estrategia.md)) y pase la prueba de contrato. Se le pasa en
+`build(..., strategies=[StrategyAllocation(estrategia, capital_share)])`. La CLI aún no tiene opción
+para elegirlas: la añade la primera estrategia real (PQ-82, tendencia).
+
+| Regla | Detalle |
+|---|---|
+| Capital | Cada estrategia usa su `capital_share` de la equity; el carry usa el resto. Las asignaciones suman menos de 1 |
+| Decisión | Una vez por cierre de vela de 1 h, dos minutos después, con la `MarketSnapshot` de su ventana `lookback`: velas de sus instrumentos y funding de sus perpetuos |
+| Datos incompletos | Si falta la vela de un instrumento, no decide y lo reintenta en el ciclo siguiente. A los 10 minutos el heartbeat lo muestra |
+| Señales | Se validan como en la prueba de contrato. Una señal inválida no se registra ni se opera, y queda en el heartbeat |
+| Latencia | La señal de *t* rige desde *t* + `execution_delay`, 1 h por defecto, como el backtest de la tendencia. Una señal nueva sustituye a la pendiente |
+| Órdenes | Por niveles: cada ciclo lleva la posición al peso vigente si se aleja más que `rebalance_band` (10 % del capital asignado por defecto). Pasan por `pre_trade`, el kill-switch y el diario, igual que las del carry |
+| Cobertura | Cada instrumento tiene un solo dueño, y un símbolo del carry no puede ser de otra estrategia. La alerta de pata sin cubrir solo vigila los símbolos del carry |
+| Reinicio | Las señales salen del diario (`SignalGenerated`): el objetivo sigue aunque la API de velas no responda, y la misma vela no se decide dos veces |
+
+El estado interno de una estrategia con memoria se reconstruye con su ventana `lookback` en la
+primera decisión tras un reinicio. La prueba de contrato garantiza que con esa ventana decide igual.
+
 ## Limitaciones conocidas
 
 - Ejecutar al precio actual no es el precio real de Binance Demo: esa diferencia la mide PQ-95.
@@ -150,3 +171,6 @@ pre-registro y no cuenta en N.
 - Con el kill-switch activado, el diario sigue registrando las decisiones de la estrategia
   (`FundingSettled`) sin órdenes. Para saber si se ejecutaron, crúzalas con `KillSwitchTripped`
   y `KillSwitchReset`.
+- Si el runner estuvo parado varias horas, las otras estrategias deciden solo con la última vela:
+  las intermedias no se recuperan. Para una estrategia sin memoria da igual; para una con memoria,
+  vale lo dicho sobre la ventana `lookback`.
