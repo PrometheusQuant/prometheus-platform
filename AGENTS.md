@@ -57,11 +57,77 @@ conflictos. El responsable de cada ticket es el asignado en Jira.
   [ADR-0011](docs/adr/0011-contrato-de-estrategia.md)) y se añaden a `STRATEGIES` en
   `tests/unit/strategies/test_strategy_contract.py`: deben pasar la prueba de contrato
   (validez, determinismo y paridad backtest ↔ paper).
-- **Revisión cruzada obligatoria.** Nadie fusiona su propio PR sin la aprobación del otro carril.
-  La regla de GitHub exige 1 aprobación y la CI en verde. Revisa con la guía
-  `.claude/skills/code-review-and-quality/SKILL.md`.
-- **Antes de empezar un ticket:** `git switch develop && git pull`. Rama `feature/PQ-<n>-…` desde ahí.
-  PR pequeños y frecuentes; rebase seguido para no divergir del otro carril.
+- **Los carriles dicen quién responde, no qué agente ejecuta.** El asignado en Jira (David o
+  Boris) **no se cambia nunca**. Cualquier agente puede trabajar tickets de cualquier carril
+  siguiendo la coordinación de abajo.
+- **PR pequeños y frecuentes**; rebase seguido para no divergir de los demás agentes.
+
+## Coordinación entre agentes (desde el 21-nov-2026)
+
+Pueden trabajar a la vez hasta tres agentes. Cada uno se identifica con su nombre en Jira, en los
+comentarios y en los PR:
+
+| Agente | Dónde corre | Etiqueta de Jira |
+|---|---|---|
+| Claude A | Claude Code en la máquina de David, configuración `~/.claude` | `agente-claude-a` |
+| Claude B | Claude Code en la máquina de David, `CLAUDE_CONFIG_DIR=~/.claude-yo` | `agente-claude-b` |
+| Codex | Codex CLI en la máquina de Boris | `agente-codex` |
+
+Claude averigua cuál es con `echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"`.
+
+**1. Jira es el candado.** Antes de tocar código:
+
+1. Busca un ticket libre del sprint activo:
+   `project = PQ AND sprint in openSprints() AND status = "To Do" AND (labels is EMPTY OR labels not in (agente-claude-a, agente-claude-b, agente-codex)) ORDER BY rank`.
+   Prioriza los que bloquean a otros.
+2. Ponle **tu etiqueta**, muévelo a *In Progress* y comenta «Tomado por <agente>». **No cambies el
+   asignado.**
+3. Vuelve a leer el ticket. Si otro agente puso su etiqueta antes que tú, quita la tuya y toma otro.
+4. Un ticket con etiqueta `agente-*` en *In Progress* o *Code Review* es de ese agente: no lo toques.
+   Al fusionar, pásalo a *Done*; la etiqueta queda como historial.
+
+**2. Un ticket = una rama = un worktree.** Claude A y Claude B comparten el disco: si uno cambia de
+rama en un checkout, le cambia los archivos al otro. Por eso, en la máquina de David:
+
+- `~/code/prometheus-platform` se queda siempre en `develop` y solo se usa para `git pull`.
+- `~/code/pq-runtime` es del runner de paper trading: no se trabaja ahí.
+- Cada ticket se trabaja en su propio worktree, creado desde `origin/develop`:
+
+  ```bash
+  git -C ~/code/prometheus-platform fetch origin
+  git -C ~/code/prometheus-platform worktree add ~/code/wt/PQ-<n> -b feature/PQ-<n>-<descripcion> origin/develop
+  cp ~/code/prometheus-platform/.env ~/code/wt/PQ-<n>/.env   # y PQ_DATA_DIR con la ruta absoluta del lakehouse
+  # al fusionar el PR:
+  git -C ~/code/prometheus-platform worktree remove ~/code/wt/PQ-<n>
+  ```
+
+- No uses `git stash` a secas: la pila se comparte entre worktrees. Usa un commit temporal.
+
+En la máquina de Boris basta con `git switch develop && git pull` y una rama por ticket.
+
+**3. PR en borrador desde el primer commit** (`gh pr create --draft`): así todos ven qué archivos
+se están tocando. Antes de editar un archivo que suelen tocar varios tickets (`api/cli.py`,
+`ops/settings.py`, `domain/ports.py`, `pyproject.toml`, `uv.lock`), revisa los PR abiertos
+(`gh pr list`, `gh pr diff <n> --name-only`) y, si alguno lo toca, coordina o espera a que se fusione.
+
+**4. Registro de ensayos:** `PQ_RESEARCH_LANE` es el **carril del ticket** (su asignado), no el
+agente que lo ejecuta. Si al rebasar chocan filas del mismo `.jsonl`, se conservan las de ambos
+lados: las filas nunca se borran.
+
+**5. Fusión (decisión del titular, 21-nov-2026).** No se espera la aprobación manual del otro
+carril:
+
+1. El agente revisa su propio diff con la guía `.claude/skills/code-review-and-quality/SKILL.md` y
+   deja el resultado como comentario en el PR (`gh pr comment`). Es la evidencia del code review.
+2. Quita el borrador (`gh pr ready <n>`) y fusiona **solo con la CI en verde**:
+   `if gh pr checks <n> >/dev/null 2>&1; then gh pr merge <n> --squash --admin; fi`.
+   Nunca encadenes el merge tras `gh pr checks --watch` sin el `if`.
+3. Pasa el ticket a *Done*.
+
+El bypass de `--admin` solo lo tiene la cuenta de David (`dq-datasci`); Boris tiene permiso
+*write*. Por eso los PR que abre Codex desde la cuenta de Boris los aprueba un Claude
+(`gh pr review <n> --approve`, tras revisarlos con la misma guía) y luego se fusionan con la CI en
+verde. Los releases a `main` siguen necesitando que el titular lo pida.
 
 ## Flujo de trabajo
 
@@ -125,8 +191,9 @@ Adaptadas de [addyosmani/agent-skills](https://github.com/addyosmani/agent-skill
 - **Ensayos:** pon `PQ_RESEARCH_LANE=boris` en tu `.env`. Cada `pq research *` agrega sus filas a
   `docs/estrategias/ensayos/boris.jsonl` y esas filas van en el mismo PR que los resultados.
 - **Jira:** Codex se conecta a Jira con el servidor MCP oficial de Atlassian (pasos en la guía de
-  trabajo con agentes). Antes de programar, lee el ticket; al empezar, muévelo a *In Progress* y,
-  al fusionar el PR, a *Done*. Proyecto `PQ`, sitio `prometheusquant.atlassian.net`. La clave
+  trabajo con agentes). Antes de programar, lee el ticket; al empezar, ponle la etiqueta
+  `agente-codex` y muévelo a *In Progress* (sin cambiar el asignado) y, al fusionar el PR, a *Done*.
+  Proyecto `PQ`, sitio `prometheusquant.atlassian.net`. La clave
   `PQ-<n>` va en la rama, en el commit y en el título del PR.
 - **No inventes cifras.** Todo número en la documentación sale de un artefacto o de un comando.
   Lo que no se pueda verificar se marca «por verificar».

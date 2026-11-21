@@ -8,5 +8,8 @@ es la fuente única: no dupliques reglas aquí.
 ## Solo para Claude Code
 
 - Las skills de `.claude/skills/` se cargan solas; úsalas en los momentos que indica `AGENTS.md`.
-- Al fusionar PRs del carril de Boris, revísalos primero con la skill `code-review-and-quality` y
-  deja la revisión en GitHub (`gh pr review`). Su aprobación cuenta como la del carril de David.
+- Hay dos sesiones de Claude Code en la misma máquina (Claude A y Claude B): sigue la sección
+  «Coordinación entre agentes» de `AGENTS.md`. Trabaja siempre en tu worktree de `~/code/wt/`,
+  nunca en `~/code/prometheus-platform` ni en `~/code/pq-runtime`.
+- Antes de fusionar, revisa el diff con la skill `code-review-and-quality` y deja el resultado
+  como comentario en el PR.
