@@ -28,7 +28,7 @@ carpeta a partir de esa evidencia.
 | 7.4 | Validación estadística | [Pruebas t con HAC, bootstrap, ANOVA y Friedman](../investigacion/2026-11-06-validacion-estadistica.md) (`pq research stats`), además de Deflated Sharpe y PBO | PQ-4, PQ-9 (PQ-48) |
 | 8.1–8.2 | Competencia y Canvas | [Modelo de negocio](modelo-de-negocio.md) §3–4 | PQ-10 (PQ-44) |
 | 8.3–8.4 | Costes cloud cotizados, VAN, TIR y capital de equilibrio | [Modelo de negocio](modelo-de-negocio.md) §6.2, generado con `uv run pq research finance`; [`deploy/`](https://github.com/PrometheusQuant/prometheus-platform/tree/develop/deploy) | PQ-10 (PQ-49) |
-| 9.1–9.4 | Conclusiones, pitch, code review, evaluación 360 | `academico/informe/`, historial de PRs | PQ-10 |
+| 9.1–9.4 | Conclusiones, pitch, code review, evaluación 360 | `academico/informe/`, historial de PRs; [code review y trazabilidad](revision-de-codigo.md) (9.3) | PQ-10 (PQ-61) |
 
 ## Marcos de referencia
 
