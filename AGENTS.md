@@ -124,7 +124,10 @@ carril:
    Nunca encadenes el merge tras `gh pr checks --watch` sin el `if`.
 3. Pasa el ticket a *Done*.
 
-Los releases a `main` siguen necesitando que el titular lo pida.
+El bypass de `--admin` solo lo tiene la cuenta de David (`dq-datasci`); Boris tiene permiso
+*write*. Por eso los PR que abre Codex desde la cuenta de Boris los aprueba un Claude
+(`gh pr review <n> --approve`, tras revisarlos con la misma guía) y luego se fusionan con la CI en
+verde. Los releases a `main` siguen necesitando que el titular lo pida.
 
 ## Flujo de trabajo
 
