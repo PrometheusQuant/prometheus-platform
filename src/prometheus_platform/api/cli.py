@@ -173,6 +173,9 @@ def _add_research(commands: Commands) -> None:
     studies.add_parser(
         "stats", help="Validación estadística de la optimización: t, ANOVA, Friedman (cap. 7.4)"
     )
+    studies.add_parser(
+        "budget", help="Presupuesto de capital entre estrategias aprobadas con tope de CVaR (PQ-83)"
+    )
     finance = studies.add_parser(
         "finance", help="Costes cotizados, VAN, TIR y capital de equilibrio (cap. 8.3-8.4)"
     )
@@ -444,6 +447,27 @@ def _research_simulate(data_dir: Path, figures: Path, paths: int) -> int:
     return 0
 
 
+def _research_budget(data_dir: Path) -> int:
+    from prometheus_platform.api import research_budget as rb  # noqa: PLC0415
+
+    research = data_dir / "research"
+    try:
+        result = rb.run(research)
+    except FileNotFoundError as exc:
+        print(f"ERROR falta un artefacto: {exc.filename}. Corre antes `pq research simulate`.")
+        return 2
+    path = rb.write(result, research / "budget")
+    approved = ", ".join(result["estrategias_aprobadas"]) or "ninguna"
+    print(f"estrategias aprobadas: {approved}; tope por exchange: {result['tope_por_exchange']}")
+    for name, weight in result["presupuesto"].items():
+        print(f"  {name}: {weight:.0%}")
+    print(
+        f"  efectivo al 4 %: {result['efectivo']:.0%} · retorno esperado "
+        f"{result['retorno_esperado']:.2%} · CVaR95 {result['cvar95']:.2%} · resumen={path}"
+    )
+    return 0
+
+
 def _research_eda(data_dir: Path, figures: Path) -> int:
     from prometheus_platform.research.eda import (  # noqa: PLC0415
         correlation_matrix,
@@ -540,6 +564,7 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
     descriptive: dict[str, Callable[[], int]] = {
         "finance": lambda: _research_finance(data_dir, args.update_doc),
         "stats": lambda: _research_stats(data_dir),
+        "budget": lambda: _research_budget(data_dir),
         "eda": lambda: _research_eda(data_dir, args.figures),
         "simulate": lambda: _research_simulate(data_dir, args.figures, args.paths),
     }
