@@ -108,6 +108,7 @@ _PEM = "-----{} RSA PRIVATE KEY-----"
     ("text", "leak"),
     [
         ("PQ_TELEGRAM_BOT_TOKEN=123456789:" + "AAH4kq9" + "x" * 28, "AAH4kq9"),
+        ("https://api.telegram.org/bot123456789:" + "AAH4kq9" + "x" * 28 + "/getMe", "AAH4kq9"),
         ("export ANTHROPIC_API_KEY=" + "sk-" + "ant-api03-" + "z" * 26, "api03"),
         ("Authorization: token " + "gh" + "p_" + "q" * 36, "qqqq"),
         ('{"api_secret": "hunter2"}', "hunter2"),
@@ -126,3 +127,33 @@ def test_redact_text_keeps_hashes_and_plain_prose() -> None:
     digest = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
     assert redact_text(f"sha256 {digest}") == f"sha256 {digest}"
     assert redact_text("El carry rinde 5 % anual.") == "El carry rinde 5 % anual."
+
+
+def _fake_telegram_token() -> str:
+    return "123456789:" + "AAH4kq9" + "x" * 28  # por partes: no es una credencial real
+
+
+def test_secrets_inside_free_text_values_are_masked() -> None:
+    """PQ-118: un token dentro de un mensaje de error (p. ej. una URL) no llega al log."""
+    stream = configured(Environment.PAPER)
+    token = _fake_telegram_token()
+    get_logger().error(
+        "paper_tick_failed",
+        detail=f"Client error for url 'https://api.telegram.org/bot{token}/sendMessage'",
+        attempts=["password: s3cr3t", 3],
+        nested={"context": (f"token={token}",)},
+    )
+    output = stream.getvalue()
+    for leaked in ("AAH4kq9", "s3cr3t"):
+        assert leaked not in output
+    [record] = json_lines(stream)
+    assert REDACTED in str(record["detail"])
+    assert record["attempts"] == [f"password: {REDACTED}", 3]  # lo que no es texto no cambia
+
+
+def test_free_text_without_secrets_is_left_alone() -> None:
+    stream = configured(Environment.PAPER)
+    get_logger().info("carry", detail="El carry rinde 5 % anual en SOLUSDT", rows=24)
+    [record] = json_lines(stream)
+    assert record["detail"] == "El carry rinde 5 % anual en SOLUSDT"
+    assert record["rows"] == 24

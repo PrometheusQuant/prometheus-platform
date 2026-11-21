@@ -130,3 +130,14 @@ def test_cli_alert_test_reports_missing_channel_and_delivery(
     assert cli.main(["alert", "test"]) == 0
     assert recorder.alerts[0].title == "alerta de prueba"
     assert "entregada=sí" in capsys.readouterr().out
+
+
+def test_forwarded_alert_does_not_carry_secrets_from_free_text() -> None:
+    """PQ-118: la alerta a Telegram se arma después de enmascarar, también en textos libres."""
+    notifier = RecordingNotifier()
+    settings = Settings(environment=Environment.PAPER)
+    configure_logging(settings, stream=io.StringIO(), notifier=notifier)
+    token = "123456789:" + "AAH4kq9" + "x" * 28  # por partes: no es una credencial real
+    get_logger().error("paper_tick_failed", detail=f"url 'https://api.telegram.org/bot{token}/x'")
+    [alert] = notifier.alerts
+    assert "AAH4kq9" not in alert.render(None)
