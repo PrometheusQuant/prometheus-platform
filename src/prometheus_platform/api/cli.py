@@ -7,6 +7,7 @@ Ejemplos::
     pq ingest funding --symbol BTCUSDT --start 2020-01
     pq silver build --symbol BTCUSDT --interval 1h
     pq research carry --hypothesis H1 --figures docs/estrategias/01-carry/img
+    pq research trend --figures docs/estrategias/02-tendencia/img
 
 Sin ``--end`` se ingiere hasta el último mes completo, porque Data Vision publica los archivos
 mensuales una vez cerrado el mes.
@@ -155,6 +156,10 @@ def _add_research(commands: Commands) -> None:
     carry = studies.add_parser("carry", help="Carry de funding: periodo de desarrollo")
     carry.add_argument("--hypothesis", choices=["H1", "H2"], required=True)
     carry.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    trend = studies.add_parser(
+        "trend", help="Tendencia (T1 y T2): periodo de desarrollo, las 12 configuraciones (PQ-68)"
+    )
+    trend.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
     eda = studies.add_parser("eda", help="Estadística descriptiva y correlaciones de las features")
     eda.add_argument("--figures", type=Path, required=True)
     model = studies.add_parser("funding-model", help="Modelo predictivo del funding (cap. 5)")
@@ -332,6 +337,33 @@ def _research_carry(
     return 0
 
 
+def _research_trend(data_dir: Path, figures: Path | None, ledger: TrialLedger) -> int:
+    from prometheus_platform.research import trend_evaluation as te  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_equity,
+        write_trend_outputs,
+    )
+
+    data = [te.load_market(data_dir / "silver", s) for s in te.SYMBOLS]
+    # Las 12 configuraciones se registran (N) antes de evaluar cualquiera de las dos hipótesis.
+    evaluations = te.evaluate_family(data, ledger)
+    for hypothesis, evaluation in evaluations.items():
+        path = write_trend_outputs(evaluation, data_dir / "research" / "trend" / str(hypothesis))
+        if figures is not None:
+            plot_equity(
+                evaluation,
+                figures / f"{str(hypothesis).lower()}-curvas.png",
+                evaluation.benchmark_returns,
+                benchmark_label="B1 comprar y mantener",
+            )
+        verdict = "PASA" if evaluation.passed else "NO PASA"
+        print(f"{hypothesis}: elegida={evaluation.selected} gates={verdict} resumen={path}")
+        for gate in evaluation.gates:
+            mark = "OK " if gate.passed else "NO "
+            print(f"  {gate.name} {mark}{gate.criterion}: {gate.value:.4f}")
+    return 0
+
+
 def _development_panel(data_dir: Path) -> pl.DataFrame:
     from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
     from prometheus_platform.research.panel import development_only  # noqa: PLC0415
@@ -499,6 +531,8 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
     if args.study == "carry":
         ledger = _ledger(settings, "carry", command)
         return _research_carry(data_dir, args.hypothesis, args.figures, ledger)
+    if args.study == "trend":
+        return _research_trend(data_dir, args.figures, _ledger(settings, "tendencia", command))
     if args.study == "funding-model":
         ledger = _ledger(settings, "modelo-funding", command)
         return _research_model(data_dir, args.figures, args.target_mode, ledger)
