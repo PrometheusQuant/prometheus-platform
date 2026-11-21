@@ -7,6 +7,11 @@ Desde el Sprint 3 el equipo trabaja en **dos carriles en paralelo**, cada uno co
 | David | David Quintela | Claude Code | `CLAUDE.md`, que importa `AGENTS.md` |
 | Boris | Boris Miranda | Codex CLI (ChatGPT) | `AGENTS.md` (Codex lo lee solo) |
 
+Desde el 21-nov-2026 pueden trabajar a la vez **tres agentes** (Claude A, Claude B y Codex), y
+cualquiera puede tomar tickets de cualquier carril: el carril dice quién responde (el asignado en
+Jira, que no cambia), no qué agente ejecuta. Cómo se reparten sin pisarse está en la sección
+«Coordinación entre agentes» de `AGENTS.md`.
+
 Las reglas del proyecto viven en un solo lugar, [`AGENTS.md`](https://github.com/PrometheusQuant/prometheus-platform/blob/develop/AGENTS.md).
 Esta página explica **cómo arrancar** y **cómo trabajar un ticket** de principio a fin.
 
@@ -74,8 +79,8 @@ También se puede hacer desde la interfaz de Dagster (`make orquestador`).
 
 ## 3. Trabajar un ticket con Codex
 
-1. **Toma un ticket de tu carril** (asignado a ti, en el sprint activo). Puedes pedírselo a Codex:
-   «lee PQ-<n> y muévelo a In Progress».
+1. **Toma un ticket libre** del sprint activo (sin etiqueta `agente-*`). Puedes pedírselo a Codex:
+   «lee PQ-<n>, ponle la etiqueta agente-codex y muévelo a In Progress». No cambies el asignado.
 2. **Crea la rama** desde `develop` actualizado:
    ```bash
    git switch develop && git pull
@@ -95,10 +100,11 @@ También se puede hacer desde la interfaz de Dagster (`make orquestador`).
    ```
 
 4. **Revisa lo que hizo Codex** antes de commitear. Tú eres el responsable del PR, no el agente.
-5. **Abre el PR** a `develop` con la plantilla (`gh pr create`). Pide la revisión del carril de
-   David. **No fusiones tu propio PR**: la regla de GitHub exige 1 aprobación y la CI en verde.
-6. Con la aprobación y la CI en verde, fusiona con **squash** y mueve el ticket a *Done* (Codex
-   puede hacerlo por ti).
+5. **Abre el PR** a `develop` con la plantilla, en borrador desde el primer commit
+   (`gh pr create --draft`).
+6. Revisa el diff con la guía `code-review-and-quality`, deja el resultado como comentario y, solo
+   con la CI en verde, fusiona con **squash** y mueve el ticket a *Done* (pasos en la sección
+   «Coordinación entre agentes» de `AGENTS.md`).
 
 ## 4. Reglas que no se negocian (resumen de `AGENTS.md`)
 
@@ -113,7 +119,8 @@ También se puede hacer desde la interfaz de Dagster (`make orquestador`).
 
 ## 5. Revisión cruzada
 
-Cada carril revisa los PR del otro con la guía
+Desde el 21-nov-2026 cada agente revisa su propio PR antes de fusionarlo (decisión del titular,
+ver `AGENTS.md`), con la guía
 [`code-review-and-quality`](https://github.com/PrometheusQuant/prometheus-platform/blob/develop/.claude/skills/code-review-and-quality/SKILL.md).
 Es también la evidencia del code review del capítulo 9.3. Además, dos modelos distintos
 (Claude y GPT) detectan errores distintos.
