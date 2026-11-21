@@ -1,6 +1,6 @@
 ---
 title: "Cobrar el funding sin apostar al precio"
-subtitle: "Informe ejecutivo de PrometheusQuant · Sprint 2"
+subtitle: "Informe final de PrometheusQuant: resumen ejecutivo, resultados y conclusiones"
 author: "PrometheusQuant"
 date: today
 date-format: "D [de] MMMM [de] YYYY"
@@ -26,6 +26,33 @@ format:
 Ninguna cifra está escrita a mano. `make report` lee los resultados guardados en `data/research/`
 y vuelve a armar el documento. Si mañana cambia un resultado, el informe cambia con él.
 :::
+
+# Resumen ejecutivo
+
+**Problema.** Quien opera criptomonedas con algoritmos suele perder dinero o engañarse: prueba
+muchas variantes sin contarlas, subestima los costes y no ve el riesgo de que quiebre el exchange.
+
+**Solución.** PrometheusQuant es una plataforma de investigación y trading que solo deja operar
+una estrategia si antes pasó un protocolo contra el sobreajuste: pre-registro, costes reales,
+validación cruzada purgada, Deflated Sharpe y PBO, con los {{< meta r.ensayos.total >}} ensayos
+contados. La primera estrategia cobra el *funding* de los perpetuos con una cobertura entre el
+contado y el perpetuo.
+
+**Resultados.** En monedas medianas (H2) rindió {{< meta r.h2.cagr >}} anual en el periodo de
+desarrollo, contra {{< meta r.h2.b1_cagr >}} de estar siempre invertido, con una caída máxima de
+{{< meta r.h2.max_dd >}}, y pasó los cuatro gates. En BTC y ETH (H1) no le ganó a su benchmark.
+La ventaja sobre una stablecoin al 4 % no es estadísticamente significativa
+(p = {{< meta r.stats.he2_p >}}), y el riesgo que domina es la quiebra del exchange: por encima de
+{{< meta r.sim.quiebra_equilibrio >}} de probabilidad anual, conviene la stablecoin.
+
+**Cliente.** El profesor y el jurado, que evalúan cada incremento y rastrean cada cifra hasta su
+evidencia; el equipo, que opera con capital propio; y el minorista, que aprende con el simulador.
+
+**Viabilidad.** Con 1.000 USD a tres años, el VAN frente a la stablecoin es
+{{< meta r.finanzas.van_1000_3a >}}, y es negativo {{< meta r.finanzas.van_negativo >}}. Sin
+quiebra, el capital de equilibrio es {{< meta r.finanzas.equilibrio >}}. Como negocio no se sostiene
+a esa escala. Lo que hoy aporta es el método, que evita poner dinero en estrategias que solo
+funcionan en el backtest.
 
 # La pregunta
 
@@ -141,8 +168,41 @@ Si limitamos la pérdida en el peor 5 % de los años (CVaR) a un 5 %, solo se pu
 3. **El riesgo de contraparte manda.** Antes de operar con dinero real, el sistema necesita un
    límite de capital por exchange, calibrado con el punto de equilibrio de
    {{< meta r.sim.quiebra_equilibrio >}}, y un kill-switch.
-4. **Primero paper trading.** El siguiente paso es operar H2 con dinero simulado durante semanas,
-   con alertas a Telegram, antes de comprometer capital.
+4. **Primero paper trading.** H2 ya opera con dinero simulado sobre precios reales, con
+   kill-switch y alertas a Telegram. Falta tenerlo encendido 24/7 en un servidor y conectarlo al
+   entorno Demo del exchange antes de comprometer capital.
+
+# Conclusiones: objetivos contra resultados
+
+Cada objetivo específico de la matriz de consistencia (capítulo 1.3), con su resultado y su estado.
+
+| Objetivo | Resultado | Estado |
+|---|---|---|
+| OE1. Lakehouse *point-in-time* con datos auditados | {{< meta r.datos.tablas >}} tablas y {{< meta r.datos.filas >}} filas desde {{< meta r.datos.desde >}}, con checksums verificados; {{< meta r.datos.con_huecos >}} tablas con huecos documentados y sin rellenar | **Cumplido** |
+| OE2. Evaluar el carry con un protocolo anti-sobreajuste | H1 {{< meta r.h1.veredicto >}}; H2 {{< meta r.h2.veredicto >}} (DSR {{< meta r.h2.dsr >}}, PBO {{< meta r.h2.pbo >}}). Frente a estar siempre invertido, H2 rinde {{< meta r.stats.he1_exceso >}} más al año ({{< meta r.stats.he1_veredicto >}} H0, p = {{< meta r.stats.he1_p >}}); frente a la stablecoin al 4 %, {{< meta r.stats.he2_veredicto >}} H0 (p = {{< meta r.stats.he2_p >}}): el exceso no es significativo | **Parcial**: el holdout sigue cerrado hasta verificar las comisiones reales |
+| OE3. Predecir el régimen del funding con ML | AUC {{< meta r.modelo.auc >}} para anticipar funding alto; en regresión, R² {{< meta r.modelo.r2_mejor >}} contra {{< meta r.modelo.r2_persistencia >}} de la persistencia (Diebold-Mariano p = {{< meta r.modelo.dm_p >}}) | **Cumplido**; usarlo para operar (H3) exige su propio pre-registro |
+| OE4. Cuantificar el riesgo que el backtest no ve | Probabilidad de quiebra de equilibrio {{< meta r.sim.quiebra_equilibrio >}} anual; con CVaR ≤ 5 % cabe hasta {{< meta r.sim.max_carry_cvar >}} del capital en el carry | **Cumplido** |
+| OE5. Paper trading de la estrategia aprobada (TRL 5) | Runner del carry H2 con bróker simulado sobre precios reales, riesgo pre-trade, kill-switch probado, monitoreo y alertas | **Parcial**: falta el servidor 24/7, la conexión al entorno Demo y medir la paridad con el backtest |
+
+**Conclusión general.** El protocolo hizo su trabajo: descartó H1, que parecía rentable, y dejó
+pasar H2 sin exagerar su ventaja. H2 le gana a estar siempre invertido, pero su exceso sobre una
+stablecoin no es significativo, y la quiebra del exchange puede borrarlo. Por eso el proyecto no
+recomienda aún capital real: recomienda terminar el paper trading y abrir el holdout una sola vez.
+
+# Recomendaciones para el trabajo futuro
+
+1. **Abrir el holdout de H2 una sola vez**, después de verificar en la cuenta las comisiones reales
+   (PQ-17), reejecutando la evaluación con las correcciones de KE-014 y KE-016.
+2. **H3: el carry con la señal del clasificador**, con su propio pre-registro y N actualizado. El
+   modelo mejora la regla, pero adoptarlo después de verlo funcionar sería sobreajuste.
+3. **Estrategia 2 (tendencia con volatility targeting)**, ya pre-registrada y con su motor de
+   backtest: falta la evaluación con CPCV, Deflated Sharpe y PBO.
+4. **Diversificar la contraparte**: repartir el carry entre varios exchanges, con un límite por
+   exchange calibrado con la probabilidad de quiebra de equilibrio.
+5. **Polymarket y el sentimiento** van después, como capas sobre estrategias que ya funcionen
+   (ADR-0005).
+6. **Capital real solo con una checklist go/no-go** (límites, legal y tributario), y empezando por
+   montos pequeños.
 
 ::: {.callout-important}
 ## Límites de este análisis

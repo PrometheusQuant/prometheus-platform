@@ -7,7 +7,7 @@ carpeta a partir de esa evidencia.
 
 | Ítem | Contenido exigido | Evidencia | Épica |
 |---|---|---|---|
-| 0.1–0.3 | Título, equipo, línea temática, resumen ejecutivo | `README.md`, este documento, `informe/` | PQ-10 |
+| 0.1–0.3 | Título, equipo, línea temática, resumen ejecutivo | `README.md`, este documento; resumen ejecutivo en el [informe final](informe-ejecutivo.pdf) (`make report`) | PQ-10 (PQ-59) |
 | 1.1 | Antecedentes y contexto | [`investigacion/`](../investigacion/README.md) | PQ-2 |
 | 1.2 | Causas (Ishikawa, 5 porqués) y solución actual | [Planteamiento del problema](planteamiento-del-problema.md) | PQ-2 (PQ-45) |
 | 1.3 | Pregunta de investigación y objetivos (matriz de consistencia) | [Planteamiento del problema](planteamiento-del-problema.md), `estrategias/*/pre-registro.md` | PQ-2 (PQ-45) |
@@ -28,7 +28,7 @@ carpeta a partir de esa evidencia.
 | 7.4 | Validación estadística | [Pruebas t con HAC, bootstrap, ANOVA y Friedman](../investigacion/2026-11-06-validacion-estadistica.md) (`pq research stats`), además de Deflated Sharpe y PBO | PQ-4, PQ-9 (PQ-48) |
 | 8.1–8.2 | Competencia y Canvas | [Modelo de negocio](modelo-de-negocio.md) §3–4 | PQ-10 (PQ-44) |
 | 8.3–8.4 | Costes cloud cotizados, VAN, TIR y capital de equilibrio | [Modelo de negocio](modelo-de-negocio.md) §6.2, generado con `uv run pq research finance`; [`deploy/`](https://github.com/PrometheusQuant/prometheus-platform/tree/develop/deploy) | PQ-10 (PQ-49) |
-| 9.1–9.4 | Conclusiones, pitch, code review, evaluación 360 | `academico/informe/`, historial de PRs; [code review y trazabilidad](revision-de-codigo.md) (9.3) | PQ-10 (PQ-61) |
+| 9.1–9.4 | Conclusiones, pitch, code review, evaluación 360 | Conclusiones y recomendaciones en el [informe final](informe-ejecutivo.pdf) (9.1); [code review y trazabilidad](revision-de-codigo.md) (9.3); historial de PRs | PQ-10 (PQ-59, PQ-61) |
 
 ## Marcos de referencia
 
