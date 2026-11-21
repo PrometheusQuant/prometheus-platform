@@ -18,6 +18,33 @@ docker compose up --build    # http://127.0.0.1:8501
 docker compose down
 ```
 
+## Modo feria (PQ-102)
+
+Para la pantalla grande de la feria, abre **<http://localhost:8501/?modo=feria>**:
+
+- **Tipografía grande**, pensada para leerse a 2 o 3 metros. Solo usa fuentes del sistema.
+- **La pestaña en vivo se actualiza sola** cada 60 s, al ritmo del runner, sin recargar el resto.
+- **Recorrido guiado** en la barra lateral: 7 pasos, uno por sección del pitch (PQ-60). Cada paso
+  dice qué pestaña abrir, qué decir y qué señalar. Se avanza con «Siguiente ▶».
+
+| Paso | Sección del pitch | Pestaña |
+|---|---|---|
+| 1 | El problema | (el título del tablero) |
+| 2 | Por qué fallan los minoristas | ¿Qué pasó? Datos y calidad |
+| 3 | Nuestra respuesta | ¿Funciona? Carry y gates |
+| 4 | La evidencia | ¿Qué riesgo hay? Simulación |
+| 5 | Demo en vivo | ¿Cómo va en vivo? Paper trading |
+| 6 | Viabilidad | ¿Y si invierto? Simula tu inversión |
+| 7 | Cierre | (vuelve a la pestaña en vivo) |
+
+Los textos se editan en `src/prometheus_platform/api/dashboard/tour.py` (`STEPS`). No llevan cifras:
+las cifras las muestra el tablero desde los artefactos.
+
+**Sin internet (plan B de PQ-63).** El tablero solo lee el lakehouse local, así que abre y navega con
+la red cortada; lo comprueba una prueba que bloquea los sockets. Sin red, el runner no recibe precios
+nuevos y la pestaña en vivo muestra el último ciclo con su antigüedad. La pestaña «¿Qué predice
+hoy?» necesita los datos de hoy ingeridos antes de perder la conexión.
+
 ## Qué muestra
 
 | Pestaña | Pregunta que responde | Artefacto | Se genera con |
