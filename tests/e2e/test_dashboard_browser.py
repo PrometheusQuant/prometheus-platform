@@ -46,3 +46,18 @@ def test_each_tab_shows_data_or_how_to_generate_it(dashboard: Page, tab: str, he
     )
     expect(content.first).to_be_visible()
     expect(dashboard.locator('[data-testid="stException"]')).to_have_count(0)
+
+
+def test_fair_mode_shows_the_guided_tour_with_big_type(page: Page, base_url: str) -> None:
+    """PQ-102: ``?modo=feria`` abre el recorrido de 7 pasos y agranda la tipografía."""
+    page.set_default_timeout(TIMEOUT_MS)
+    page.goto(f"{base_url}/?modo=feria")
+    sidebar = page.get_by_test_id("stSidebar")
+    expect(sidebar).to_contain_text("paso 1 de 7")
+    sidebar.get_by_role("button", name="Siguiente ▶").click()
+    expect(sidebar).to_contain_text("paso 2 de 7")
+    expect(sidebar).to_contain_text("¿Qué pasó? Datos y calidad")
+    title = page.get_by_role("heading", level=1)
+    size = title.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+    assert size >= 60  # 3rem sobre 22 px; el modo normal ronda los 44 px
+    expect(page.locator('[data-testid="stException"]')).to_have_count(0)

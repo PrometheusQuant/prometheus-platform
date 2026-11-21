@@ -2,6 +2,9 @@
 
 Solo lee artefactos del lakehouse (``PQ_DATA_DIR``); en Docker el volumen se monta en solo
 lectura. Nunca muestra el holdout: las evaluaciones terminan antes de 2024-07-01.
+
+Con ``?modo=feria`` (PQ-102): tipografía grande, la pestaña en vivo se actualiza sola y la barra
+lateral guía el recorrido de 7 pasos del pitch (``tour.py``).
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import streamlit as st
 
 from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
+from prometheus_platform.api.dashboard import tour
 from prometheus_platform.api.dashboard.artifacts import (
     Artifacts,
     equity_curves,
@@ -378,7 +382,9 @@ def _live_tables(view: PaperView) -> None:
     )
 
 
-def _tab_live(data_dir: Path, art: Artifacts, max_age_minutes: int) -> None:
+def _tab_live(
+    data_dir: Path, art: Artifacts, max_age_minutes: int, *, auto_refresh: bool = False
+) -> None:
     st.subheader("Paper trading del carry H2 en vivo")
     paths = PaperPaths(data_dir / "paper")
     view = build_view(JsonlEventJournal(paths.journal).replay())
@@ -408,11 +414,41 @@ def _tab_live(data_dir: Path, art: Artifacts, max_age_minutes: int) -> None:
     _live_status(paths, max_age_minutes)
     _live_curve(view, _expected_cagr(art))
     _live_tables(view)
-    st.caption("Recarga la página para ver el último ciclo.")
+    if auto_refresh:
+        st.caption(f"Se actualiza sola cada {tour.LIVE_REFRESH.seconds} s.")
+    else:
+        st.caption("Recarga la página para ver el último ciclo.")
+
+
+def _move(delta: int) -> None:
+    st.session_state["paso"] = tour.clamp(int(st.session_state.get("paso", 0)) + delta)
+
+
+def _sidebar_tour() -> None:
+    """Recorrido de la feria: qué pestaña abrir, qué decir y qué señalar en cada paso."""
+    step = tour.clamp(int(st.session_state.get("paso", 0)))
+    current, total = tour.STEPS[step], len(tour.STEPS)
+    with st.sidebar:
+        st.markdown(f"### Recorrido de la feria · paso {step + 1} de {total}")
+        st.progress((step + 1) / total)
+        st.subheader(current.title)
+        if current.tab is not None:
+            st.markdown(f"**Abre:** {current.tab}")
+        st.markdown(f"**Di:** {current.say}")
+        st.markdown(f"**Señala:** {current.show}")
+        back, forward = st.columns(2)
+        back.button("◀ Anterior", disabled=step == 0, on_click=_move, args=(-1,), width="stretch")
+        forward.button(
+            "Siguiente ▶", disabled=step == total - 1, on_click=_move, args=(1,), width="stretch"
+        )
 
 
 def main() -> None:
     st.set_page_config(page_title="PrometheusQuant", layout="wide")
+    fair = tour.is_fair_mode(st.query_params.to_dict())
+    if fair:
+        st.markdown(tour.FAIR_CSS, unsafe_allow_html=True)
+        _sidebar_tour()
     st.title("PrometheusQuant: tablero de investigación")
     settings = load_settings()
     data_dir = settings.data_dir
@@ -429,7 +465,13 @@ def main() -> None:
     with tabs[5]:
         _tab_nowcast(data_dir)
     with tabs[6]:
-        _tab_live(data_dir, art, settings.paper_heartbeat_max_age_minutes)
+        max_age = settings.paper_heartbeat_max_age_minutes
+        if fair:  # se redibuja sola, sin recargar el resto del tablero
+            st.fragment(run_every=tour.LIVE_REFRESH)(_tab_live)(
+                data_dir, art, max_age, auto_refresh=True
+            )
+        else:
+            _tab_live(data_dir, art, max_age)
 
 
 main()
