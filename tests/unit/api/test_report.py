@@ -122,3 +122,73 @@ def test_cli_report_inputs(
     out = capsys.readouterr().out
     assert "falta el artefacto «simulación»" in out
     assert (tmp_path / "r/_resultados.yml").exists()
+
+
+def test_conclusion_inputs_come_from_stats_finance_and_the_trial_ledger(tmp_path: Path) -> None:
+    """PQ-59: las cifras de las conclusiones (7.4, 8.3 a 8.4 y N) también salen de artefactos."""
+    lake, repo, out = tmp_path / "lake", tmp_path / "repo", tmp_path / "out"
+    stats = lake / "research/stats"
+    stats.mkdir(parents=True)
+    (stats / "summary.json").write_text(
+        json.dumps(
+            {
+                "he1": {"mean_annualized": 0.0236, "p_hac": 0.0441, "reject_h0": True},
+                "he2": {"mean_annualized": 0.0491, "p_hac": 0.1458, "reject_h0": False},
+                "he3": {"friedman_p": 1.5e-35, "kendall_w": 0.0127, "reject_h0": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    finance = lake / "research/finance"
+    finance.mkdir(parents=True)
+    oracle = "Oracle Cloud Always Free (Ampere A1)"
+    rows = [
+        {"escenario": "sin quiebra", "infraestructura": oracle, "capital": 1000.0, "anios": 3,
+         "van": -315.07, "capital_equilibrio": 28368.0},
+        {"escenario": "sin quiebra", "infraestructura": "Laptop", "capital": 1000.0, "anios": 3,
+         "van": -200.0, "capital_equilibrio": 25000.0},
+        {"escenario": "p = 2%", "infraestructura": oracle, "capital": 1000.0, "anios": 3,
+         "van": -377.92, "capital_equilibrio": None},
+    ]  # fmt: skip
+    (finance / "summary.json").write_text(
+        json.dumps({"escenarios": {"sin quiebra": {}, "p = 2%": {}}, "evaluaciones": rows}),
+        encoding="utf-8",
+    )
+    ledger = repo / "docs/estrategias/ensayos"
+    ledger.mkdir(parents=True)
+    row = {
+        "fecha": "2026-11-01T00:00:00+00:00",
+        "autor": "a",
+        "carril": "david",
+        "familia": "carry",
+        "hipotesis": "H2",
+        "nombre": "n",
+        "commit": "c",
+        "cuenta_en_n": True,
+        "comando": "pq",
+    }
+    lines = [
+        json.dumps(row),
+        json.dumps({**row, "familia": "modelo-funding"}),
+        json.dumps({**row, "familia": "descriptivo", "cuenta_en_n": False}),
+    ]
+    (ledger / "david.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    build_report_inputs(lake, repo, out)
+    values = json.loads((out / "_resultados.yml").read_text(encoding="utf-8"))["r"]
+    assert values["stats"]["he1_exceso"] == "2,36 %"
+    assert values["stats"]["he1_p"] == "0,044"
+    assert values["stats"]["he2_veredicto"] == "no se rechaza"
+    assert values["stats"]["he3_w"] == "0,013"
+    assert values["finanzas"]["van_1000_3a"] == "-315 USD"
+    assert values["finanzas"]["equilibrio"] == "28.368 USD"
+    assert values["finanzas"]["van_negativo"] == "en todos los casos evaluados"
+    assert values["ensayos"] == {"total": "2", "carry": "1", "modelo": "1"}
+
+
+def test_conclusion_inputs_are_na_without_artifacts(tmp_path: Path) -> None:
+    build_report_inputs(tmp_path / "lake", tmp_path / "repo", tmp_path / "out")
+    values = json.loads((tmp_path / "out/_resultados.yml").read_text(encoding="utf-8"))["r"]
+    assert values["stats"]["he1_p"] == NA
+    assert values["finanzas"]["equilibrio"] == NA
+    assert values["ensayos"]["total"] == NA

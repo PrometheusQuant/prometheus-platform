@@ -16,6 +16,7 @@ from typing import Any
 
 import polars as pl
 
+from prometheus_platform.adapters.trial_ledger import counts
 from prometheus_platform.api.dashboard.artifacts import (
     Artifacts,
     gates_table,
@@ -190,15 +191,102 @@ def _data_values(art: Artifacts) -> dict[str, str]:
     }
 
 
+def _read_summary(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else None
+
+
+def _stats_values(stats: dict[str, Any] | None) -> dict[str, str]:
+    """Pruebas de hipótesis del cap. 7.4 (``pq research stats``)."""
+    keys = ("he1_exceso", "he1_p", "he1_veredicto", "he2_media", "he2_p", "he2_veredicto")
+    if stats is None:
+        return dict.fromkeys((*keys, "he3_p", "he3_w"), NA)
+    values: dict[str, str] = {}
+    for name in ("he1", "he2"):
+        test = stats.get(name, {})
+        values[f"{name}_p"] = num(test.get("p_hac"), 3)
+        rejected = test.get("reject_h0")
+        values[f"{name}_veredicto"] = (
+            NA if rejected is None else ("se rechaza" if rejected else "no se rechaza")
+        )
+    values["he1_exceso"] = pct(stats.get("he1", {}).get("mean_annualized"), 2)
+    values["he2_media"] = pct(stats.get("he2", {}).get("mean_annualized"), 2)
+    he3 = stats.get("he3", {})
+    p_friedman = he3.get("friedman_p")
+    values["he3_p"] = NA if p_friedman is None else f"{float(p_friedman):.1e}"
+    values["he3_w"] = num(he3.get("kendall_w"), 3)
+    return values
+
+
+def _finance_values(finance: dict[str, Any] | None) -> dict[str, str]:
+    """VAN y capital de equilibrio del cap. 8.3 a 8.4 (``pq research finance``).
+
+    La referencia es la del informe de PQ-49: Oracle Always Free, 1.000 USD, 3 años, sin quiebra.
+    """
+    keys = ("van_1000_3a", "equilibrio", "van_negativo")
+    if finance is None:
+        return dict.fromkeys(keys, NA)
+    base = next(iter(finance.get("escenarios", {})), None)
+    rows = finance.get("evaluaciones", [])
+    ref = next(
+        (
+            e
+            for e in rows
+            if e["escenario"] == base
+            and str(e["infraestructura"]).startswith("Oracle")
+            and e["capital"] == 1_000
+            and e["anios"] == 3
+        ),
+        None,
+    )
+    equilibrium = ref.get("capital_equilibrio") if ref else None
+    negatives = sum(1 for e in rows if e["van"] < 0)
+    return {
+        "van_1000_3a": NA if ref is None else f"{num(ref['van'], 0)} USD",
+        "equilibrio": (
+            NA
+            if ref is None
+            else "no existe"
+            if equilibrium is None
+            else f"{num(equilibrium, 0)} USD"
+        ),
+        "van_negativo": (
+            NA
+            if not rows
+            else "en todos los casos evaluados"
+            if negatives == len(rows)
+            else f"en {negatives} de {len(rows)} casos"
+        ),
+    }
+
+
+def _ledger_values(ledger_dir: Path) -> dict[str, str]:
+    """N del registro de ensayos compartido (PQ-112): lo que cuenta en el Deflated Sharpe."""
+    if not any(ledger_dir.glob("*.jsonl")):
+        return dict.fromkeys(("total", "carry", "modelo"), NA)
+    n = counts(ledger_dir)
+    return {
+        "total": str(n["total"]),
+        "carry": str(n.get("carry", 0)),
+        "modelo": str(n.get("modelo-funding", 0)),
+    }
+
+
 def build_report_inputs(data_dir: Path, repo_root: Path, out_dir: Path) -> list[str]:
     """Escribe las entradas del informe. Devuelve los artefactos que faltaban."""
     art = load_artifacts(data_dir)
+    research = data_dir / "research"
     values = {
         "datos": _data_values(art),
         "h1": _carry_values(art.carry.get("H1")),
         "h2": _carry_values(art.carry.get("H2")),
         "modelo": _model_values(art.model),
         "sim": _simulation_values(art.simulation),
+        "stats": _stats_values(_read_summary(research / "stats" / "summary.json")),
+        "finanzas": _finance_values(_read_summary(research / "finance" / "summary.json")),
+        "ensayos": _ledger_values(repo_root / "docs" / "estrategias" / "ensayos"),
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     # JSON es YAML válido: así no hace falta otra dependencia.
