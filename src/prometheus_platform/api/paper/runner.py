@@ -128,6 +128,9 @@ class RunnerConfig:
     carry_share: Decimal | None = None
     # Cada cuánto se leen las señales de contraparte (PQ-96).
     counterparty_every: timedelta = timedelta(minutes=5)
+    # Datos atrasados (PQ-98): si la liquidación siguiente no aparece en este margen tras su hora,
+    # el símbolo deja de decidir y se alerta hasta que llegue.
+    funding_max_delay: timedelta = timedelta(minutes=30)
 
     def __post_init__(self) -> None:
         if not self.symbols:
@@ -325,6 +328,7 @@ class PaperRunner:
         self._imbalanced_since: dict[str, datetime] = {}
         self._warnings: set[str] = set()  # violaciones leves vigentes: se registran al aparecer
         self._rejected: dict[str, str] = {}  # último rechazo por símbolo: se registra al cambiar
+        self._late: set[str] = set()  # símbolos con la liquidación siguiente atrasada (PQ-98)
 
     # --- ciclo -----------------------------------------------------------------------------
 
@@ -539,6 +543,8 @@ class PaperRunner:
         history = self._market.recent_funding(symbol, self.config.history_limit)
         if not history:
             raise MarketUnavailableError(f"{symbol}: sin liquidaciones recientes")
+        if self._funding_late(symbol, history[-1], now, problems):
+            return 0  # sin el dato que falta no se decide nada nuevo para este símbolo
         since = self._processed.get(symbol)
         target = self._targets.get(symbol)
         if since is None:  # arranque en frío: la histéresis se reconstruye con el historial
@@ -566,6 +572,30 @@ class PaperRunner:
                 now=now,
             )
         return len(decisions)
+
+    def _funding_late(
+        self, symbol: str, latest: FundingRate, now: datetime, problems: list[str]
+    ) -> bool:
+        """¿La liquidación que sigue a ``latest`` ya debería estar publicada? (PQ-98)
+
+        Alerta una vez al atrasarse (ERROR, que llega a Telegram) y registra la recuperación.
+        """
+        expected = latest.funding_time + timedelta(hours=latest.interval_hours)
+        if now <= expected + self.config.funding_max_delay:
+            if symbol in self._late:
+                self._late.discard(symbol)
+                log.warning("paper_data_recovered", symbol=symbol)
+            return False
+        problems.append(f"{symbol}: liquidación de las {expected:%Y-%m-%d %H:%M} UTC atrasada")
+        if symbol not in self._late:
+            self._late.add(symbol)
+            log.error(
+                "paper_data_stale",
+                symbol=symbol,
+                expected=expected.isoformat(),
+                last=latest.funding_time.isoformat(),
+            )
+        return True
 
     def _record(  # noqa: PLR0913 - una liquidación con su decisión y el estado que deja
         self,

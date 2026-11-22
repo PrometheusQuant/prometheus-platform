@@ -213,3 +213,16 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 - **Solución:** `FUTURES_WS` apunta a `/market`. Además, el hilo del stream trata **el silencio como
   un corte** (`recv(timeout=30)`) y reconecta, y el runner cae a REST si el precio tiene más de 15 s.
   Un cambio parecido en el futuro ya no deja precios viejos. **Resuelto** (PR de PQ-80).
+
+### KE-019: `capture_logs` no ve los eventos del runner después de otras pruebas
+
+- **Síntoma:** al agregar la prueba de datos atrasados (PQ-98), pasaba sola pero fallaba en la
+  suite: `structlog.testing.capture_logs()` no capturaba ningún evento del runner.
+- **Causa:** `test_paper_monitoring.py` hace `monkeypatch.setattr(runner.log, "error", …)` sobre el
+  *proxy* perezoso de structlog. Para restaurarlo, `monkeypatch` guarda `getattr(log, "error")`, que
+  resuelve el logger con la configuración de ese momento, y al deshacer **fija** ese método en el
+  proxy. Desde entonces, `log.error` ya no sigue la configuración global y `capture_logs` no lo ve.
+- **Solución:** en las pruebas del runner, verificar los eventos con el mismo patrón
+  (`monkeypatch.setattr(runner_module.log, "<nivel>", …)`), que no depende del orden de las
+  pruebas. Una corrección de fondo sería no parchear el proxy en `test_paper_monitoring.py`.
+  **Resuelto** (PQ-98).
