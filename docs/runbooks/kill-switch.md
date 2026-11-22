@@ -57,6 +57,23 @@ uv run pq paper kill --reset --confirm --by "nombre"
 
 `--confirm` y `--by` son obligatorios: el rearme queda en el diario con el autor (`KillSwitchReset`).
 
+## Detener una sola estrategia (PQ-83)
+
+Cada estrategia tiene su propio kill-switch, en `data/paper/KILL_SWITCH-<id>`. Al activarlo, el
+runner cierra **solo sus posiciones** y deja de operarla. Las demás siguen, y el kill-switch global
+sigue mandando sobre todas.
+
+```bash
+uv run pq paper kill --strategy carry-h2 --reason "revisar el funding de XRP"
+uv run pq paper status        # «estrategia carry-h2: DETENIDA …»
+uv run pq paper kill --strategy carry-h2 --reset --confirm --by David
+```
+
+- Mientras una estrategia está detenida, el heartbeat lo indica en `estrategias_detenidas`.
+- No cancela las órdenes de las demás: eso solo lo hace el global.
+- Si el diario no registra la activación, el runner la registra en su próximo ciclo, igual que el
+  global.
+
 ## Simulacro (antes de operar y después de cada cambio en riesgo o ejecución)
 
 El test `tests/unit/portfolio_risk/test_risk_and_kill_switch.py::test_simulacro_del_runbook`

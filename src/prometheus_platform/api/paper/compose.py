@@ -7,7 +7,8 @@ en disco) con la configuración del proceso. La CLI (`pq paper run`) solo llama 
 from __future__ import annotations
 
 import fcntl
-from collections.abc import Iterator, Sequence
+import re
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -21,6 +22,7 @@ from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.simulated_broker import SimulatedBroker
 from prometheus_platform.api.paper.runner import PaperRunner, RunnerConfig
 from prometheus_platform.api.paper.watchdog import Watchdog
+from prometheus_platform.domain.model import Venue
 from prometheus_platform.domain.ports import Clock, Notifier
 from prometheus_platform.execution.allocation import StrategyAllocation
 from prometheus_platform.ops.logging import get_logger
@@ -35,6 +37,9 @@ BROKER_STATE_FILE = "broker-simulado.json"
 LOCK_FILE = "runner.lock"
 WATCHDOG_STATE_FILE = "watchdog.json"
 log = get_logger(component="paper_compose")
+
+
+STRATEGY_ID = re.compile(r"[A-Za-z0-9_-]+")  # va en un nombre de archivo
 
 
 class RunnerAlreadyRunningError(RuntimeError):
@@ -52,6 +57,21 @@ class PaperPaths:
     @property
     def kill_switch(self) -> Path:
         return self.root / FLAG_NAME
+
+    def strategy_kill_switch(self, strategy_id: str) -> Path:
+        """Bandera del kill-switch de una sola estrategia (PQ-83): ``KILL_SWITCH-<id>``."""
+        if not STRATEGY_ID.fullmatch(strategy_id):
+            raise ValueError(f"strategy_id no válido para un archivo: {strategy_id!r}")
+        return self.root / f"{FLAG_NAME}-{strategy_id}"
+
+    def strategy_kill_switches(self) -> dict[str, Path]:
+        """Las banderas de estrategia presentes (sin las temporales del rearme)."""
+        found = {}
+        for path in sorted(self.root.glob(f"{FLAG_NAME}-*")):
+            strategy_id = path.name.removeprefix(f"{FLAG_NAME}-")
+            if STRATEGY_ID.fullmatch(strategy_id):
+                found[strategy_id] = path
+        return found
 
     @property
     def heartbeat(self) -> Path:
@@ -97,6 +117,7 @@ def build(  # noqa: PLR0913 - keyword-only: cada argumento es una pieza de la co
     capital: Decimal,
     notifier: Notifier | None = None,
     strategies: Sequence[StrategyAllocation] = (),
+    exchange_caps: Mapping[Venue, Decimal] | None = None,
 ) -> PaperRunner:
     if settings.environment is Environment.LIVE:
         raise ValueError("El runner de paper no opera en PQ_ENVIRONMENT=live")
@@ -120,6 +141,9 @@ def build(  # noqa: PLR0913 - keyword-only: cada argumento es una pieza de la co
     market = BinancePublicMarket(client, clock)
     broker = SimulatedBroker(market, costs_for, clock, paths.broker_state, capital)
     journal = JsonlEventJournal(paths.journal)
+    # Uno por estrategia, sin bróker: cancelar «todas» las órdenes es cosa del global.
+    ids = [config.strategy_id, *(a.strategy_id for a in strategies)]
+    strategy_kills = {i: KillSwitch(paths.strategy_kill_switch(i), clock, journal) for i in ids}
     return PaperRunner(
         config=config,
         market=market,
@@ -133,6 +157,8 @@ def build(  # noqa: PLR0913 - keyword-only: cada argumento es una pieza de la co
         environment=settings.environment.value,
         strategies=strategies,
         feed=market,  # la API pública también da las velas de las otras estrategias (PQ-116)
+        strategy_kills=strategy_kills,
+        exchange_caps=exchange_caps,
     )
 
 

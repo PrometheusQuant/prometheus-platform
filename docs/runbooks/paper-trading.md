@@ -130,6 +130,21 @@ funding o las pérdidas de un símbolo mueven el objetivo de los demás. Por eso
 entradas y salidas, no en rebalanceos ni en tamaño. El paper trading no es una evaluación del
 pre-registro y no cuenta en N.
 
+## Presupuesto de capital (PQ-83)
+
+`uv run pq research budget` calcula el presupuesto recomendado entre las estrategias aprobadas, con
+el tope de CVaR y el tope por exchange ([ADR-0012](../adr/0012-presupuesto-de-capital-con-cvar.md)).
+Escribe `data/research/budget/summary.json`. **El runner no lo aplica solo** (decisión del titular del
+21-nov-2026): el paper es una demostración. Para hacerlo cumplir, se le pasa a mano:
+
+```bash
+uv run pq paper run --carry-share 0.10 --exchange-cap BINANCE=0.125
+```
+
+- `--carry-share`: parte del capital del carry. El resto queda en efectivo en el bróker.
+- `--exchange-cap`: el runner no arranca si las partes de ese exchange suman más que el tope.
+- Sin las opciones, el runner opera como siempre: el carry usa lo que dejan las demás estrategias.
+
 ## Otras estrategias en el mismo runner (PQ-116)
 
 Además del carry, el runner opera cualquier estrategia que cumpla el puerto `Strategy`

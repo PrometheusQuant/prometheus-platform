@@ -62,6 +62,7 @@ from prometheus_platform.data_platform.silver import SilverValidationError, buil
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
 from prometheus_platform.domain.carry_rules import CarryParams
 from prometheus_platform.domain.datasets import ArchiveRef, DatasetKind, Granularity, Market
+from prometheus_platform.domain.model import Venue
 from prometheus_platform.domain.ports import Notifier
 from prometheus_platform.ops.logging import configure_logging
 from prometheus_platform.ops.settings import Settings, load_settings
@@ -203,7 +204,10 @@ def _add_operations(commands: Commands) -> None:
     kill.add_argument("--reset", action="store_true", help="rearmar la operación")
     kill.add_argument("--confirm", action="store_true", help="obligatorio con --reset")
     kill.add_argument("--by", default="", help="quién rearma (obligatorio con --reset)")
-    paper_actions.add_parser("status", help="Estado del kill-switch")
+    kill.add_argument(
+        "--strategy", default="", help="solo esa estrategia (p. ej. carry-h2); sin ella, todo"
+    )
+    paper_actions.add_parser("status", help="Estado del kill-switch global y por estrategia")
     run = paper_actions.add_parser(
         "run", help="Runner del carry H2 con el bróker simulado y datos en vivo (PQ-54)"
     )
@@ -213,6 +217,19 @@ def _add_operations(commands: Commands) -> None:
     run.add_argument("--symbols", default=",".join(HYPOTHESES["H2"]))
     run.add_argument("--k", type=int, default=H2_PARAMS.k)
     run.add_argument("--theta", type=float, default=H2_PARAMS.theta)
+    run.add_argument(
+        "--carry-share",
+        type=_decimal_arg,
+        default=None,
+        help="parte del capital del carry en (0, 1]; el resto queda en efectivo (PQ-83)",
+    )
+    run.add_argument(
+        "--exchange-cap",
+        action="append",
+        default=[],
+        metavar="EXCHANGE=TOPE",
+        help="tope de capital por exchange, p. ej. BINANCE=0.125 (pq research budget)",
+    )
     watchdog = paper_actions.add_parser(
         "watchdog", help="Vigila el heartbeat del runner y alerta si deja de reportar (PQ-55)"
     )
@@ -645,7 +662,9 @@ def _paper_run(
                 symbols=symbols,
                 params=CarryParams(args.k, args.theta),
                 drawdown_alert=Decimal(str(settings.paper_drawdown_alert)),
+                carry_share=args.carry_share,
             )
+            caps = _exchange_caps(args.exchange_cap)
             with single_instance(paths):
                 runner = build(
                     settings=settings,
@@ -655,6 +674,7 @@ def _paper_run(
                     paths=paths,
                     capital=args.capital,
                     notifier=notifier,
+                    exchange_caps=caps,
                 )
                 print(f"runner de paper: bróker simulado, {','.join(symbols)}, {config.describe()}")
                 healthy = runner.run(
@@ -667,6 +687,23 @@ def _paper_run(
             print("runner detenido a mano (el estado queda en el diario y en el bróker)")
             return 0
     return 0 if healthy else 1
+
+
+def _exchange_caps(items: Sequence[str]) -> dict[Venue, Decimal]:
+    caps = {}
+    for item in items:
+        name, sep, value = item.partition("=")
+        try:
+            venue = Venue(name.strip().upper())
+            cap = Decimal(value)
+        except (ValueError, ArithmeticError) as exc:
+            raise ValueError(
+                f"--exchange-cap {item!r}: usa EXCHANGE=TOPE, p. ej. BINANCE=0.125"
+            ) from exc
+        if not sep or not cap.is_finite() or not Decimal(0) < cap <= 1:
+            raise ValueError(f"--exchange-cap {item!r}: el tope va en (0, 1]")
+        caps[venue] = cap
+    return caps
 
 
 def _decimal_arg(text: str) -> Decimal:
@@ -685,19 +722,43 @@ def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | No
     if args.action == "watchdog":
         return _paper_watchdog(args, settings, notifier)
     paths = PaperPaths(settings.data_dir / PAPER_DIR)
-    switch = KillSwitch(paths.kill_switch, SystemClock(), JsonlEventJournal(paths.journal))
+    journal = JsonlEventJournal(paths.journal)
     if args.action == "status":
-        state = switch.state()
-        print(
-            "kill-switch: ARMADO (operación permitida)"
-            if state is None
-            else f"kill-switch: ACTIVADO {state}"
-        )
-        print(f"bandera: {switch.flag_path.resolve()}")
-        return 0
+        return _paper_status(paths, journal)
+    return _paper_kill(args, paths, journal)
+
+
+def _paper_status(paths: PaperPaths, journal: JsonlEventJournal) -> int:
+    state = KillSwitch(paths.kill_switch, SystemClock(), journal).state()
+    print(
+        "kill-switch: ARMADO (operación permitida)"
+        if state is None
+        else f"kill-switch: ACTIVADO {state}"
+    )
+    print(f"bandera: {paths.kill_switch.resolve()}")
+    for strategy_id, flag in paths.strategy_kill_switches().items():
+        detail = KillSwitch(flag, SystemClock(), journal).state()
+        print(f"estrategia {strategy_id}: DETENIDA {detail}")
+    return 0
+
+
+def _paper_kill(args: argparse.Namespace, paths: PaperPaths, journal: JsonlEventJournal) -> int:
+    """Kill-switch global o de una estrategia (``--strategy``, PQ-83)."""
+    try:
+        flag = paths.strategy_kill_switch(args.strategy) if args.strategy else paths.kill_switch
+    except ValueError as exc:
+        print(f"ERROR {exc}", file=sys.stderr)
+        return 2
+    switch = KillSwitch(flag, SystemClock(), journal)
+    scope = f" de la estrategia {args.strategy}" if args.strategy else ""
     if not args.reset:
-        tripped = switch.trip(args.reason, source="cli")
-        print("kill-switch ACTIVADO" if tripped else "el kill-switch ya estaba activado")
+        reason = f"{args.strategy}: {args.reason}" if args.strategy else args.reason
+        tripped = switch.trip(reason, source="cli")
+        print(
+            f"kill-switch{scope} ACTIVADO"
+            if tripped
+            else f"el kill-switch{scope} ya estaba activado"
+        )
         print(f"bandera: {switch.flag_path.resolve()}")
         print("el runner cancela las órdenes y cierra las posiciones en su próximo ciclo;")
         print("verifica con `pq paper status` y en Binance (órdenes abiertas)")
@@ -705,7 +766,10 @@ def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | No
     if not (args.confirm and args.by.strip()):
         print("para rearmar hacen falta --confirm y --by <nombre>", file=sys.stderr)
         return 2
-    print("kill-switch rearmado" if switch.reset(args.by) else "el kill-switch no estaba activado")
+    rearmed = switch.reset(args.by)
+    print(
+        f"kill-switch{scope} rearmado" if rearmed else f"el kill-switch{scope} no estaba activado"
+    )
     return 0
 
 

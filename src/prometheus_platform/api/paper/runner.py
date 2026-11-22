@@ -25,6 +25,12 @@ día salen del diario (``replay``).
 **Arranque en frío.** Sin liquidaciones previas en el diario, el estado de la histéresis se
 reconstruye recorriendo el historial reciente (``CarryStrategy.walk``).
 
+**Presupuestos y kill-switch por estrategia (PQ-83, ADR-0012).** ``RunnerConfig.carry_share``
+fija la parte del carry; sin ella, el carry usa lo que dejan las demás. El resto queda en efectivo.
+Con ``exchange_caps``, el runner no arranca si las partes de un exchange superan su tope. Cada
+estrategia tiene su kill-switch (``KILL_SWITCH-<id>``): al activarse se cierran **sus** posiciones
+y deja de operar, mientras las demás siguen. El kill-switch global sigue mandando sobre todo.
+
 **Otras estrategias (PQ-116).** Además del carry, el runner opera una lista de ``Strategy``
 (ADR-0011), cada una con su parte del capital (``StrategyAllocation``), mediante el ejecutor
 genérico de ``executor.py``. El carry usa el resto del capital. Cada instrumento tiene un solo
@@ -36,7 +42,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -55,7 +61,7 @@ from prometheus_platform.domain.events import (
     RunnerStarted,
     SignalGenerated,
 )
-from prometheus_platform.domain.model import FundingRate, InstrumentId, Side, Signal
+from prometheus_platform.domain.model import FundingRate, InstrumentId, Side, Signal, Venue
 from prometheus_platform.domain.ports import (
     Broker,
     Clock,
@@ -111,6 +117,8 @@ class RunnerConfig:
     valuation_every: timedelta = timedelta(minutes=15)
     # Caída desde el máximo de la curva que dispara una alerta ERROR (PQ-55).
     drawdown_alert: Decimal = Decimal("0.03")
+    # Parte del capital del carry (PQ-83). None: lo que dejan las demás estrategias.
+    carry_share: Decimal | None = None
 
     def __post_init__(self) -> None:
         if not self.symbols:
@@ -123,6 +131,10 @@ class RunnerConfig:
             raise ValueError("sizing_buffer debe estar en [0, 1)")
         if not ZERO < self.drawdown_alert < 1:
             raise ValueError("drawdown_alert debe estar en (0, 1)")
+        if self.carry_share is not None and not (
+            self.carry_share.is_finite() and ZERO < self.carry_share <= 1
+        ):
+            raise ValueError(f"carry_share debe estar en (0, 1], no {self.carry_share}")
 
     def describe(self) -> str:
         p = self.params
@@ -130,6 +142,7 @@ class RunnerConfig:
             f"k={p.k} theta={p.theta} always_on={p.always_on} history_limit={self.history_limit} "
             f"sizing_buffer={self.sizing_buffer} execution_delay={EXECUTION_DELAY} "
             f"drawdown_alert={self.drawdown_alert}"
+            + ("" if self.carry_share is None else f" carry_share={self.carry_share}")
         )
 
 
@@ -141,6 +154,7 @@ class TickReport:
     settlements: int = 0
     orders: int = 0
     detail: str = ""
+    halted: tuple[str, ...] = ()  # estrategias con su kill-switch activado (PQ-83)
 
 
 @dataclass
@@ -239,6 +253,8 @@ class PaperRunner:
         environment: str = "paper",
         strategies: Sequence[StrategyAllocation] = (),
         feed: MarketDataFeed | None = None,
+        strategy_kills: Mapping[str, KillSwitch] | None = None,
+        exchange_caps: Mapping[Venue, Decimal] | None = None,
     ) -> None:
         self.config = config
         self._notifier = notifier
@@ -253,9 +269,21 @@ class PaperRunner:
         self._strategy = CarryStrategy(config.symbols, config.params, config.strategy_id)
         self._allocations = tuple(strategies)
         allocated = validate_allocations(self._allocations)
-        if allocated >= 1:
-            raise ValueError(f"Las estrategias se asignan {allocated}: no queda capital al carry")
-        self._carry_share = 1 - allocated
+        if config.carry_share is None:
+            if allocated >= 1:
+                raise ValueError(
+                    f"Las estrategias se asignan {allocated}: no queda capital al carry"
+                )
+            self._carry_share = 1 - allocated
+        else:
+            if allocated + config.carry_share > 1:
+                raise ValueError(
+                    f"El carry ({config.carry_share}) y las estrategias ({allocated}) "
+                    "suman más de 1"
+                )
+            self._carry_share = config.carry_share
+        self._check_exchange_caps(exchange_caps or {})
+        self._strategy_kills = dict(strategy_kills or {})
         history = list(journal.replay())
         self._executor: StrategyExecutor | None = None
         if self._allocations:
@@ -300,9 +328,44 @@ class PaperRunner:
         )
         log.info("paper_runner_started", broker=self._broker.name, symbols=self.config.symbols)
 
+    def _check_exchange_caps(self, caps: Mapping[Venue, Decimal]) -> None:
+        """Las partes del capital en cada exchange no pueden superar su tope (ADR-0012)."""
+        by_venue: dict[Venue, Decimal] = {Venue.BINANCE: self._carry_share}  # el carry: Binance
+        for allocation in self._allocations:
+            for venue in {i.venue for i in allocation.strategy.instruments}:
+                by_venue[venue] = by_venue.get(venue, ZERO) + allocation.capital_share
+        for venue, cap in caps.items():
+            if by_venue.get(venue, ZERO) > cap:
+                raise ValueError(
+                    f"{venue}: las estrategias tienen {by_venue[venue]} del capital, más que su "
+                    f"tope de {cap} (pq research budget)"
+                )
+
+    def _halted(self, strategy_id: str, halted: list[str]) -> bool:
+        """El kill-switch de una estrategia (no el global). Se observa una vez por ciclo."""
+        switch = self._strategy_kills.get(strategy_id)
+        if switch is None or not switch.observe():
+            return False
+        halted.append(strategy_id)
+        return True
+
+    def _flatten(
+        self,
+        instruments: Iterable[InstrumentId],
+        book: PortfolioSnapshot,
+        tag: str,
+        marks: Marks,
+        now: datetime,
+    ) -> int:
+        """Cierra solo las posiciones de esos instrumentos (kill-switch de una estrategia)."""
+        owned = set(instruments)
+        mine = replace(book, positions=[p for p in book.positions if p.instrument in owned])
+        return self._execute(flatten_orders(mine), tag, marks, now)
+
     def tick(self) -> TickReport:
         now = self._clock.now()
         killed = self._kill.observe()
+        halted: list[str] = []
         try:
             marks = self._marks()
         except MarketUnavailableError as exc:
@@ -324,6 +387,13 @@ class PaperRunner:
         orders = 0
         if killed:
             orders += self._execute(flatten_orders(book), f"kill-{now:%Y%m%dT%H%M%S}", marks, now)
+        carry_halted = self._halted(self.config.strategy_id, halted)
+        if carry_halted and not killed:
+            carry = [
+                i for s in self.config.symbols for i in (spot_instrument(s), perp_instrument(s))
+            ]
+            tag = f"kill-{self.config.strategy_id}-{now:%Y%m%dT%H%M%S}"
+            orders += self._flatten(carry, book, tag, marks, now)
         settlements = 0
         for symbol in self.config.symbols:
             # Por separado: sin liquidaciones nuevas (API de funding caída) se sigue
@@ -331,12 +401,12 @@ class PaperRunner:
             settlements += self._guarded(
                 symbol, "liquidar", problems, self._settle, symbol, marks, now, problems
             )
-            if not killed:
+            if not (killed or carry_halted):
                 orders += self._guarded(
                     symbol, "reconciliar", problems, self._reconcile, symbol, marks, now
                 )
         if self._executor is not None:
-            orders += self._run_strategies(self._executor, marks, now, problems, killed=killed)
+            orders += self._run_strategies(marks, now, problems, killed=killed, halted=halted)
 
         equity = self._broker.equity(marks)
         self._watch_drawdown(equity)
@@ -351,8 +421,8 @@ class PaperRunner:
             )
             self._last_valued = now
         detail = "; ".join(problems)
-        self._write_heartbeat(now, ok=not problems, detail=detail, killed=killed)
-        return TickReport(not problems, equity, killed, settlements, orders, detail)
+        self._write_heartbeat(now, ok=not problems, detail=detail, killed=killed, halted=halted)
+        return TickReport(not problems, equity, killed, settlements, orders, detail, tuple(halted))
 
     def run(
         self,
@@ -404,19 +474,27 @@ class PaperRunner:
 
     def _run_strategies(
         self,
-        executor: StrategyExecutor,
         marks: Marks,
         now: datetime,
         problems: list[str],
         *,
         killed: bool,
+        halted: list[str],
     ) -> int:
-        """Las otras estrategias: decidir siempre; operar solo sin el kill-switch activado."""
+        """Las otras estrategias: decidir siempre; operar solo sin su kill-switch ni el global."""
+        executor = self._executor
+        if executor is None:
+            return 0
         orders = 0
         for allocation in self._allocations:
             name = allocation.strategy_id
             self._guarded(name, "decidir", problems, executor.decide, allocation, now, problems)
             if killed:
+                continue
+            if self._halted(name, halted):
+                tag = f"kill-{name}-{now:%Y%m%dT%H%M%S}"
+                book = self._book(marks, now)
+                orders += self._flatten(allocation.strategy.instruments, book, tag, marks, now)
                 continue
             account = Account(
                 equity=self._broker.equity(marks),
@@ -781,14 +859,18 @@ class PaperRunner:
     def _valuation_due(self, now: datetime) -> bool:
         return self._last_valued is None or now - self._last_valued >= self.config.valuation_every
 
-    def _write_heartbeat(self, now: datetime, *, ok: bool, detail: str, killed: bool) -> None:
-        payload = {
+    def _write_heartbeat(
+        self, now: datetime, *, ok: bool, detail: str, killed: bool, halted: Sequence[str] = ()
+    ) -> None:
+        payload: dict[str, object] = {
             "at": now.isoformat(),
             "ok": ok,
             "detail": detail,
             "broker": self._broker.name,
             "kill_switch": killed,
         }
+        if halted:  # solo con un kill-switch de estrategia activado: el formato no cambia
+            payload["estrategias_detenidas"] = list(halted)
         try:
             self._heartbeat.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._heartbeat.with_name(f"{self._heartbeat.name}.tmp")
