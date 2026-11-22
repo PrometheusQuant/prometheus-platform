@@ -238,6 +238,12 @@ def _add_operations(commands: Commands) -> None:
     run.add_argument("--k", type=int, default=H2_PARAMS.k)
     run.add_argument("--theta", type=float, default=H2_PARAMS.theta)
     run.add_argument(
+        "--market-data",
+        choices=["rest", "stream"],
+        default="rest",
+        help="stream: precios por websocket con respaldo REST (PQ-80); rest: la API cada ciclo",
+    )
+    run.add_argument(
         "--carry-share",
         type=_decimal_arg,
         default=None,
@@ -799,6 +805,7 @@ def _paper_run(
                     capital=args.capital,
                     notifier=notifier,
                     exchange_caps=caps,
+                    market_data=args.market_data,
                 )
                 print(f"runner de paper: bróker simulado, {','.join(symbols)}, {config.describe()}")
                 healthy = runner.run(

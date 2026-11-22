@@ -18,6 +18,13 @@ from pathlib import Path
 import httpx
 
 from prometheus_platform.adapters.binance_public_market import BinancePublicMarket
+from prometheus_platform.adapters.binance_ws_market import (
+    StreamCache,
+    StreamingMarket,
+    StreamWorker,
+    connect_websocket,
+    stream_urls,
+)
 from prometheus_platform.adapters.counterparty_signals import PublicCounterpartySignals
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.simulated_broker import SimulatedBroker
@@ -31,6 +38,7 @@ from prometheus_platform.ops.settings import Environment, Settings
 from prometheus_platform.portfolio_risk.kill_switch import FLAG_NAME, KillSwitch
 from prometheus_platform.portfolio_risk.risk import RiskLimits, RiskManager
 from prometheus_platform.research.carry_evaluation import costs_for
+from prometheus_platform.strategies.carry import symbol_of
 
 JOURNAL_FILE = "diario.jsonl"
 HEARTBEAT_FILE = "heartbeat.json"
@@ -119,6 +127,7 @@ def build(  # noqa: PLR0913 - keyword-only: cada argumento es una pieza de la co
     notifier: Notifier | None = None,
     strategies: Sequence[StrategyAllocation] = (),
     exchange_caps: Mapping[Venue, Decimal] | None = None,
+    market_data: str = "rest",
 ) -> PaperRunner:
     if settings.environment is Environment.LIVE:
         raise ValueError("El runner de paper no opera en PQ_ENVIRONMENT=live")
@@ -139,7 +148,16 @@ def build(  # noqa: PLR0913 - keyword-only: cada argumento es una pieza de la co
             usable=str(usable),
             detail="los límites de riesgo acotan el nocional: sube PQ_RISK_MAX_NOTIONAL_*",
         )
-    market = BinancePublicMarket(client, clock)
+    rest = BinancePublicMarket(client, clock)
+    market: BinancePublicMarket | StreamingMarket = rest
+    if market_data == "stream":  # PQ-80: precios por websocket, con REST de respaldo
+        others = (symbol_of(i) for a in strategies for i in a.strategy.instruments)
+        symbols = sorted({*config.symbols, *others})
+        cache = StreamCache()
+        StreamWorker(cache, stream_urls(symbols), connect=connect_websocket, clock=clock).start()
+        market = StreamingMarket(rest, cache, clock)
+    elif market_data != "rest":
+        raise ValueError(f"market_data debe ser rest o stream, no {market_data!r}")
     broker = SimulatedBroker(market, costs_for, clock, paths.broker_state, capital)
     journal = JsonlEventJournal(paths.journal)
     # Uno por estrategia, sin bróker: cancelar «todas» las órdenes es cosa del global.

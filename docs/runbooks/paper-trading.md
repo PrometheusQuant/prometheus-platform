@@ -136,6 +136,22 @@ funding o las pérdidas de un símbolo mueven el objetivo de los demás. Por eso
 entradas y salidas, no en rebalanceos ni en tamaño. El paper trading no es una evaluación del
 pre-registro y no cuenta en N.
 
+## Precios por websocket (PQ-80, opcional)
+
+```bash
+uv run pq paper run --market-data stream     # por defecto: --market-data rest
+```
+
+- Un hilo lee los streams públicos de Binance: `markPrice@1s` y `kline_1h` de futuros (por la ruta
+  `/market`, ver KE-018) y `miniTicker` de spot. Reconecta con espera creciente, y un stream que
+  calla 30 s cuenta como corte.
+- **El runner usa el precio del stream solo si tiene menos de 15 s.** Si no, lo pide a REST y lo
+  registra una vez (`market_stream_fallback`); al volver, `market_stream_recovered`. Una vela de
+  1 h que no sigue a la anterior deja `market_stream_gap`.
+- Las liquidaciones ya ocurridas, el historial y las velas de las estrategias siguen saliendo de
+  REST. El estado vive en el diario y el bróker: un corte de red solo cambia de dónde salen los
+  precios (prueba de caos con 5 minutos sin stream).
+
 ## Presupuesto de capital (PQ-83)
 
 `uv run pq research budget` calcula el presupuesto recomendado entre las estrategias aprobadas, con

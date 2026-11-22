@@ -25,6 +25,7 @@ dependencies = [
     "scipy>=1.14",
     "sqlalchemy>=2.1.6",
     "structlog>=26.1",
+    "websockets>=15",
 ]
 
 [project.scripts]

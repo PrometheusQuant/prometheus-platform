@@ -24,6 +24,8 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Corregido en código; reejecución pendiente |
 | KE-015 | `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS | Workaround |
 | KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Corregido en código; reejecución pendiente |
+| KE-017 | Los logs no enmascaraban secretos dentro de textos libres | Resuelto |
+| KE-018 | El stream de futuros de Binance abre la conexión pero no envía nada | Resuelto |
 
 ---
 
@@ -199,3 +201,15 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 - **Solución:** `_redact` aplica `redact_text` a todo valor `str`, también dentro de listas y tuplas,
   y el patrón acepta el prefijo `bot`. Pruebas en `tests/unit/ops/` (log, alerta y URL).
   **Resuelto** (PQ-118).
+
+### KE-018: el stream de futuros de Binance abre pero no envía nada
+
+- **Síntoma:** encontrado al probar PQ-80 contra Binance. `wss://fstream.binance.com/stream?streams=solusdt@markPrice@1s`
+  completa el handshake en ~1,6 s, pero no llega ningún mensaje: `recv` vence a los 10 s. El stream
+  spot (`stream.binance.com:9443/stream`) sí funciona.
+- **Causa:** Binance movió los streams de mercado de USDⓈ-M a la ruta **`/market`**
+  (`wss://fstream.binance.com/market/stream?...`, verificado el 2026-11-22, también para `kline_1h`).
+  La ruta antigua sigue aceptando conexiones, por eso no hay error.
+- **Solución:** `FUTURES_WS` apunta a `/market`. Además, el hilo del stream trata **el silencio como
+  un corte** (`recv(timeout=30)`) y reconecta, y el runner cae a REST si el precio tiene más de 15 s.
+  Un cambio parecido en el futuro ya no deja precios viejos. **Resuelto** (PR de PQ-80).
