@@ -68,7 +68,7 @@ jobs:
           format: cyclonedx-json
           output-file: sbom.cdx.json
           upload-artifact: false
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.3
       - name: Firmar la imagen y adjuntarle el SBOM como atestación
         env:
           REF: ${{ env.IMAGEN }}@${{ steps.build.outputs.digest }}
