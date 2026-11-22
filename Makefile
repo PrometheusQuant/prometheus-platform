@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report e2e screenshots orquestador
+.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report poster e2e screenshots orquestador
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -32,6 +32,13 @@ e2e: ## Pruebas en navegador real contra el dashboard en Docker (Playwright)
 	docker compose up -d --build --wait
 	uv run --group e2e playwright install chromium
 	uv run --group e2e pytest tests/e2e --no-cov --base-url http://127.0.0.1:8501
+
+poster: ## Póster A3 de la feria con QR, desde los resultados (Typst)
+	@command -v quarto >/dev/null || { echo "Falta Quarto: https://quarto.org/docs/get-started/"; exit 1; }
+	uv run pq report inputs --out reports/poster
+	cd reports/poster && quarto typst compile poster.typ poster.pdf
+	cp reports/poster/poster.pdf docs/academico/poster-feria.pdf
+	@echo "Póster en docs/academico/poster-feria.pdf"
 
 screenshots: ## Captura cada pestaña del dashboard en reports/storytelling/_img/dashboard/
 	docker compose up -d --build --wait
