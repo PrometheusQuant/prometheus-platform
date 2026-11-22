@@ -484,11 +484,12 @@ def _research_budget(data_dir: Path) -> int:
 
     research = data_dir / "research"
     try:
-        result = rb.run(research)
+        budget = rb.run(research)
     except FileNotFoundError as exc:
         print(f"ERROR falta un artefacto: {exc.filename}. Corre antes `pq research simulate`.")
         return 2
-    path = rb.write(result, research / "budget")
+    path = rb.write(budget, research / "budget")
+    result = budget.summary
     approved = ", ".join(result["estrategias_aprobadas"]) or "ninguna"
     print(f"estrategias aprobadas: {approved}; tope por exchange: {result['tope_por_exchange']}")
     for name, weight in result["presupuesto"].items():

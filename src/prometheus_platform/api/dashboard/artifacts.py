@@ -32,6 +32,8 @@ class Artifacts:
     model: dict[str, Any] | None = None
     model_mode: str | None = None
     simulation: dict[str, Any] | None = None
+    budget: dict[str, Any] | None = None  # PQ-83: presupuesto recomendado
+    budget_scenarios: pl.DataFrame | None = None
     missing: list[Missing] = field(default_factory=list)
 
 
@@ -78,6 +80,12 @@ def load_artifacts(data_dir: Path) -> Artifacts:
     art.simulation = _read_json(data_dir / "research" / "simulation" / "summary.json")
     if art.simulation is None:
         art.missing.append(Missing("simulación", "uv run pq research simulate --figures …"))
+    budget_dir = data_dir / "research" / "budget"
+    art.budget = _read_json(budget_dir / "summary.json")
+    if art.budget is None:
+        art.missing.append(Missing("presupuesto de capital", "uv run pq research budget"))
+    elif (budget_dir / "scenarios.parquet").exists():
+        art.budget_scenarios = pl.read_parquet(budget_dir / "scenarios.parquet")
     return art
 
 

@@ -199,3 +199,48 @@ def frontier(
             }
         )
     return rows
+
+
+def cvar_contributions(
+    scenarios: Mapping[str, FloatArray], weights: Mapping[str, float], *, hurdle: float = HURDLE
+) -> dict[str, float]:
+    """Contribución de cada estrategia (y del efectivo) al CVaR95 de la cartera (Euler).
+
+    En los escenarios de la cola de la cartera, cada parte aporta su pérdida media ponderada. Las
+    contribuciones suman el CVaR95 de la cartera (PQ-84).
+    """
+    names = sorted(weights)
+    cash = 1 - sum(weights.values())
+    parts = {n: weights[n] * np.asarray(scenarios[n], dtype=np.float64) for n in names}
+    n_paths = len(next(iter(scenarios.values()))) if scenarios else 1
+    parts["efectivo"] = np.full(n_paths, cash * hurdle)
+    portfolio = np.sum(list(parts.values()), axis=0)
+    tail = portfolio <= np.quantile(portfolio, TAIL)
+    return {name: -float(values[tail].mean()) for name, values in parts.items()}
+
+
+def bootstrap_bands(  # noqa: PLR0913 - keyword-only: parámetros del remuestreo
+    daily: FloatArray,
+    horizon_days: int,
+    *,
+    n_paths: int = 2_000,
+    block: int = BLOCK_DAYS,
+    seed: int = SEED,
+    quantiles: tuple[float, ...] = (0.05, 0.5, 0.95),
+) -> FloatArray:
+    """Bandas del capital acumulado (inicio = 1) para cada día de 1 a ``horizon_days``.
+
+    Remuestrea por bloques los retornos diarios del desarrollo, como los escenarios del
+    presupuesto. Devuelve una matriz (cuantiles, días).
+    """
+    returns = np.asarray(daily, dtype=np.float64)
+    if horizon_days < 1:
+        raise ValueError("El horizonte debe ser de al menos un día")
+    if returns.size < block:
+        raise ValueError(f"Hacen falta al menos {block} días de historia")
+    rng = np.random.default_rng(seed)
+    n_blocks = -(-horizon_days // block)
+    starts = rng.integers(0, returns.size - block + 1, size=(n_paths, n_blocks))
+    index = (starts[:, :, None] + np.arange(block)).reshape(n_paths, -1)[:, :horizon_days]
+    paths = np.cumprod(1 + returns[index], axis=1)
+    return np.asarray(np.quantile(paths, quantiles, axis=0), dtype=np.float64)

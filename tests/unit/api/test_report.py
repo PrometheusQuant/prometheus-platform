@@ -40,7 +40,7 @@ def test_inputs_without_artifacts_still_build_a_report(tmp_path: Path) -> None:
     out = tmp_path / "out"
     missing = build_report_inputs(tmp_path / "lake", tmp_path / "repo", out)
 
-    assert len(missing) == 5
+    assert len(missing) == 6  # incluye el presupuesto de capital (PQ-83)
     values = json.loads((out / "_resultados.yml").read_text(encoding="utf-8"))["r"]
     assert values["h2"]["cagr"] == NA
     assert values["sim"]["quiebra_equilibrio"] == NA

@@ -55,7 +55,8 @@ def test_only_approved_strategies_and_only_development_days(tmp_path: Path) -> N
 
 def test_run_writes_the_budget_with_the_exchange_cap(tmp_path: Path) -> None:
     root = research(tmp_path)
-    result = rb.run(root, n_paths=2000)
+    budget = rb.run(root, n_paths=2000)
+    result = budget.summary
     assert result["estrategias_aprobadas"] == ["carry-H2"]
     assert result["tope_por_exchange"] == {"binance": pytest.approx(0.125)}
     weight = result["presupuesto"]["carry-H2"]
@@ -63,8 +64,13 @@ def test_run_writes_the_budget_with_the_exchange_cap(tmp_path: Path) -> None:
     assert result["efectivo"] == pytest.approx(1 - weight)
     assert result["cvar95"] <= rb.CVAR_LIMIT
     assert result["dias_desarrollo"] == 399
-    path = rb.write(result, root / "budget")
+    contributions = result["contribucion_cvar"]
+    assert sum(contributions.values()) == pytest.approx(result["cvar95"])
+    path = rb.write(budget, root / "budget")
     assert json.loads(path.read_text())["presupuesto"] == result["presupuesto"]
+    scenarios = pl.read_parquet(root / "budget" / "scenarios.parquet")
+    assert scenarios.columns == ["carry-H2"]
+    assert scenarios.height == 2000
 
 
 def test_without_approved_strategies_everything_stays_in_cash(tmp_path: Path) -> None:
@@ -73,7 +79,7 @@ def test_without_approved_strategies_everything_stays_in_cash(tmp_path: Path) ->
     (root / "simulation" / "summary.json").write_text(
         json.dumps({"probabilidad_quiebra_equilibrio": 0.004})
     )
-    result = rb.run(root)
+    result = rb.run(root).summary
     assert result["estrategias_aprobadas"] == []
     assert result["efectivo"] == 1.0
 
@@ -109,5 +115,5 @@ def test_cli_explains_a_missing_chapter_6_artifact(
 
 
 def test_generated_timestamp_is_utc(tmp_path: Path) -> None:
-    result = rb.run(research(tmp_path), n_paths=200)
+    result = rb.run(research(tmp_path), n_paths=200).summary
     assert datetime.fromisoformat(result["generado"]).utcoffset() == UTC.utcoffset(None)

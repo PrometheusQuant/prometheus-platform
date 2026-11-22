@@ -9,6 +9,7 @@ lateral guía el recorrido de 7 pasos del pitch (``tour.py``).
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 import polars as pl
@@ -16,7 +17,7 @@ import streamlit as st
 
 from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
-from prometheus_platform.api.dashboard import tour
+from prometheus_platform.api.dashboard import portfolio, tour
 from prometheus_platform.api.dashboard.artifacts import (
     Artifacts,
     equity_curves,
@@ -30,8 +31,14 @@ from prometheus_platform.api.dashboard.artifacts import (
     validation_table,
 )
 from prometheus_platform.api.paper.compose import PaperPaths
-from prometheus_platform.api.paper.report import PaperView, build_view, read_heartbeat
+from prometheus_platform.api.paper.report import (
+    PaperView,
+    build_view,
+    read_heartbeat,
+    strategy_breakdown,
+)
 from prometheus_platform.ops.settings import load_settings
+from prometheus_platform.portfolio_risk.budget import BLOCK_DAYS
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch
 from prometheus_platform.research import explain, nowcast, what_if
 from prometheus_platform.research.simulation import WeeklyRegimeModel
@@ -45,6 +52,7 @@ LABELS = [
     "¿Y si invierto? Simula tu inversión",
     "¿Qué predice hoy? Funding en vivo",
     "¿Cómo va en vivo? Paper trading",
+    "¿Cómo se reparte? Cartera",
 ]
 
 
@@ -420,6 +428,83 @@ def _tab_live(
         st.caption("Recarga la página para ver el último ciclo.")
 
 
+def _tab_portfolio(data_dir: Path, art: Artifacts) -> None:
+    st.subheader("Cartera multiestrategia: capital, PnL y riesgo")
+    view = build_view(JsonlEventJournal(PaperPaths(data_dir / "paper").journal).replay())
+    equity = view.equity or Decimal(0)
+    rows = strategy_breakdown(view)
+    current = portfolio.paper_weights(rows, equity)
+
+    st.markdown("**Presupuesto recomendado frente al paper**")
+    if art.budget is None:
+        _missing(art, "presupuesto")
+    else:
+        st.dataframe(
+            portfolio.allocation_table(art.budget, current), hide_index=True, width="stretch"
+        )
+        caps = art.budget.get("tope_por_exchange", {})
+        cols = st.columns(3)
+        cols[0].metric("Tope por exchange", ", ".join(f"{k}: {v:.1%}" for k, v in caps.items()))
+        cols[1].metric("CVaR95 recomendado", f"{float(art.budget.get('cvar95', 0)):.2%}")
+        cols[2].metric("Retorno esperado", f"{float(art.budget.get('retorno_esperado', 0)):.2%}")
+        st.caption(
+            "El presupuesto (pq research budget) maximiza el retorno esperado con un CVaR95 ≤ 5 %"
+            " y una quiebra del exchange del 2 % anual. El paper es una demostración y no lo aplica"
+            " solo (decisión del titular, 21-nov-2026)."
+        )
+    st.markdown("**Capital y PnL por estrategia y exchange (paper)**")
+    if not rows:
+        st.info("Aún no hay operaciones en el paper trading: `uv run pq paper run`.")
+    else:
+        st.dataframe(portfolio.strategy_table(rows, equity), hide_index=True, width="stretch")
+        by_exchange = (
+            pl.DataFrame(
+                {
+                    "exchange": [r.exchange.lower() for r in rows],
+                    "capital": [float(r.exposure) for r in rows],
+                }
+            )
+            .group_by("exchange")
+            .agg(pl.col("capital").sum())
+        )
+        st.bar_chart(by_exchange, x="exchange", y="capital")
+    st.markdown("**Contribución al riesgo de cola (CVaR95, un año)**")
+    if art.budget is not None and art.budget_scenarios is not None:
+        st.dataframe(
+            portfolio.cvar_table(art.budget, art.budget_scenarios, current),
+            hide_index=True,
+            width="stretch",
+        )
+        st.caption(
+            "Contribución de Euler: cuánto pierde en promedio cada parte en el peor 5 % de los"
+            " años simulados. Las partes suman el CVaR95 de la cartera."
+        )
+    elif art.budget is not None:  # sin presupuesto ya se avisó arriba
+        st.info(
+            "Faltan los escenarios del presupuesto: vuelve a correr `uv run pq research budget`."
+        )
+    _portfolio_bands(view, art)
+
+
+def _portfolio_bands(view: PaperView, art: Artifacts) -> None:
+    st.markdown("**Paper frente a lo que esperaba el backtest (bandas del Monte Carlo)**")
+    summary, returns = art.carry.get("H2"), art.carry_returns.get("H2")
+    paper = portfolio.daily_paper_equity(view.valuations)
+    if summary is None or returns is None or paper.height < 2:
+        st.info("Hacen falta al menos dos días de paper y la evaluación de H2 para las bandas.")
+        return
+    daily = portfolio.development_returns(returns, str(summary.get("selected")))
+    if daily.size < BLOCK_DAYS:
+        st.info("La evaluación de H2 tiene muy pocos días para remuestrear las bandas.")
+        return
+    st.line_chart(portfolio.bands_frame(paper, daily), x="día")
+    st.caption(
+        "Bandas del 5 %, la mediana y el 95 % al remuestrear por bloques de 21 días los retornos"
+        " diarios del desarrollo de H2 (la configuración elegida). Si el paper sale de la banda,"
+        " algo es distinto del backtest."
+    )
+
+
 def _move(delta: int) -> None:
     st.session_state["paso"] = tour.clamp(int(st.session_state.get("paso", 0)) + delta)
 
@@ -472,6 +557,8 @@ def main() -> None:
             )
         else:
             _tab_live(data_dir, art, max_age)
+    with tabs[7]:
+        _tab_portfolio(data_dir, art)
 
 
 main()

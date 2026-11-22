@@ -113,9 +113,14 @@ class JsonlEventJournal:
             raw = json.loads(line)
             cls = _EVENT_TYPES[raw.pop("type")]
             hints = typing.get_type_hints(cls)
-            expected = {f.name for f in dataclasses.fields(cls)}
-            if set(raw) != expected:
-                raise ValueError(f"campos {sorted(set(raw) ^ expected)}")
+            fields = dataclasses.fields(cls)
+            expected = {f.name for f in fields}
+            # Un campo añadido después con un valor por defecto fijo (p. ej. ``marks``, PQ-84) puede
+            # faltar en las líneas antiguas. Cualquier otro hueco o campo desconocido es corrupción.
+            optional = {f.name for f in fields if f.default is not dataclasses.MISSING}
+            unknown, missing = set(raw) - expected, expected - set(raw) - optional
+            if unknown or missing:
+                raise ValueError(f"campos {sorted(unknown | missing)}")
             for name, value in raw.items():
                 if hints[name] is str and not isinstance(value, str):
                     raise TypeError(f"{name} debe ser texto")

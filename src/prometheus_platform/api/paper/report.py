@@ -25,8 +25,12 @@ from prometheus_platform.domain.events import (
     PortfolioValued,
     RiskLimitBreached,
     RunnerStarted,
+    SignalGenerated,
 )
 from prometheus_platform.domain.model import InstrumentId, Side
+from prometheus_platform.strategies.carry import perp_instrument, symbol_of
+
+UNASSIGNED = "sin asignar"
 
 ZERO = Decimal(0)
 
@@ -65,6 +69,16 @@ class PaperView:
     valuations: list[PortfolioValued] = field(default_factory=list)
     breaches: list[RiskLimitBreached] = field(default_factory=list)
     kill_events: list[KillSwitchTripped | KillSwitchReset] = field(default_factory=list)
+    # PQ-84: de qué estrategia es cada instrumento (sus señales) y el último precio de cada uno.
+    owners: dict[InstrumentId, str] = field(default_factory=dict)
+    marks: dict[InstrumentId, Decimal] = field(default_factory=dict)
+    # Respaldo: la estrategia del último arranque para cada símbolo (el carry antes de operar).
+    runner_symbols: dict[str, str] = field(default_factory=dict)
+
+    def owner(self, instrument: InstrumentId) -> str:
+        """De quién es un instrumento: sus señales mandan; si no tiene, el runner del símbolo."""
+        found = self.owners.get(instrument)
+        return found or self.runner_symbols.get(symbol_of(instrument), UNASSIGNED)
 
     @property
     def funding(self) -> Decimal:
@@ -105,6 +119,29 @@ class PaperView:
         return max(ZERO, 1 - last / peak)
 
 
+def _apply_fill(view: PaperView, event: OrderFilled, submitted: dict[str, OrderSubmitted]) -> None:
+    order = submitted.get(event.client_order_id)
+    if order is None:  # un fill sin su orden: no se puede atribuir, no se inventa
+        return
+    fill = Fill(
+        event.occurred_at,
+        event.client_order_id,
+        order.instrument,
+        order.side,
+        event.fill_quantity,
+        event.fill_price,
+        event.fee,
+        event.slippage,
+    )
+    view.fills.append(fill)
+    signed = fill.quantity if fill.side is Side.BUY else -fill.quantity
+    quantity = view.positions.get(fill.instrument, ZERO) + signed
+    if quantity:
+        view.positions[fill.instrument] = quantity
+    else:
+        view.positions.pop(fill.instrument, None)
+
+
 def build_view(events: Iterable[DomainEvent]) -> PaperView:
     view = PaperView()
     submitted: dict[str, OrderSubmitted] = {}
@@ -112,38 +149,84 @@ def build_view(events: Iterable[DomainEvent]) -> PaperView:
         if isinstance(event, RunnerStarted):
             view.broker = event.broker
             view.started_at = view.started_at or event.occurred_at
+            for symbol in filter(None, event.symbols.split(",")):
+                view.runner_symbols[symbol] = event.strategy_id
         elif isinstance(event, OrderSubmitted):
             submitted[event.client_order_id] = event
         elif isinstance(event, OrderFilled):
-            order = submitted.get(event.client_order_id)
-            if order is None:  # un fill sin su orden: no se puede atribuir, no se inventa
-                continue
-            fill = Fill(
-                event.occurred_at,
-                event.client_order_id,
-                order.instrument,
-                order.side,
-                event.fill_quantity,
-                event.fill_price,
-                event.fee,
-                event.slippage,
-            )
-            view.fills.append(fill)
-            signed = fill.quantity if fill.side is Side.BUY else -fill.quantity
-            quantity = view.positions.get(fill.instrument, ZERO) + signed
-            if quantity:
-                view.positions[fill.instrument] = quantity
-            else:
-                view.positions.pop(fill.instrument, None)
+            _apply_fill(view, event, submitted)
         elif isinstance(event, FundingSettled):
             view.settlements.append(event)
         elif isinstance(event, PortfolioValued):
             view.valuations.append(event)
+            view.marks.update(event.mark_prices())
+        elif isinstance(event, SignalGenerated):
+            view.owners[event.signal.instrument] = event.signal.strategy_id
         elif isinstance(event, RiskLimitBreached):
             view.breaches.append(event)
         elif isinstance(event, KillSwitchTripped | KillSwitchReset):
             view.kill_events.append(event)
     return view
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyRow:
+    """Una estrategia en un exchange, según el diario del paper trading (PQ-84)."""
+
+    strategy: str
+    exchange: str
+    exposure: Decimal  # nocional bruto abierto, a la última marca
+    pnl: Decimal  # flujos de las órdenes + funding + posición a la última marca
+    funding: Decimal
+    costs: Decimal  # comisiones + slippage
+    approximate: bool  # alguna posición sin marca: se valoró al último fill
+
+
+@dataclass
+class _Acc:
+    exposure: Decimal = ZERO
+    pnl: Decimal = ZERO
+    funding: Decimal = ZERO
+    costs: Decimal = ZERO
+    approximate: bool = False
+
+
+def strategy_breakdown(view: PaperView) -> list[StrategyRow]:
+    """Capital y PnL por estrategia y exchange. La suma de los PnL es el PnL de la cartera.
+
+    PnL de un instrumento: menos la suma de (cantidad con signo · precio) de sus fills, menos las
+    comisiones, más la cantidad abierta a la última marca. El slippage ya va dentro del precio del
+    fill. El funding de un símbolo es de quien tiene su perpetuo.
+    """
+    rows: dict[tuple[str, str], _Acc] = {}
+
+    def row(instrument: InstrumentId) -> _Acc:
+        key = (view.owner(instrument), str(instrument.venue))
+        return rows.setdefault(key, _Acc())
+
+    last_price: dict[InstrumentId, Decimal] = {}
+    for fill in view.fills:
+        signed = fill.quantity if fill.side is Side.BUY else -fill.quantity
+        acc = row(fill.instrument)
+        acc.pnl -= signed * fill.price + fill.fee
+        acc.costs += fill.cost
+        last_price[fill.instrument] = fill.price
+    for settlement in view.settlements:
+        acc = row(perp_instrument(settlement.symbol))
+        acc.pnl += settlement.amount
+        acc.funding += settlement.amount
+    for instrument, quantity in view.positions.items():
+        acc = row(instrument)
+        mark = view.marks.get(instrument)
+        if mark is None:  # diario anterior a PQ-84: se valora al último fill
+            mark = last_price.get(instrument, ZERO)
+            acc.approximate = True
+        acc.pnl += quantity * mark
+        acc.exposure += abs(quantity) * mark
+    return [
+        StrategyRow(strategy, exchange, a.exposure, a.pnl, a.funding, a.costs, a.approximate)
+        for (strategy, exchange), a in sorted(rows.items())
+    ]
 
 
 @dataclass(frozen=True, slots=True)

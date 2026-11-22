@@ -103,6 +103,7 @@ def test_empty_lake_reports_every_missing_artifact_with_its_command(tmp_path: Pa
         "carry H2",
         "modelo de funding",
         "simulación",
+        "presupuesto de capital",
     ]
     assert all(m.command.startswith("uv run pq ") for m in art.missing)
     assert quality_table(art.quality).is_empty()
@@ -110,7 +111,8 @@ def test_empty_lake_reports_every_missing_artifact_with_its_command(tmp_path: Pa
 
 def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
     art = load_artifacts(lake)
-    assert [m.artifact for m in art.missing] == ["carry H1"]  # el JSON roto se ignora
+    # El JSON roto se ignora; el presupuesto (PQ-83) no está en este lago.
+    assert [m.artifact for m in art.missing] == ["carry H1", "presupuesto de capital"]
 
     assert quality_table(art.quality).row(0, named=True)["desde"] == "2020-09-13"
     h2 = art.carry["H2"]
@@ -146,6 +148,7 @@ def app_labels() -> list[str]:
         "¿Y si invierto? Simula tu inversión",
         "¿Qué predice hoy? Funding en vivo",
         "¿Cómo va en vivo? Paper trading",
+        "¿Cómo se reparte? Cartera",
     ]
 
 
@@ -172,8 +175,9 @@ def test_app_degrades_gracefully_without_artifacts(
 ) -> None:
     at = run_app(tmp_path / "vacio", monkeypatch)
     assert not at.exception
-    # 5 artefactos faltantes + simulador y predicción sin silver + paper trading sin diario
-    assert len(at.info) == 8
+    # 6 artefactos faltantes + simulador y predicción sin silver + paper trading sin diario, y en la
+    # cartera: sin operaciones y sin bandas
+    assert len(at.info) == 11
     assert not at.dataframe
 
 

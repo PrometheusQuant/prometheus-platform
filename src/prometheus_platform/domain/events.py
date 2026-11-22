@@ -6,12 +6,13 @@ puede auditar qué pasó y reconstruir el estado reproduciendo el journal.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from prometheus_platform.domain.model import InstrumentId, Side, Signal
+from prometheus_platform.domain.model import InstrumentId, Side, Signal, Venue
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -97,8 +98,28 @@ class FundingSettled(DomainEvent):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PortfolioValued(DomainEvent):
-    """Valoración de la cartera: la curva de capital del paper trading."""
+    """Valoración de la cartera: la curva de capital del paper trading.
+
+    ``marks`` guarda el precio de cada instrumento usado en la valoración (PQ-84), para repartir
+    el PnL por estrategia. Es texto (``SOLUSDT.BINANCE=160.1;…``) porque el diario solo guarda tipos
+    simples; los diarios anteriores no lo traen y quedan vacíos.
+    """
 
     equity: Decimal
     cash: Decimal
     gross_notional: Decimal
+    marks: str = ""
+
+    @staticmethod
+    def encode_marks(marks: Mapping[InstrumentId, Decimal]) -> str:
+        return ";".join(
+            f"{i}={price}" for i, price in sorted(marks.items(), key=lambda x: str(x[0]))
+        )
+
+    def mark_prices(self) -> dict[InstrumentId, Decimal]:
+        prices = {}
+        for item in filter(None, self.marks.split(";")):
+            name, _, price = item.partition("=")
+            symbol, _, venue = name.rpartition(".")
+            prices[InstrumentId(symbol, Venue(venue))] = Decimal(price)
+        return prices
