@@ -12,6 +12,7 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
+import altair as alt
 import polars as pl
 import streamlit as st
 
@@ -467,7 +468,8 @@ def _tab_portfolio(data_dir: Path, art: Artifacts) -> None:
             .group_by("exchange")
             .agg(pl.col("capital").sum())
         )
-        st.bar_chart(by_exchange, x="exchange", y="capital")
+        if by_exchange["capital"].sum() > 0:  # sin posiciones el gráfico sería un bloque vacío
+            st.bar_chart(by_exchange, x="exchange", y="capital")
     st.markdown("**Contribución al riesgo de cola (CVaR95, un año)**")
     if art.budget is not None and art.budget_scenarios is not None:
         st.dataframe(
@@ -497,12 +499,31 @@ def _portfolio_bands(view: PaperView, art: Artifacts) -> None:
     if daily.size < BLOCK_DAYS:
         st.info("La evaluación de H2 tiene muy pocos días para remuestrear las bandas.")
         return
-    st.line_chart(portfolio.bands_frame(paper, daily), x="día")
+    st.altair_chart(_bands_chart(portfolio.bands_frame(paper, daily)), width="stretch")
     st.caption(
-        "Bandas del 5 %, la mediana y el 95 % al remuestrear por bloques de 21 días los retornos"
-        " diarios del desarrollo de H2 (la configuración elegida). Si el paper sale de la banda,"
-        " algo es distinto del backtest."
+        "Naranja: el paper. Gris: la banda del 5 % al 95 % y la mediana (discontinua) al"
+        " remuestrear por bloques de 21 días los retornos diarios del desarrollo de H2 (la"
+        " configuración elegida). Si el paper sale de la banda, algo es distinto del backtest."
     )
+
+
+def _bands_chart(frame: pl.DataFrame) -> alt.LayerChart | alt.FacetChart:
+    """Banda del 5 % al 95 % sombreada, la mediana y el paper. El eje no fuerza el cero."""
+    axis = alt.Axis(format="d", tickMinStep=1)  # días enteros
+    base = alt.Chart(frame.to_pandas()).encode(x=alt.X("día:Q", title="días de paper", axis=axis))
+    scale = alt.Scale(zero=False)
+    band = base.mark_area(opacity=0.25, color="#64748b").encode(
+        y=alt.Y("backtest p5:Q", scale=scale, title="capital (inicio = 1)"),
+        y2="backtest p95:Q",
+    )
+    median = base.mark_line(color="#64748b", strokeDash=[4, 4]).encode(
+        y=alt.Y("backtest mediana:Q", scale=scale)
+    )
+    # Con puntos: los días sin runner (laptop apagada) quedan como huecos reales, no se inventan.
+    paper = base.mark_line(
+        color="#c2410c", strokeWidth=3, point=alt.OverlayMarkDef(color="#c2410c")
+    ).encode(y=alt.Y("paper:Q", scale=scale))
+    return alt.layer(band, median, paper)
 
 
 def _move(delta: int) -> None:
