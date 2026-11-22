@@ -69,6 +69,35 @@ por el navegador:
 Las alertas INFO no salen de los logs: el runner y el vigilante las envían directamente al canal.
 Ninguna orden individual genera alerta: van en el resumen diario.
 
+## Bot de comandos (PQ-72)
+
+El mismo bot también **responde comandos**, para vigilar y detener el paper trading desde el
+celular. Corre como un proceso aparte, junto al runner y al vigilante:
+
+```bash
+uv run pq paper bot
+```
+
+| Comando | Qué responde |
+|---|---|
+| `/estado` | Kill-switch, salud del runner (antigüedad del heartbeat), equity y posiciones |
+| `/pnl` | Resultado de hoy (UTC), de los últimos 7 días y desde el inicio, con funding y costes |
+| `/kill` | Un código de 6 dígitos; `/kill <código>` en los 2 minutos siguientes activa el kill-switch |
+| `/ayuda` | La lista de comandos |
+
+- **Quién puede usarlo:** solo los chats de `PQ_TELEGRAM_AUTHORIZED_CHAT_IDS` (separados por
+  comas). Si está vacío, solo el chat de alertas (`PQ_TELEGRAM_CHAT_ID`), es decir, el grupo
+  del equipo. A cualquier otro chat el bot no le contesta: registra el intento
+  (`telegram_bot_unauthorized`) y manda **una** alerta por chat.
+- **El kill-switch no se rearma desde Telegram.** Rearmar exige la CLI:
+  `uv run pq paper kill --reset --confirm --by <nombre>` ([kill-switch](kill-switch.md)).
+- **Mensajes viejos:** los comandos de más de 5 minutos se ignoran (los que esperaban mientras el
+  bot estaba apagado). Así, un `/kill` viejo no se ejecuta al arrancar.
+- **Sin puertos abiertos:** usa *long polling* (`getUpdates`), no webhook.
+- **Un solo proceso del bot por token:** Telegram rechaza dos `getUpdates` a la vez.
+- **En un grupo**, el modo privacidad del bot basta: Telegram le entrega los mensajes que empiezan
+  con `/`. Si hay varios bots en el grupo, escribe `/estado@NombreDelBot`.
+
 ## Si no llegan
 
 | Síntoma | Causa probable |

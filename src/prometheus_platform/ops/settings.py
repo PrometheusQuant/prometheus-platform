@@ -47,6 +47,9 @@ class Settings(BaseSettings):
 
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
+    # Chats que pueden darle comandos al bot (PQ-72), separados por comas.
+    # Vacío: solo el chat de alertas.
+    telegram_authorized_chat_ids: str = ""
     # Zona horaria IANA en la que se muestran las alertas a las personas (los logs siguen en UTC).
     alert_timezone: str = "America/La_Paz"
 
@@ -89,6 +92,14 @@ class Settings(BaseSettings):
     @property
     def alert_tz(self) -> ZoneInfo:
         return ZoneInfo(self.alert_timezone)
+
+    @property
+    def bot_authorized_chats(self) -> frozenset[str]:
+        """Chats que pueden darle comandos al bot. Sin lista explícita, solo el chat de alertas."""
+        listed = {c.strip() for c in self.telegram_authorized_chat_ids.split(",") if c.strip()}
+        if listed:
+            return frozenset(listed)
+        return frozenset({self.telegram_chat_id}) if self.telegram_chat_id else frozenset()
 
     @model_validator(mode="after")
     def _check_environment_invariants(self) -> Self:

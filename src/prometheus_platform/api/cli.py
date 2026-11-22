@@ -218,6 +218,9 @@ def _add_operations(commands: Commands) -> None:
     )
     watchdog.add_argument("--once", action="store_true", help="una revisión y termina (cron)")
     watchdog.add_argument("--interval", type=float, default=60.0, help="segundos entre revisiones")
+    paper_actions.add_parser(
+        "bot", help="Bot de Telegram: /estado, /pnl y /kill desde los chats autorizados (PQ-72)"
+    )
 
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
@@ -632,6 +635,13 @@ def _paper_watchdog(args: argparse.Namespace, settings: Settings, notifier: Noti
         return 0
 
 
+def _paper_bot(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:
+    from prometheus_platform.api.paper.bot import serve  # noqa: PLC0415
+
+    del args  # el bot no tiene opciones: todo sale de la configuración
+    return serve(settings, notifier, settings.data_dir / PAPER_DIR)
+
+
 def _paper_run(
     args: argparse.Namespace, settings: Settings, notifier: Notifier | None = None
 ) -> int:
@@ -680,10 +690,9 @@ def _decimal_arg(text: str) -> Decimal:
 
 
 def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:
-    if args.action == "run":
-        return _paper_run(args, settings, notifier)
-    if args.action == "watchdog":
-        return _paper_watchdog(args, settings, notifier)
+    processes = {"run": _paper_run, "watchdog": _paper_watchdog, "bot": _paper_bot}
+    if args.action in processes:
+        return processes[args.action](args, settings, notifier)
     paths = PaperPaths(settings.data_dir / PAPER_DIR)
     switch = KillSwitch(paths.kill_switch, SystemClock(), JsonlEventJournal(paths.journal))
     if args.action == "status":
