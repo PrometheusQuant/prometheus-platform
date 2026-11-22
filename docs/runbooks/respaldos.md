@@ -23,8 +23,9 @@ respalda `data/paper/`, cómo se restaura y qué midió el simulacro.
 - **El servidor solo tiene la clave pública** (`PQ_BACKUP_AGE_RECIPIENT`): puede cifrar, pero no
   descifrar. Si alguien entra al servidor o al repo de respaldos, no puede leer los respaldos.
 - **La clave privada** está en la laptop de David (`~/.config/prometheus/respaldos.key`, permisos
-  600). **Sin ella no hay restauración posible**: guarda una copia en un lugar seguro que no sea la
-  laptop, por ejemplo un gestor de contraseñas.
+  600), con una **segunda copia como nota segura en su gestor de contraseñas** (desde el 22-nov).
+  **Sin ella no hay restauración posible.** Para recuperarla en otra máquina, pega la línea
+  `AGE-SECRET-KEY-1…` en ese mismo archivo y dale `chmod 600`.
 
 ## Configurar el servidor (una vez, en PQ-57)
 
@@ -91,4 +92,4 @@ Se hizo sobre una **copia** de `data/paper/`, sin tocar el runner que estaba en 
 
 **El RTO real lo marca una persona, no la máquina.** Hace falta alguien con la clave privada, y
 quien se entera es quien recibe la alerta de «runner caído» del vigilante. Por eso la clave privada
-necesita una segunda copia fuera de la laptop.
+tiene una segunda copia fuera de la laptop.
