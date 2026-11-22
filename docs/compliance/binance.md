@@ -41,6 +41,13 @@ se usan las tasas sin descuento de BNB hasta que la sección 3 confirme las real
 ## 3. Verificación desde la cuenta (pendiente: titular)
 
 Completar con la fecha de consulta. Si algo difiere de la sección 2, manda la cuenta.
+Cómo obtener cada dato sin operar:
+
+- con `scripts/comisiones_binance.py`, que usa una clave de solo lectura y se niega a seguir si
+  tiene más permisos;
+- o desde la web.
+
+Ver [pasos del titular](pasos-del-titular.md#paso-1-comisiones-reales-de-binance-pq-17).
 
 | Comprobación | Dónde se ve | Resultado | Fecha |
 |---|---|---|---|
