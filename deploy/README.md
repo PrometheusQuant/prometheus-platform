@@ -19,6 +19,8 @@ deploy/
 
 ## Reglas
 
-- Secretos con `sops` + `age` o variables del servidor; nunca en texto plano en este directorio.
+- Secretos con `sops` + `age` (`deploy/secretos.sh`, `.sops.yaml`); nunca en texto plano en este directorio.
+- Solo se despliegan imágenes que acepta `deploy/verificar-imagen.sh` (firma cosign + SBOM). Ver
+  [cadena de suministro](../docs/runbooks/cadena-de-suministro.md).
 - Las claves de exchange en producción: **sin permiso de retiro** y con lista blanca de IP.
 - Cada cambio de infraestructura entra por PR con su ticket, igual que el código.
