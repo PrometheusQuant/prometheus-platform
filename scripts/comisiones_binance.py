@@ -92,7 +92,13 @@ class Cliente:
         respuesta = self.http.get(
             f"{base}{ruta}?{firmar(todos, self.secreto)}", headers={"X-MBX-APIKEY": self.clave}
         )
-        cuerpo = respuesta.json()
+        try:
+            cuerpo = respuesta.json()
+        except ValueError:
+            # Bloqueo de la CDN o página de error en HTML: no es la API.
+            raise BinanceError(
+                f"{ruta}: HTTP {respuesta.status_code}, respuesta que no es JSON"
+            ) from None
         if respuesta.status_code != 200:
             codigo = cuerpo.get("code") if isinstance(cuerpo, dict) else None
             mensaje = cuerpo.get("msg") if isinstance(cuerpo, dict) else respuesta.text[:200]

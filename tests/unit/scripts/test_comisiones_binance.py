@@ -187,3 +187,13 @@ def test_porcentaje_con_coma_decimal(script: ModuleType) -> None:
     assert script.porcentaje("0.00100000") == "0,100 %"
     assert script.porcentaje("0.000500") == "0,050 %"
     assert sorted(script.PERMITIDOS) == ["enableFixReadOnly", "enableReading"]
+
+
+def test_una_respuesta_html_es_un_error_claro(script: ModuleType) -> None:
+    def manejar(peticion: httpx.Request) -> httpx.Response:
+        if peticion.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1})
+        return httpx.Response(403, text="<html>bloqueado</html>")
+
+    with pytest.raises(script.BinanceError, match="HTTP 403, respuesta que no es JSON"):
+        script.consultar(_cliente(script, manejar), ("BTCUSDT",))
