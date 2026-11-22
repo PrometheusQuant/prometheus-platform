@@ -18,6 +18,7 @@ TABS = {
     "¿Y si invierto? Simula tu inversión": "Simula tu inversión en el carry (H2)",
     "¿Qué predice hoy? Funding en vivo": "¿Habrá funding alto en la próxima liquidación?",
     "¿Cómo va en vivo? Paper trading": "Paper trading del carry H2 en vivo",
+    "¿Cómo se reparte? Cartera": "Cartera multiestrategia: capital, PnL y riesgo",
 }
 TIMEOUT_MS = 30_000
 

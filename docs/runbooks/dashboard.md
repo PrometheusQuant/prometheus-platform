@@ -56,6 +56,7 @@ hoy?» necesita los datos de hoy ingeridos antes de perder la conexión.
 | ¿Y si invierto? | ¿Qué me pasaría con mi capital? | Silver de H2 (desarrollo): Monte Carlo del cap. 6 con tu capital, horizonte y riesgo de quiebra; θ solo pre-registrado | `uv run pq silver build --symbol <S>` |
 | ¿Qué predice hoy? | ¿Habrá funding alto en la próxima liquidación? | Clasificador del cap. 5 entrenado con el desarrollo; predice solo con datos **posteriores** al holdout | `uv run pq ingest --source api ...` + `pq silver build` |
 | ¿Cómo va en vivo? | ¿Cómo va el paper trading ahora? | `data/paper/diario.jsonl` y `heartbeat.json`: equity frente a lo esperado según el backtest, funding, costes, posiciones, órdenes, decisiones, heartbeat y kill-switch | `uv run pq paper run` ([runbook](paper-trading.md)) |
+| ¿Cómo se reparte? | ¿Cómo se reparte el capital y el riesgo entre estrategias? | Presupuesto recomendado frente al paper, capital y PnL por estrategia y exchange, contribución al CVaR95 (con el presupuesto y con el paper ahora) y el paper frente a las bandas del 5 %, la mediana y el 95 % del backtest de H2 | `uv run pq research budget` y `uv run pq paper run` (PQ-84) |
 
 Si falta un artefacto, la pestaña muestra el comando que lo genera.
 

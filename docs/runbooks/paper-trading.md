@@ -77,6 +77,12 @@ si dura más que la gracia (`PQ_RISK_IMBALANCE_GRACE_SECONDS`), activa el kill-s
 | `heartbeat.json` | Último ciclo: hora, `ok`, detalle de lo que falló (precios, un símbolo, un hueco), bróker y kill-switch |
 | `runner.lock` | Bloqueo de instancia única (lo libera el sistema si el proceso muere) |
 | `KILL_SWITCH` | Existe solo si el kill-switch está activado ([runbook](kill-switch.md)) |
+| `KILL_SWITCH-<id>` | Existe solo si el kill-switch **de esa estrategia** está activado (PQ-83) |
+
+**Compatibilidad del diario.** Cada línea debe traer exactamente los campos de su evento. Solo puede
+faltar un campo que se añadió después **con un valor por defecto fijo**, como `marks` en
+`PortfolioValued` (PQ-84): así los diarios antiguos se siguen leyendo. Un campo desconocido o un
+campo obligatorio que falta detienen la lectura (`JournalCorruptError`), porque no se adivina.
 
 Ver el estado:
 

@@ -28,6 +28,7 @@ from prometheus_platform.domain.protocol import HOLDOUT_START
 from prometheus_platform.portfolio_risk.budget import (
     HURDLE,
     apply_exchange_failures,
+    cvar_contributions,
     exchange_cap,
     frontier,
     joint_annual_scenarios,
@@ -72,7 +73,15 @@ def break_even_probability(research: Path) -> float:
     return float(data["probabilidad_quiebra_equilibrio"])
 
 
-def run(research: Path, *, n_paths: int = 10_000) -> dict[str, Any]:
+@dataclass(frozen=True, slots=True)
+class BudgetRun:
+    summary: dict[str, Any]
+    # Retornos anuales simulados con quiebra, por estrategia: el dashboard calcula con ellos el
+    # CVaR de la asignación que tenga el paper en cada momento (PQ-84).
+    scenarios: dict[str, np.ndarray]
+
+
+def run(research: Path, *, n_paths: int = 10_000) -> BudgetRun:
     strategies = approved_strategies(research)
     p_star = break_even_probability(research)
     cap = exchange_cap(
@@ -90,7 +99,7 @@ def run(research: Path, *, n_paths: int = 10_000) -> dict[str, Any]:
     }
     if not strategies:
         result.update(presupuesto={}, efectivo=1.0, retorno_esperado=HURDLE, cvar95=-HURDLE)
-        return result
+        return BudgetRun(result, {})
     aligned = strategies[0].returns.rename({"ret": strategies[0].name})
     for s in strategies[1:]:
         aligned = aligned.join(s.returns.rename({"ret": s.name}), on="date", how="inner")
@@ -108,17 +117,20 @@ def run(research: Path, *, n_paths: int = 10_000) -> dict[str, Any]:
         efectivo=budget.cash,
         retorno_esperado=budget.expected_return,
         cvar95=budget.cvar95,
+        contribucion_cvar=cvar_contributions(stressed, budget.weights),
         por_exchange=budget.by_exchange,
         frontera=frontier(stressed),
         sin_quiebra=asdict(
             optimize_budget(annual, exchange_of, caps={EXCHANGE: cap}, cvar_limit=CVAR_LIMIT)
         ),
     )
-    return result
+    return BudgetRun(result, stressed)
 
 
-def write(result: dict[str, Any], out_dir: Path) -> Path:
+def write(run_result: BudgetRun, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "summary.json"
-    path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps(run_result.summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    if run_result.scenarios:
+        pl.DataFrame(run_result.scenarios).write_parquet(out_dir / "scenarios.parquet")
     return path

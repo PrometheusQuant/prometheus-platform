@@ -417,6 +417,7 @@ class PaperRunner:
                     equity=equity,
                     cash=self._broker.cash(),
                     gross_notional=self._book(marks, now).gross_notional,
+                    marks=PortfolioValued.encode_marks(marks),
                 )
             )
             self._last_valued = now
