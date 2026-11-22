@@ -238,6 +238,18 @@ def _add_operations(commands: Commands) -> None:
     paper_actions.add_parser(
         "bot", help="Bot de Telegram: /estado, /pnl y /kill desde los chats autorizados (PQ-72)"
     )
+    backup = paper_actions.add_parser(
+        "backup", help="Respaldos cifrados (age) de data/paper y su restauración (PQ-73)"
+    )
+    backup_actions = backup.add_subparsers(dest="backup_action", required=True)
+    keygen = backup_actions.add_parser("keygen", help="Crea el par de claves age (una vez)")
+    keygen.add_argument("--out", type=Path, required=True, help="archivo de la clave privada")
+    create = backup_actions.add_parser("create", help="Cifra data/paper y poda lo viejo")
+    create.add_argument("--out", type=Path, required=True, help="carpeta de los respaldos")
+    restore = backup_actions.add_parser("restore", help="Restaura un respaldo en data/paper")
+    restore.add_argument("archive", type=Path, help="paper-<fecha>.tar.gz.age")
+    restore.add_argument("--identity", type=Path, required=True, help="clave privada age")
+    restore.add_argument("--force", action="store_true", help="reemplaza el diario existente")
 
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
@@ -659,6 +671,31 @@ def _paper_bot(args: argparse.Namespace, settings: Settings, notifier: Notifier 
     return serve(settings, notifier, settings.data_dir / PAPER_DIR)
 
 
+def _paper_backup(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:
+    from prometheus_platform.api.paper import backup  # noqa: PLC0415
+
+    del notifier  # los fallos salen por el código de salida: los vigila el cron o systemd
+    paper_dir = settings.data_dir / PAPER_DIR
+    now = SystemClock().now()
+    try:
+        if args.backup_action == "keygen":
+            public = backup.generate_identity(args.out)
+            print(f"clave privada en {args.out}: guárdala fuera del servidor y no la compartas")
+            print(f"clave pública (va en PQ_BACKUP_AGE_RECIPIENT del servidor): {public}")
+        elif args.backup_action == "create":
+            target = backup.create_backup(paper_dir, args.out, settings.backup_age_recipient, now)
+            removed = backup.prune(args.out, timedelta(days=settings.backup_keep_days), now)
+            print(f"respaldo: {target} ({len(removed)} viejos borrados)")
+        else:
+            names = backup.restore_backup(args.archive, args.identity, paper_dir, force=args.force)
+            print(f"restaurados en {paper_dir}: {', '.join(names)}")
+            print("arranca el runner: reconcilia el estado deseado con el bróker en su 1er ciclo")
+    except (backup.BackupError, RunnerAlreadyRunningError, OSError) as exc:
+        print(f"ERROR {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _paper_run(
     args: argparse.Namespace, settings: Settings, notifier: Notifier | None = None
 ) -> int:
@@ -727,7 +764,12 @@ def _decimal_arg(text: str) -> Decimal:
 
 
 def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:
-    processes = {"run": _paper_run, "watchdog": _paper_watchdog, "bot": _paper_bot}
+    processes = {
+        "run": _paper_run,
+        "watchdog": _paper_watchdog,
+        "bot": _paper_bot,
+        "backup": _paper_backup,
+    }
     if args.action in processes:
         return processes[args.action](args, settings, notifier)
     paths = PaperPaths(settings.data_dir / PAPER_DIR)
