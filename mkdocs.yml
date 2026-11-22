@@ -110,6 +110,7 @@ nav:
       - compliance/README.md
       - Binance: compliance/binance.md
       - Polymarket: compliance/polymarket.md
+      - Go/no-go para capital real: compliance/go-no-go-capital-real.md
   - Runbooks:
       - runbooks/README.md
       - Errores conocidos: runbooks/errores-conocidos.md
