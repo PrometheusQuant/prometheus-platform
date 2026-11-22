@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 
+from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.trial_ledger import counts
 from prometheus_platform.api.dashboard.artifacts import (
     Artifacts,
@@ -25,6 +27,7 @@ from prometheus_platform.api.dashboard.artifacts import (
     scenario_table,
     validation_table,
 )
+from prometheus_platform.api.paper.report import PaperView, build_view
 
 NA = "n/d"
 # nombre -> (ruta en el repo, pie de figura)
@@ -350,3 +353,181 @@ def build_report_inputs(data_dir: Path, repo_root: Path, out_dir: Path) -> list[
             snippet = f"*Figura no disponible ({source}).*\n"
         (figures / f"{name}.md").write_text(snippet, encoding="utf-8")
     return [m.artifact for m in art.missing]
+
+
+# --- Página pública de resultados (PQ-89) -----------------------------------------------------
+
+DISCLAIMER = (
+    '!!! warning "No es asesoramiento financiero"\n'
+    "    Proyecto universitario de investigación. Los resultados son del periodo de\n"
+    "    desarrollo y de **paper trading con dinero simulado**; rentabilidades pasadas no\n"
+    "    garantizan las futuras. Nada de esta página es una recomendación de inversión.\n"
+)
+PAPER_DAYS_SHOWN = 14
+
+
+def paper_daily(view: PaperView) -> pl.DataFrame:
+    """Un renglón por día UTC con valoración: equity al cierre, funding, costes y órdenes."""
+    days = sorted({v.occurred_at.date() for v in view.valuations})
+    rows = []
+    for day in days:
+        closing = [v.equity for v in view.valuations if v.occurred_at.date() == day][-1]
+        rows.append(
+            {
+                "día (UTC)": day.isoformat(),
+                "equity (USD)": float(closing),
+                "funding (USD)": float(
+                    sum((s.amount for s in view.settlements if s.funding_time.date() == day), 0)
+                ),
+                "costes (USD)": float(sum((f.cost for f in view.fills if f.at.date() == day), 0)),
+                "órdenes": sum(1 for f in view.fills if f.at.date() == day),
+            }
+        )
+    return pl.DataFrame(rows) if rows else pl.DataFrame()
+
+
+def _max_drawdown(view: PaperView) -> float | None:
+    peak, worst = None, 0.0
+    for v in view.valuations:
+        equity = float(v.equity)
+        peak = equity if peak is None else max(peak, equity)
+        if peak > 0:
+            worst = max(worst, 1 - equity / peak)
+    return None if peak is None else worst
+
+
+def _paper_section(paper_dir: Path) -> str:
+    journal = paper_dir / "diario.jsonl"
+    if not journal.exists():
+        return "*Todavía no hay historial de paper trading.*\n"
+    view = build_view(JsonlEventJournal(journal).replay())
+    if not view.valuations:
+        return "*El paper trading aún no registró valoraciones.*\n"
+    first, last = view.valuations[0], view.valuations[-1]
+    change = float(last.equity / first.equity - 1) if first.equity > 0 else None
+    summary = pl.DataFrame(
+        [
+            {"medida": "Desde", "valor": first.occurred_at.date().isoformat()},
+            {"medida": "Capital inicial (simulado)", "valor": f"{num(first.equity)} USD"},
+            {"medida": "Capital actual (simulado)", "valor": f"{num(last.equity)} USD"},
+            {"medida": "Variación", "valor": pct(change, 3)},
+            {"medida": "Caída máxima", "valor": pct(_max_drawdown(view), 3)},
+            {"medida": "Funding cobrado", "valor": f"{num(view.funding, 4)} USD"},
+            {"medida": "Comisiones y slippage", "valor": f"{num(view.costs, 4)} USD"},
+            {"medida": "Órdenes ejecutadas", "valor": str(len(view.fills))},
+            {"medida": "Activaciones del kill-switch", "valor": str(len(view.kill_events))},
+        ]
+    )
+    daily = paper_daily(view).tail(PAPER_DAYS_SHOWN)
+    note = (
+        "\nTodavía no hubo operaciones: la regla de entrada del carry H2 no dio señal en este "
+        "periodo, así que el capital sigue en efectivo.\n"
+        if not view.fills and not view.breaches
+        else ""
+    )
+    formats = {"equity (USD)": "num", "funding (USD)": "num", "costes (USD)": "num"}
+    return (
+        to_markdown(summary)
+        + note
+        + f"\n**Últimos {PAPER_DAYS_SHOWN} días con actividad**\n\n"
+        + to_markdown(daily, formats)
+    )
+
+
+def build_public_page(data_dir: Path, repo_root: Path, now: datetime) -> str:
+    """Markdown de ``docs/resultados.md``: solo agregados, sin claves ni identificadores."""
+    art = load_artifacts(data_dir)
+    research = data_dir / "research"
+    h1, h2 = _carry_values(art.carry.get("H1")), _carry_values(art.carry.get("H2"))
+    stats = _stats_values(_read_summary(research / "stats" / "summary.json"))
+    sim = _simulation_values(art.simulation)
+    ledger = _ledger_values(repo_root / "docs" / "estrategias" / "ensayos")
+    carry = pl.DataFrame(
+        [
+            {
+                "hipótesis": f"{name} ({v['simbolos']})",
+                "retorno anual": v["cagr"],
+                "siempre invertido": v["b1_cagr"],
+                "caída máx.": v["max_dd"],
+                "PBO": v["pbo"],
+                "DSR": v["dsr"],
+                "veredicto": v["veredicto"],
+            }
+            for name, v in (("H1", h1), ("H2", h2))
+        ]
+    )
+    h2_summary = art.carry.get("H2")
+    gates = (
+        to_markdown(gates_table(h2_summary), {"valor": "num"})
+        if h2_summary
+        else "*Artefacto no disponible.*\n"
+    )
+    tests = pl.DataFrame(
+        [
+            {
+                "prueba": "HE1: H2 rinde más que estar siempre invertido",
+                "resultado": f"{stats['he1_exceso']} al año; p = {stats['he1_p']}",
+                "H0": stats["he1_veredicto"],
+            },
+            {
+                "prueba": "HE2: H2 rinde más que una stablecoin al 4 %",
+                "resultado": f"{stats['he2_media']} al año; p = {stats['he2_p']}",
+                "H0": stats["he2_veredicto"],
+            },
+            {
+                "prueba": "HE3: las configuraciones difieren (Friedman)",
+                "resultado": f"p = {stats['he3_p']}; W de Kendall = {stats['he3_w']}",
+                "H0": NA if stats["he3_p"] == NA else "se rechaza",
+            },
+        ]
+    )
+    return "\n".join(
+        [
+            "# Resultados",
+            "",
+            "<!-- Generado con `uv run pq report public`: no lo edites a mano. -->",
+            "",
+            DISCLAIMER,
+            f"*Actualizado: {now.astimezone(UTC):%Y-%m-%d %H:%M} UTC. Cada cifra sale de un "
+            "artefacto del repositorio; nada se copia a mano.*",
+            "",
+            "## ¿Funciona? El carry de funding en el periodo de desarrollo",
+            "",
+            "Neto de comisiones VIP 0 y slippage, de enero de 2020 a junio de 2024. El holdout "
+            "(julio de 2024 en adelante) sigue cerrado: se abre una sola vez.",
+            "",
+            to_markdown(carry),
+            "**Gates de H2**",
+            "",
+            gates,
+            "## ¿Es significativo? Validación estadística",
+            "",
+            to_markdown(tests),
+            "## ¿Qué riesgo hay? Simulación",
+            "",
+            f"- Retorno medio simulado del carry H2: **{sim['media']}** "
+            f"(mediana {sim['mediana']}).",
+            f"- Años por debajo del 4 %: **{sim['p_bajo_4']}**; años con pérdida: "
+            f"**{sim['p_perdida']}**.",
+            f"- Con un 2 % anual de probabilidad de quiebra del exchange, el retorno medio cae a "
+            f"**{sim['media_p2']}**. Por encima de **{sim['quiebra_equilibrio']}** anual conviene "
+            "la stablecoin.",
+            "",
+            "## ¿Cómo va en vivo? Paper trading del carry H2",
+            "",
+            "Dinero simulado sobre precios reales de Binance, con kill-switch y alertas. Solo "
+            "agregados: sin claves ni identificadores de cuenta.",
+            "",
+            _paper_section(data_dir / "paper"),
+            "## Cuántas veces probamos",
+            "",
+            f"Ensayos registrados: **{ledger['total']}** (carry {ledger['carry']}, modelo del "
+            f"funding {ledger['modelo']}). Ninguna ejecución se descarta: cada una queda en el "
+            "[registro de ensayos](estrategias/registro-de-ensayos.md). El Deflated Sharpe de cada "
+            "estrategia descuenta los ensayos de su familia (el N del gate G1).",
+            "",
+            "La Estrategia 2 (tendencia con volatility targeting) está pre-registrada; su "
+            "evaluación está pendiente.",
+            "",
+        ]
+    )

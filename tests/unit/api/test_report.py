@@ -1,20 +1,26 @@
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import polars as pl
 import pytest
 import structlog
 
+from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.api import cli
 from prometheus_platform.api.report import (
     FIGURES,
     NA,
+    build_public_page,
     build_report_inputs,
     num,
     pct,
     to_markdown,
 )
+from prometheus_platform.domain.events import OrderFilled, OrderSubmitted, PortfolioValued
+from prometheus_platform.domain.model import InstrumentId, Side, Venue
 
 
 def test_spanish_number_formatting() -> None:
@@ -192,3 +198,69 @@ def test_conclusion_inputs_are_na_without_artifacts(tmp_path: Path) -> None:
     assert values["stats"]["he1_p"] == NA
     assert values["finanzas"]["equilibrio"] == NA
     assert values["ensayos"]["total"] == NA
+
+
+def test_public_page_aggregates_paper_trading_without_identifiers(tmp_path: Path) -> None:
+    """PQ-89: la página del jurado sale de los artefactos y no expone órdenes ni cuentas."""
+    now = datetime(2026, 11, 21, 12, tzinfo=UTC)
+    lake = tmp_path / "lake"
+    journal = JsonlEventJournal(lake / "paper" / "diario.jsonl")
+    for days, equity in ((2, "1000"), (1, "990"), (0, "1005")):
+        journal.append(
+            PortfolioValued(
+                occurred_at=now - timedelta(days=days),
+                equity=Decimal(equity),
+                cash=Decimal(0),
+                gross_notional=Decimal(0),
+            )
+        )
+    order = "entrada-20261121T120000-SOLUSDT"
+    journal.append(
+        OrderSubmitted(
+            occurred_at=now,
+            client_order_id=order,
+            instrument=InstrumentId("SOLUSDT", Venue.BINANCE),
+            side=Side.BUY,
+            quantity=Decimal(1),
+        )
+    )
+    journal.append(
+        OrderFilled(
+            occurred_at=now,
+            client_order_id=order,
+            fill_price=Decimal(100),
+            fill_quantity=Decimal(1),
+            fee=Decimal("0.1"),
+        )
+    )
+
+    page = build_public_page(lake, tmp_path / "repo", now)
+    assert "No es asesoramiento financiero" in page
+    assert "| Capital actual (simulado) | 1.005,00 USD |" in page
+    assert "| Variación | 0,500 % |" in page
+    assert "| Caída máxima | 1,000 % |" in page
+    assert "| Órdenes ejecutadas | 1 |" in page
+    assert "Todavía no hubo operaciones" not in page
+    assert order not in page  # ni ids de órdenes ni de cuenta
+    assert "Actualizado: 2026-11-21 12:00 UTC" in page
+
+
+def test_public_page_without_artifacts_still_builds(tmp_path: Path) -> None:
+    page = build_public_page(
+        tmp_path / "lake", tmp_path / "repo", datetime(2026, 11, 21, tzinfo=UTC)
+    )
+    assert "Todavía no hay historial de paper trading" in page
+    assert "Artefacto no disponible" in page
+    assert "| H2 (" in page
+
+
+@pytest.mark.usefixtures("reset_structlog")
+def test_cli_report_public(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PQ_DATA_DIR", str(tmp_path / "lake"))
+    out = tmp_path / "resultados.md"
+    assert cli.main(["report", "public", "--out", str(out)]) == 0
+    assert out.read_text(encoding="utf-8").startswith("# Resultados")
+    assert "página pública" in capsys.readouterr().out
