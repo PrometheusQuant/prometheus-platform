@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     paper_drawdown_alert: float = Field(default=0.03, gt=0, lt=1, allow_inf_nan=False)
     paper_heartbeat_max_age_minutes: int = Field(default=10, ge=1)
 
+    # Respaldos cifrados de data/paper (PQ-73): clave PÚBLICA age (no es secreta) y retención.
+    backup_age_recipient: str = ""
+    backup_keep_days: int = Field(default=14, ge=1)
+
     @field_validator("alert_timezone")
     @classmethod
     def _check_timezone(cls, value: str) -> str:

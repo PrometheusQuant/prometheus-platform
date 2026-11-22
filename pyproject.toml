@@ -20,6 +20,7 @@ dependencies = [
     "pyarrow>=26",
     "pydantic>=2.14",
     "pydantic-settings>=2.16",
+    "pyrage>=1.4.0",
     "scikit-learn>=1.6",
     "scipy>=1.14",
     "sqlalchemy>=2.1.6",
@@ -102,7 +103,7 @@ files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["sklearn.*", "mlflow.*", "optuna.*", "playwright.*"]
+module = ["sklearn.*", "mlflow.*", "optuna.*", "playwright.*", "pyrage.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
