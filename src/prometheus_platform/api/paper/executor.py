@@ -64,11 +64,13 @@ class Account:
     marks: Mapping[InstrumentId, Decimal]
     limits: RiskLimits
     sizing_buffer: Decimal
+    exposure_scale: Decimal = Decimal(1)  # PQ-96: a la mitad con la alerta de contraparte
 
     def budget(self, allocation: StrategyAllocation) -> Decimal:
         """Capital asignado: su parte de la equity, sin pasar del nocional total permitido."""
         base = min(self.equity, self.limits.max_notional_total)
-        return max(base, ZERO) * allocation.capital_share * (1 - self.sizing_buffer)
+        share = allocation.capital_share * (1 - self.sizing_buffer) * self.exposure_scale
+        return max(base, ZERO) * share
 
     @property
     def max_instrument(self) -> Decimal:

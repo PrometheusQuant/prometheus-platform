@@ -14,6 +14,7 @@ from typing import Protocol
 
 from prometheus_platform.domain.alerts import Alert
 from prometheus_platform.domain.chat import ChatMessage
+from prometheus_platform.domain.counterparty import CounterpartyReading
 from prometheus_platform.domain.datasets import ArchiveRef, RawArchive
 from prometheus_platform.domain.events import DomainEvent, OrderFilled
 from prometheus_platform.domain.market import MarketSnapshot
@@ -134,6 +135,15 @@ class LiveMarket(Protocol):
     def recent_funding(self, symbol: str, limit: int) -> list[FundingRate]:
         """Últimas liquidaciones **ya ocurridas**, de la más antigua a la más reciente."""
         ...
+
+
+class CounterpartyFeed(Protocol):
+    """Señales públicas del riesgo de contraparte del exchange (PQ-96).
+
+    Nunca lanza: lo que no pudo leer queda en ``None`` dentro de la lectura.
+    """
+
+    def read(self) -> CounterpartyReading: ...
 
 
 class Broker(OrderGateway, Protocol):
