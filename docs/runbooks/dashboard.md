@@ -60,6 +60,15 @@ hoy?» necesita los datos de hoy ingeridos antes de perder la conexión.
 
 Si falta un artefacto, la pestaña muestra el comando que lo genera.
 
+### La pestaña de cartera (PQ-84)
+
+![Pestaña «¿Cómo se reparte? Cartera» con los datos del 21-nov-2026](../academico/img/dashboard-cartera.png)
+
+Captura del 21-nov-2026, con el paper fuera de posición (el carry no ha entrado) y el presupuesto
+recomendado al 100 % en efectivo. Las capturas de todas las pestañas se regeneran con
+`uv run --group e2e python scripts/capture_dashboard.py --url http://127.0.0.1:8501` en
+`reports/storytelling/_img/dashboard/`, que no se versiona.
+
 ## Seguridad del contenedor
 
 - `data/` se monta con `:ro`: el panel no puede modificar el lakehouse.
