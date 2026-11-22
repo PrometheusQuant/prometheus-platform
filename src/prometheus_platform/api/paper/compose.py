@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 
 from prometheus_platform.adapters.binance_public_market import BinancePublicMarket
+from prometheus_platform.adapters.counterparty_signals import PublicCounterpartySignals
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.simulated_broker import SimulatedBroker
 from prometheus_platform.api.paper.runner import PaperRunner, RunnerConfig
@@ -159,6 +160,7 @@ def build(  # noqa: PLR0913 - keyword-only: cada argumento es una pieza de la co
         feed=market,  # la API pública también da las velas de las otras estrategias (PQ-116)
         strategy_kills=strategy_kills,
         exchange_caps=exchange_caps,
+        counterparty=PublicCounterpartySignals(client, clock),  # PQ-96
     )
 
 

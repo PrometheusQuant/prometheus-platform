@@ -31,6 +31,11 @@ Con ``exchange_caps``, el runner no arranca si las partes de un exchange superan
 estrategia tiene su kill-switch (``KILL_SWITCH-<id>``): al activarse se cierran **sus** posiciones
 y deja de operar, mientras las demás siguen. El kill-switch global sigue mandando sobre todo.
 
+**Riesgo de contraparte (PQ-96).** Con un ``CounterpartyFeed``, cada ``counterparty_every`` el
+runner lee las señales públicas del exchange. En **alerta** avisa (Telegram), lo deja en el diario y
+dimensiona a la mitad (el carry recorta sus patas si superan en más de un 10 % el objetivo nuevo).
+En **crítico** activa el kill-switch, que cierra todo: el único cierre total automático.
+
 **Otras estrategias (PQ-116).** Además del carry, el runner opera una lista de ``Strategy``
 (ADR-0011), cada una con su parte del capital (``StrategyAllocation``), mediante el ejecutor
 genérico de ``executor.py``. El carry usa el resto del capital. Cada instrumento tiene un solo
@@ -65,6 +70,7 @@ from prometheus_platform.domain.model import FundingRate, InstrumentId, Side, Si
 from prometheus_platform.domain.ports import (
     Broker,
     Clock,
+    CounterpartyFeed,
     EventJournal,
     LiveMarket,
     MarketDataFeed,
@@ -72,6 +78,7 @@ from prometheus_platform.domain.ports import (
 )
 from prometheus_platform.execution.allocation import StrategyAllocation, validate_allocations
 from prometheus_platform.ops.logging import get_logger
+from prometheus_platform.portfolio_risk.counterparty import Assessment, Level, assess
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch, enforce
 from prometheus_platform.portfolio_risk.risk import (
     Breach,
@@ -119,6 +126,8 @@ class RunnerConfig:
     drawdown_alert: Decimal = Decimal("0.03")
     # Parte del capital del carry (PQ-83). None: lo que dejan las demás estrategias.
     carry_share: Decimal | None = None
+    # Cada cuánto se leen las señales de contraparte (PQ-96).
+    counterparty_every: timedelta = timedelta(minutes=5)
 
     def __post_init__(self) -> None:
         if not self.symbols:
@@ -237,6 +246,19 @@ def _assume_filled(book: PortfolioSnapshot, order: ProposedOrder) -> PortfolioSn
     return replace(book, positions=others)
 
 
+def _carry_share(config: RunnerConfig, allocated: Decimal) -> Decimal:
+    """Parte del carry: la fijada en la configuración o lo que dejan las demás estrategias."""
+    if config.carry_share is None:
+        if allocated >= 1:
+            raise ValueError(f"Las estrategias se asignan {allocated}: no queda capital al carry")
+        return 1 - allocated
+    if allocated + config.carry_share > 1:
+        raise ValueError(
+            f"El carry ({config.carry_share}) y las estrategias ({allocated}) suman más de 1"
+        )
+    return config.carry_share
+
+
 class PaperRunner:
     def __init__(  # noqa: PLR0913 - raíz de composición: cada dependencia es un puerto
         self,
@@ -255,6 +277,7 @@ class PaperRunner:
         feed: MarketDataFeed | None = None,
         strategy_kills: Mapping[str, KillSwitch] | None = None,
         exchange_caps: Mapping[Venue, Decimal] | None = None,
+        counterparty: CounterpartyFeed | None = None,
     ) -> None:
         self.config = config
         self._notifier = notifier
@@ -268,22 +291,12 @@ class PaperRunner:
         self._heartbeat = heartbeat_path
         self._strategy = CarryStrategy(config.symbols, config.params, config.strategy_id)
         self._allocations = tuple(strategies)
-        allocated = validate_allocations(self._allocations)
-        if config.carry_share is None:
-            if allocated >= 1:
-                raise ValueError(
-                    f"Las estrategias se asignan {allocated}: no queda capital al carry"
-                )
-            self._carry_share = 1 - allocated
-        else:
-            if allocated + config.carry_share > 1:
-                raise ValueError(
-                    f"El carry ({config.carry_share}) y las estrategias ({allocated}) "
-                    "suman más de 1"
-                )
-            self._carry_share = config.carry_share
+        self._carry_share = _carry_share(config, validate_allocations(self._allocations))
         self._check_exchange_caps(exchange_caps or {})
         self._strategy_kills = dict(strategy_kills or {})
+        self._counterparty = counterparty
+        self._cp: Assessment = Assessment(Level.NORMAL)
+        self._cp_checked: datetime | None = None
         history = list(journal.replay())
         self._executor: StrategyExecutor | None = None
         if self._allocations:
@@ -376,7 +389,9 @@ class PaperRunner:
         self._roll_day(now, self._broker.equity(marks))
         book = self._book(marks, now)
         if not killed:
-            recorded = self._to_record(self._risk.monitor(book))
+            recorded = self._to_record(
+                [*self._risk.monitor(book), *self._counterparty_breaches(now)]
+            )
             for breach in recorded:
                 if breach.rule == "pata_sin_cubrir":  # alerta CRITICAL por Telegram (PQ-55)
                     log.critical("paper_unhedged_leg", detail=breach.detail)
@@ -503,6 +518,7 @@ class PaperRunner:
                 marks=marks,
                 limits=self._risk.limits,
                 sizing_buffer=self.config.sizing_buffer,
+                exposure_scale=Decimal(str(self._cp.exposure_scale)),
             )
             orders += self._guarded(
                 name,
@@ -636,6 +652,8 @@ class PaperRunner:
             tag, leg = target.tag, self._leg_target(marks)
         elif due is not None and now >= due + EXECUTION_DELAY:
             label, tag, leg = "rebalanceo", f"{due:%Y%m%dT%H%M}", self._leg_target(marks)
+        elif self._too_big(q_spot * marks[spot], marks):
+            label, tag, leg = "reduccion", f"{now:%Y%m%dT%H%M}", self._leg_target(marks)
         else:
             return 0
         targets = {spot: leg / marks[spot], perp: -leg / marks[perp]}
@@ -656,6 +674,35 @@ class PaperRunner:
         if sent and label == "rebalanceo":
             del self._rebalance_due[symbol]
         return sent
+
+    def _too_big(self, spot_value: Decimal, marks: Marks) -> bool:
+        """PQ-96: con la alerta de contraparte, bajan las patas un 10 % por encima del objetivo."""
+        if self._cp.exposure_scale >= 1:
+            return False
+        return spot_value > self._leg_target(marks) * Decimal("1.10")
+
+    def _counterparty_breaches(self, now: datetime) -> list[Breach]:
+        """Lee las señales de contraparte cuando toca y avisa al cambiar de nivel."""
+        if self._counterparty is None:
+            return []
+        due = self._cp_checked is None or now - self._cp_checked >= self.config.counterparty_every
+        if due:
+            previous, self._cp = self._cp.level, assess(self._counterparty.read())
+            self._cp_checked = now
+            detail = "; ".join(self._cp.reasons) or "señales normales"
+            if self._cp.level is not previous:
+                if self._cp.level is Level.NORMAL:
+                    log.warning("paper_counterparty_normal", previous=previous.value)
+                else:
+                    log.error("paper_counterparty_alert", level=self._cp.level.value, detail=detail)
+                    self._journal.append(
+                        RiskLimitBreached(occurred_at=now, rule="contraparte_alerta", detail=detail)
+                    )
+            if self._cp.unknown:
+                log.warning("paper_counterparty_unknown", signals=", ".join(self._cp.unknown))
+        if self._cp.level is Level.CRITICO:
+            return [Breach("contraparte", "; ".join(self._cp.reasons), trips_kill_switch=True)]
+        return []
 
     def _hedged(self, spot_value: Decimal, perp_value: Decimal) -> bool:
         """Spot largo, perpetuo corto y desbalance por debajo de la mitad del límite de riesgo.
@@ -679,7 +726,8 @@ class PaperRunner:
         equity = self._broker.equity(marks) * self._carry_share
         total = limits.max_notional_total * self._carry_share
         share = min(equity / n, limits.max_notional_symbol, total / n)
-        return share / 2 * (1 - self.config.sizing_buffer)
+        scale = Decimal(str(self._cp.exposure_scale))  # PQ-96: a la mitad en alerta
+        return share / 2 * (1 - self.config.sizing_buffer) * scale
 
     def _signal(self, targets: dict[InstrumentId, Decimal], marks: Marks, now: datetime) -> None:
         equity = self._broker.equity(marks)
@@ -872,6 +920,8 @@ class PaperRunner:
         }
         if halted:  # solo con un kill-switch de estrategia activado: el formato no cambia
             payload["estrategias_detenidas"] = list(halted)
+        if self._cp.level is not Level.NORMAL:  # PQ-96: solo si hay alerta de contraparte
+            payload["contraparte"] = self._cp.level.value
         try:
             self._heartbeat.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._heartbeat.with_name(f"{self._heartbeat.name}.tmp")
