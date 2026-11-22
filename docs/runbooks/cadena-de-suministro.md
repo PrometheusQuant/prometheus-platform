@@ -64,6 +64,10 @@ cosign download attestation ghcr.io/prometheusquant/pq-dashboard:develop \
 
 También está como artefacto `sbom-pq-dashboard` en el run de *Imagen*.
 
+La firma y la atestación van sobre el digest del índice multiarquitectura, que cubre las dos
+variantes. El SBOM se extrae de la variante amd64. Los paquetes de Python y sus versiones son los
+mismos en arm64, porque salen del mismo `uv.lock`; solo cambian los binarios de cada wheel.
+
 ## Secretos del servidor con sops + age
 
 - **Solo se versiona** `deploy/secretos/servidor.sops.env`. Sus claves (nombres de variables) son
