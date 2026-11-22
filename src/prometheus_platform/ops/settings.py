@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Zona horaria IANA en la que se muestran las alertas a las personas (los logs siguen en UTC).
     alert_timezone: str = "America/La_Paz"
 
+    # Asistente /pregunta del bot (PQ-90): clave de la API de Claude y límite de gasto diario.
+    anthropic_api_key: SecretStr | None = None
+    assistant_daily_limit_usd: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+
     # Límites de riesgo (PQ-53). Valores conservadores para paper trading con < 1.000 USD.
     risk_max_notional_symbol_usd: float = Field(default=500.0, gt=0, allow_inf_nan=False)
     risk_max_notional_total_usd: float = Field(default=1_000.0, gt=0, allow_inf_nan=False)
