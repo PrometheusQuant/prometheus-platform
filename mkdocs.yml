@@ -108,6 +108,7 @@ nav:
       - "Momentum transversal · pre-registro": estrategias/03-momentum-transversal/pre-registro.md
   - Compliance:
       - compliance/README.md
+      - Pasos manuales del titular: compliance/pasos-del-titular.md
       - Binance: compliance/binance.md
       - Polymarket: compliance/polymarket.md
       - Go/no-go para capital real: compliance/go-no-go-capital-real.md
