@@ -59,10 +59,12 @@ report: ## Genera el informe ejecutivo en PDF desde los resultados (Quarto + Typ
 MUTANTES = "prometheus_platform.portfolio_risk.*" "prometheus_platform.research.validation.*" \
 	"prometheus_platform.data_platform.gold.x_validate__*" "prometheus_platform.data_platform.gold.x__validate_calendar__*"
 
-mutation: ## Mutation testing del riesgo y la validación con mutmut (lento: ~1 h; PQ-99)
+MUTATION_UMBRAL = 78  # score ajustado mínimo (%); trinquete: docs/metodologia/mutation-testing.md
+
+mutation: ## Mutation testing del riesgo y la validación con mutmut (~10 min en 8 núcleos; PQ-99)
 	rm -rf mutants
 	uv run mutmut run $(MUTANTES)
-	uv run python scripts/mutmut_informe.py --umbral 80 --salida mutmut-informe.md
+	uv run python scripts/mutmut_informe.py --umbral $(MUTATION_UMBRAL) --salida mutmut-informe.md
 
 audit: ## Busca vulnerabilidades conocidas en las dependencias del uv.lock (pip-audit)
 	uv export --frozen --no-emit-project --format requirements-txt -o .audit-requirements.txt

@@ -90,3 +90,27 @@ def test_score_bruto_y_ajustado_ignoran_los_no_evaluados(informe: ModuleType) ->
     assert "| `prometheus_platform.portfolio_risk.kill_switch` | `enforce` | 2 |" in texto
     assert "Descontados (log o texto): 1." in texto
     assert f"- log: `{nombres[1]}`" in texto
+
+
+def test_un_argumento_de_un_log_en_varias_lineas_es_log(informe: ModuleType) -> None:
+    diff = (
+        "--- a.py\n+++ a.py\n@@ -1,3 +1,3 @@\n"
+        "         log.critical(\n"
+        '-            "kill_switch_active", reason=state.get("reason")\n'
+        '+            "kill_switch_active", reason=None\n'
+        "         )\n"
+    )
+    assert informe.clasificar(diff) == "log"
+
+
+def test_un_argumento_de_otra_llamada_en_varias_lineas_es_comportamiento(
+    informe: ModuleType,
+) -> None:
+    diff = (
+        "--- a.py\n+++ a.py\n@@ -1,3 +1,3 @@\n"
+        "         self._journal_trip(\n"
+        '-            str(state.get("reason", "")), at\n'
+        "+            None, at\n"
+        "         )\n"
+    )
+    assert informe.clasificar(diff) == "comportamiento"

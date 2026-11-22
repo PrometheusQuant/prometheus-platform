@@ -66,6 +66,26 @@ def leer_resultados(texto: str) -> list[Mutante]:
     return mutantes
 
 
+def _en_llamada_de_log(diff: str) -> bool:
+    """Cada línea cambiada es una llamada de log o un argumento de una partida en varias líneas."""
+    lineas = [linea for linea in diff.splitlines() if not linea.startswith(("---", "+++", "@@"))]
+    cambiadas = [i for i, linea in enumerate(lineas) if linea[:1] in "-+"]
+    if not cambiadas:
+        return False
+    for i in cambiadas:
+        if LOG.search(lineas[i]):
+            continue
+        # Sube por el contexto (sin la otra versión de la línea) mientras la sentencia siga abierta.
+        j = i - 1
+        while j >= 0 and lineas[j][:1] in "-+":
+            j -= 1
+        while j >= 0 and lineas[j].rstrip().endswith(("(", ",")) and not LOG.search(lineas[j]):
+            j -= 1
+        if j < 0 or not LOG.search(lineas[j]) or not lineas[j].rstrip().endswith(("(", ",")):
+            return False
+    return True
+
+
 def clasificar(diff: str) -> str:
     """'log', 'texto' o 'comportamiento' según las líneas que cambia el mutante."""
     quitadas = [
@@ -80,7 +100,7 @@ def clasificar(diff: str) -> str:
     ]
     if not quitadas or not puestas:
         return "comportamiento"
-    if all(LOG.search(linea) for linea in quitadas + puestas):
+    if _en_llamada_de_log(diff):
         return "log"
 
     def sin_literales(lineas: list[str]) -> list[str]:

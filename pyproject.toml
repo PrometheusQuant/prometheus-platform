@@ -184,6 +184,8 @@ update_changelog_on_bump = true
 [tool.mutmut]
 # Código que protege el dinero (riesgo, kill switch, contraparte, presupuesto) y el protocolo
 # (validación, gold.validate). De gold.py solo se ejecutan los mutantes de validate (ver Makefile).
+# Cuentan solo las pruebas del propio módulo: las del runner (tests/unit/api/) multiplican el tiempo
+# por ~20 y el gate debe medir si el módulo se defiende con sus propios tests.
 source_paths = [
     "src/prometheus_platform/portfolio_risk/",
     "src/prometheus_platform/research/validation.py",
@@ -191,9 +193,11 @@ source_paths = [
 ]
 also_copy = ["src/prometheus_platform/", "tests/", "docs/"]
 pytest_add_cli_args = ["--no-cov", "-p", "no:cacheprovider"]
+# Con 8 procesos en paralelo las pruebas de gold superan el tiempo estimado y salían «timeout»
+# espurios (contados como detectados). 10 s fijos de margen los reclasifican.
+timeout_constant = 10.0
 pytest_add_cli_args_test_selection = [
     "tests/unit/portfolio_risk/",
     "tests/unit/research/test_validation.py",
     "tests/unit/data_platform/test_gold.py",
-    "tests/unit/api/",
 ]

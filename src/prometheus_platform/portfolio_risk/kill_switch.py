@@ -173,7 +173,10 @@ class KillSwitch:
             return
         state["journaled"] = True
         tmp = self._flag.with_name(f"{self._flag.name}.tmp")
-        tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        # Mismos permisos que la bandera original (600): write_text dejaría 644 (PQ-99).
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, ensure_ascii=False)
         if self._flag.exists():  # no resucita una bandera rearmada mientras tanto
             os.replace(tmp, self._flag)
         else:

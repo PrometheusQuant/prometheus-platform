@@ -88,6 +88,7 @@ nav:
       - metodologia/README.md
       - Definición de Listo y Terminado: metodologia/definicion-de-listo-y-terminado.md
       - Trabajo en dos carriles con agentes: metodologia/trabajo-con-agentes.md
+      - Mutation testing (mutmut): metodologia/mutation-testing.md
       - Prompt inicial para Codex: metodologia/prompt-inicial-codex.md
   - Producto:
       - Visión y propuesta de valor: producto/vision.md
