@@ -83,6 +83,7 @@ uv run pq paper bot
 | `/estado` | Kill-switch, salud del runner (antigüedad del heartbeat), equity y posiciones |
 | `/pnl` | Resultado de hoy (UTC), de los últimos 7 días y desde el inicio, con funding y costes |
 | `/kill` | Un código de 6 dígitos; `/kill <código>` en los 2 minutos siguientes activa el kill-switch |
+| `/pregunta <texto>` | Explica en lenguaje natural el estado real (asistente de PQ-90, solo lectura) |
 | `/ayuda` | La lista de comandos |
 
 - **Quién puede usarlo:** solo los chats de `PQ_TELEGRAM_AUTHORIZED_CHAT_IDS` (separados por
@@ -97,6 +98,23 @@ uv run pq paper bot
 - **Un solo proceso del bot por token:** Telegram rechaza dos `getUpdates` a la vez.
 - **En un grupo**, el modo privacidad del bot basta: Telegram le entrega los mensajes que empiezan
   con `/`. Si hay varios bots en el grupo, escribe `/estado@NombreDelBot`.
+
+### Asistente `/pregunta` (PQ-90)
+
+Para la demo: el jurado pregunta, por ejemplo, «¿por qué no hay posición abierta hoy?», y el bot
+responde con el estado real. Lo responde Claude (`claude-opus-5-5`, esfuerzo bajo) con tres
+herramientas **de solo lectura**: el estado del paper, las decisiones recientes y las evaluaciones
+([ADR-0013](../adr/0013-asistente-de-solo-lectura.md)).
+
+1. Pon la clave de la API de Claude en el `.env` local: `PQ_ANTHROPIC_API_KEY=...`. **Nunca en el
+   chat ni en el repo.** Sin clave, `/pregunta` responde que el asistente no está configurado.
+2. Opcional: `PQ_ASSISTANT_DAILY_LIMIT_USD` (1 USD por defecto). Cada consulta deja sus tokens y su
+   coste en `data/paper/asistente_costes.json`; pasado el límite, el asistente no responde hasta el
+   día siguiente (UTC).
+3. Reinicia `pq paper bot`.
+
+**No puede operar:** no tiene herramientas de órdenes ni de kill-switch (registro cerrado, con
+pruebas). Si alguien se lo pide, explica que eso solo lo hace el equipo desde la CLI.
 
 ## Si no llegan
 

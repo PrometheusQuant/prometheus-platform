@@ -7,6 +7,7 @@ Comandos:
 | ``/estado`` | Kill-switch, salud del runner (heartbeat), equity y posiciones |
 | ``/pnl`` | Resultado de hoy, de los últimos 7 días y desde el inicio, con funding y costes |
 | ``/kill`` | Pide un código de 6 dígitos; ``/kill <código>`` activa el kill-switch |
+| ``/pregunta <texto>`` | Responde en lenguaje natural con el estado real (PQ-90, solo lectura) |
 | ``/ayuda`` | La lista de comandos |
 
 Seguridad:
@@ -39,6 +40,7 @@ import httpx
 from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.telegram_bot import TelegramBotApi
+from prometheus_platform.api.paper.assistant import COST_FILE, Assistant, Context, CostLedger
 from prometheus_platform.api.paper.compose import PaperPaths
 from prometheus_platform.api.paper.report import PaperView, build_view, read_heartbeat
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
@@ -58,6 +60,7 @@ HELP = (
     "/estado: kill-switch, runner, equity y posiciones\n"
     "/pnl: resultado de hoy, de 7 días y desde el inicio\n"
     "/kill: detiene la operación (pide un código de confirmación)\n"
+    "/pregunta <texto>: explica el estado en lenguaje natural (no opera)\n"
     "Rearmar el kill-switch solo se puede desde la CLI."
 )
 
@@ -110,6 +113,7 @@ class CommandBot:
         local_tz: tzinfo | None = None,
         poll_timeout_seconds: int = 30,
         new_code: Callable[[], str] = _new_code,
+        assistant: Assistant | None = None,
     ) -> None:
         self._transport = transport
         self._authorized = authorized_chats
@@ -123,6 +127,7 @@ class CommandBot:
         self._tz = local_tz
         self._poll_timeout = poll_timeout_seconds
         self._new_code = new_code
+        self._assistant = assistant
         self._offset: int | None = None
         self._pending: dict[str, _PendingKill] = {}
         self._alerted_chats: set[str] = set()
@@ -159,9 +164,17 @@ class CommandBot:
             return self._pnl()
         if command == "/kill":
             return self._kill_command(args, message)
+        if command == "/pregunta":
+            return self._question(args)
         if command in {"/start", "/ayuda", "/help"}:
             return HELP
         return f"No conozco {command}.\n\n{HELP}"
+
+    def _question(self, args: list[str]) -> str:
+        """PQ-90: el asistente solo lee; sin clave de la API, lo dice."""
+        if self._assistant is None:
+            return "El asistente no está configurado: falta PQ_ANTHROPIC_API_KEY en el .env."
+        return self._assistant.answer(" ".join(args))
 
     def _status(self) -> str:
         state = self._kill.state()
@@ -272,6 +285,24 @@ class CommandBot:
         return (moment.astimezone(self._tz) if self._tz else moment).strftime("%H:%M")
 
 
+def _assistant(
+    settings: Settings, paths: PaperPaths, journal: EventJournal, clock: Clock
+) -> Assistant | None:
+    """El asistente de PQ-90, solo si hay clave de la API de Claude en el ``.env``."""
+    key = settings.anthropic_api_key
+    if key is None or not key.get_secret_value().strip():
+        return None
+    import anthropic  # noqa: PLC0415 - solo se carga si el asistente está configurado
+
+    client = anthropic.Anthropic(api_key=key.get_secret_value())
+    return Assistant(
+        create=client.beta.messages.create,
+        ctx=Context(paths=paths, data_dir=settings.data_dir, replay=lambda: list(journal.replay())),
+        ledger=CostLedger(paths.root / COST_FILE, Decimal(str(settings.assistant_daily_limit_usd))),
+        clock=clock,
+    )
+
+
 def serve(settings: Settings, notifier: Notifier | None, paper_dir: Path) -> int:
     """``pq paper bot``: compone el bot con los adaptadores reales y atiende hasta Ctrl+C."""
     token = settings.telegram_bot_token
@@ -294,6 +325,7 @@ def serve(settings: Settings, notifier: Notifier | None, paper_dir: Path) -> int
             environment=settings.environment.value,
             heartbeat_max_age=timedelta(minutes=settings.paper_heartbeat_max_age_minutes),
             local_tz=settings.alert_tz,
+            assistant=_assistant(settings, paths, journal, clock),
         )
         print(
             f"bot de Telegram atendiendo {len(authorized)} chat(s) autorizado(s); Ctrl+C para salir"
