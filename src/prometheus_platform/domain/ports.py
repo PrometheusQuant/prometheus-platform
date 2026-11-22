@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from prometheus_platform.domain.alerts import Alert
+from prometheus_platform.domain.chat import ChatMessage
 from prometheus_platform.domain.datasets import ArchiveRef, RawArchive
 from prometheus_platform.domain.events import DomainEvent, OrderFilled
 from prometheus_platform.domain.market import MarketSnapshot
@@ -87,6 +88,17 @@ class Notifier(Protocol):
     """
 
     def notify(self, alert: Alert) -> bool: ...
+
+
+class ChatTransport(Protocol):
+    """Canal de chat de ida y vuelta: recibe comandos y responde (bot de Telegram, PQ-72).
+
+    Como ``Notifier``, nunca lanza por fallos de red: devuelve una lista vacía o ``False``.
+    """
+
+    def updates(self, offset: int | None, timeout_seconds: int) -> list[ChatMessage]: ...
+
+    def send(self, chat_id: str, text: str) -> bool: ...
 
 
 class Strategy(Protocol):

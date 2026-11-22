@@ -113,3 +113,10 @@ def test_alert_timezone_defaults_to_bolivia_and_rejects_unknown_names() -> None:
     assert Settings(alert_timezone="UTC").alert_tz.key == "UTC"
     with pytest.raises(ValidationError, match="Zona horaria desconocida"):
         Settings(alert_timezone="Bolivia/Santa_Cruz")
+
+
+def test_bot_authorized_chats_default_to_the_alert_chat() -> None:
+    assert Settings(telegram_chat_id="-1001").bot_authorized_chats == {"-1001"}
+    listed = Settings(telegram_chat_id="-1001", telegram_authorized_chat_ids=" -1001, 42 ,")
+    assert listed.bot_authorized_chats == {"-1001", "42"}
+    assert Settings().bot_authorized_chats == frozenset()
