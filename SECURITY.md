@@ -14,6 +14,21 @@ Este repositorio es **público**. Cualquier secreto que llegue a git debe consid
 5. El kill-switch (`portfolio_risk`) debe poder cancelar todas las órdenes aunque falle el resto
    del sistema.
 
+## Cadena de suministro (PQ-81)
+
+- **Dependencias:** `uv.lock` congelado en la CI, `pip-audit` en cada PR (`make audit`), Dependabot
+  agrupado y CodeQL.
+- **SBOM CycloneDX** de la imagen del dashboard en cada PR (`ci.yml`) y en cada imagen publicada,
+  adjunto a ella como atestación firmada.
+- **Firma sin clave** con cosign y el OIDC de GitHub (`.github/workflows/imagen.yml`). La VM solo
+  despliega lo que acepta `deploy/verificar-imagen.sh`: firmado por ese workflow en `develop` o
+  `main` y con su SBOM.
+- **Secretos del servidor:** cifrados con `sops` + `age` (`.sops.yaml`, `deploy/secretos.sh`). Las
+  claves privadas age solo existen en la VM y en la máquina del titular.
+
+Procedimiento completo en
+[`docs/runbooks/cadena-de-suministro.md`](docs/runbooks/cadena-de-suministro.md).
+
 ## Si se filtra una clave
 
 1. Revocarla de inmediato en el exchange.

@@ -53,6 +53,13 @@ jobs:
       - uses: actions/checkout@v7
       - name: Construir la imagen
         run: docker build -t pq-dashboard:ci .
+      - name: SBOM CycloneDX de la imagen (PQ-81)
+        uses: anchore/sbom-action@v0.24.3
+        with:
+          image: pq-dashboard:ci
+          format: cyclonedx-json
+          output-file: sbom-pq-dashboard.cdx.json
+          artifact-name: sbom-pq-dashboard.cdx.json
       - name: Arrancar en solo lectura y comprobar que responde
         run: |
           mkdir -p empty-data
