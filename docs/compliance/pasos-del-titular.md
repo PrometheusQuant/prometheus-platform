@@ -326,7 +326,9 @@ enmienda con ensayos nuevos en N.
 
 ## Lo que no necesita nada tuyo
 
-- **Releases a `main`:** solo cuando tú lo pidas.
+- **Releases a `main`:** solo cuando tú lo pidas. Hay un motivo para pedir uno pronto: GitHub
+  ejecuta los jobs programados solo desde `main`. El job semanal de mutation testing (PQ-99) no
+  correrá hasta el próximo release.
 - **La VM de Oracle:** sigue el plan A (reintentar A1) y el plan B (créditos de estudiante); es
   carril de Claude B ([runbook](../runbooks/oracle-cloud.md)).
 - **El resto de los tickets del sprint:** los agentes siguen avanzándolos y te avisan solo cuando
