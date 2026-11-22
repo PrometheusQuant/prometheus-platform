@@ -493,12 +493,14 @@ def read_bronze_sources(
     return merged, sources
 
 
-def silver_path(
+def silver_path(  # noqa: PLR0913 - el exchange se añadió después, solo por nombre (PQ-79)
     silver_root: Path,
     dataset: DatasetKind,
     symbol: str,
     market: Market | None = None,
     interval: str | None = None,
+    *,
+    exchange: str | None = None,
 ) -> Path:
     if dataset is DatasetKind.KLINES:
         return (
@@ -508,6 +510,8 @@ def silver_path(
             / f"interval={interval}"
             / f"{symbol}.parquet"
         )
+    if exchange is not None:  # otros exchanges (PQ-79): Binance conserva su ruta de siempre
+        return silver_root / "funding" / f"exchange={exchange}" / f"{symbol}.parquet"
     return silver_root / "funding" / f"{symbol}.parquet"
 
 
@@ -547,3 +551,24 @@ def build_symbol(data_dir: Path, symbol: str, interval: str = "1h") -> list[Qual
     write_silver(frame, report, silver_path(silver, DatasetKind.FUNDING_RATE, symbol), quality)
     reports.append(report)
     return reports
+
+
+def build_exchange_funding(data_dir: Path, exchange: str, symbol: str) -> QualityReport:
+    """Silver del funding de otro exchange (PQ-79), desde ``bronze/source=<exchange>_api``.
+
+    El mismo ``build_funding`` y el mismo esquema que Binance; solo cambian la fuente de bronze y la
+    ruta de silver (``silver/funding/exchange=<exchange>/<símbolo>.parquet``).
+    """
+    bronze, silver = data_dir / "bronze", data_dir / "silver"
+    files = _source_files(
+        bronze / f"source={exchange}_api", DatasetKind.FUNDING_RATE, Market.USDM, symbol, None
+    )
+    frame, report = build_funding(read_bronze(files), symbol)
+    report.table = f"funding/{exchange}/{symbol}"
+    write_silver(
+        frame,
+        report,
+        silver_path(silver, DatasetKind.FUNDING_RATE, symbol, exchange=exchange),
+        silver / "_quality",
+    )
+    return report

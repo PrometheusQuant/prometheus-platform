@@ -33,6 +33,7 @@ from prometheus_platform.adapters.binance_data_vision import BinanceDataVisionSo
 from prometheus_platform.adapters.binance_rest import SOURCE_NAME as API_SOURCE_NAME
 from prometheus_platform.adapters.binance_rest import BinanceRestSource, day_refs
 from prometheus_platform.adapters.clock import SystemClock
+from prometheus_platform.adapters.exchange_funding import SOURCES as EXCHANGE_SOURCES
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.notifiers import notifier_from_settings
 from prometheus_platform.adapters.parquet_bronze import ParquetBronzeStore
@@ -58,7 +59,11 @@ from prometheus_platform.data_platform.ingest import (
     monthly_funding,
     monthly_klines,
 )
-from prometheus_platform.data_platform.silver import SilverValidationError, build_symbol
+from prometheus_platform.data_platform.silver import (
+    SilverValidationError,
+    build_exchange_funding,
+    build_symbol,
+)
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
 from prometheus_platform.domain.carry_rules import CarryParams
 from prometheus_platform.domain.datasets import ArchiveRef, DatasetKind, Granularity, Market
@@ -112,9 +117,12 @@ def _add_ingest(commands: Commands) -> None:
     ingest_cmd = commands.add_parser("ingest", help="Ingesta bronze desde Binance")
     ingest_cmd.add_argument(
         "--source",
-        choices=["data-vision", "api"],
+        choices=["data-vision", "api", "bybit", "okx"],
         default="data-vision",
-        help="data-vision: meses publicados (auditados); api: días recientes por la API pública",
+        help=(
+            "data-vision: meses publicados (auditados); api: días recientes por la API pública;"
+            " bybit u okx: funding mensual de ese exchange (PQ-79)"
+        ),
     )
     datasets = ingest_cmd.add_subparsers(dest="dataset", required=True)
 
@@ -143,6 +151,11 @@ def _add_layers(commands: Commands) -> None:
     build = silver_actions.add_parser("build", help="Reconstruye silver desde bronze")
     build.add_argument("--symbol", required=True, type=str.upper)
     build.add_argument("--interval", default="1h", help="intervalo de las velas (por defecto 1h)")
+    build.add_argument(
+        "--exchange",
+        choices=["bybit", "okx"],
+        help="solo el funding de ese exchange (PQ-79); sin él, las tablas de Binance",
+    )
 
     gold_cmd = commands.add_parser("gold", help="Capa gold: modelo en estrella para BI (PQ-46)")
     gold_actions = gold_cmd.add_subparsers(dest="action", required=True)
@@ -173,6 +186,9 @@ def _add_research(commands: Commands) -> None:
     simulate.add_argument("--paths", type=int, default=10_000)
     studies.add_parser(
         "stats", help="Validación estadística de la optimización: t, ANOVA, Friedman (cap. 7.4)"
+    )
+    studies.add_parser(
+        "exchanges", help="Funding de Binance frente a Bybit y OKX en el desarrollo (PQ-79)"
     )
     studies.add_parser(
         "budget", help="Presupuesto de capital entre estrategias aprobadas con tope de CVaR (PQ-83)"
@@ -301,6 +317,24 @@ def _ingest_api(args: argparse.Namespace, bronze_root: Path, clock: SystemClock)
     return 0 if report.ok else 1
 
 
+def _ingest_exchange(args: argparse.Namespace, bronze_root: Path, clock: SystemClock) -> int:
+    """Funding mensual de Bybit u OKX en bronze, con su propia fuente (PQ-79)."""
+    if args.dataset != "funding" or args.start is None:
+        print(
+            f"ERROR con --source {args.source} solo hay funding y --start es obligatorio",
+            file=sys.stderr,
+        )
+        return 2
+    refs = monthly_funding(
+        args.symbol, args.start, args.end or last_complete_month(clock.now().date())
+    )
+    store = ParquetBronzeStore(bronze_root, source=f"{args.source}_api", clock=clock)
+    with http_client() as client:
+        report = ingest(refs, EXCHANGE_SOURCES[args.source](client), store)
+    _print_report(report)
+    return 0 if report.ok else 1
+
+
 def _print_report(report: IngestReport) -> None:
     print(
         f"escritos={len(report.written)} ya_ingeridos={len(report.skipped)} "
@@ -321,9 +355,13 @@ def _sources_line(sources: dict[str, int]) -> str:
     return line
 
 
-def _silver_build(data_dir: Path, symbol: str, interval: str) -> int:
+def _silver_build(data_dir: Path, symbol: str, interval: str, exchange: str | None = None) -> int:
     try:
-        reports = build_symbol(data_dir, symbol, interval)
+        reports = (
+            [build_exchange_funding(data_dir, exchange, symbol)]
+            if exchange
+            else build_symbol(data_dir, symbol, interval)
+        )
     except SilverValidationError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 1
@@ -505,6 +543,31 @@ def _research_budget(data_dir: Path) -> int:
     return 0
 
 
+def _research_exchanges(data_dir: Path) -> int:
+    import json  # noqa: PLC0415
+
+    from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
+    from prometheus_platform.research.exchanges import compare  # noqa: PLC0415
+
+    symbols = [s for group in ce.HYPOTHESES.values() for s in group]
+    rows = compare(data_dir / "silver", symbols)
+    out = data_dir / "research" / "exchanges"
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "summary.json"
+    path.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    for row in rows:
+        if row["liquidaciones_comunes"] < 2:
+            print(f"  {row['simbolo']} {row['exchange']}: {row.get('nota', '')}")
+            continue
+        print(
+            f"  {row['simbolo']} {row['exchange']}: n={row['liquidaciones_comunes']}"
+            f" mediana binance={row['mediana_binance']:.1%} otro={row['mediana_otro']:.1%}"
+            f" correlación={row['correlacion']:.2f} otro paga más={row['otro_paga_mas']:.0%}"
+        )
+    print(f"resumen={path}")
+    return 0
+
+
 def _research_eda(data_dir: Path, figures: Path) -> int:
     from prometheus_platform.research.eda import (  # noqa: PLC0415
         correlation_matrix,
@@ -601,6 +664,7 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
     descriptive: dict[str, Callable[[], int]] = {
         "finance": lambda: _research_finance(data_dir, args.update_doc),
         "stats": lambda: _research_stats(data_dir),
+        "exchanges": lambda: _research_exchanges(data_dir),
         "budget": lambda: _research_budget(data_dir),
         "eda": lambda: _research_eda(data_dir, args.figures),
         "simulate": lambda: _research_simulate(data_dir, args.figures, args.paths),
@@ -857,6 +921,8 @@ def _ingest(args: argparse.Namespace, bronze_root: Path) -> int:
     clock = SystemClock()
     if args.source == "api":
         return _ingest_api(args, bronze_root, clock)
+    if args.source in EXCHANGE_SOURCES:
+        return _ingest_exchange(args, bronze_root, clock)
     if args.start is None:
         print("ERROR --start (AAAA-MM) es obligatorio con --source data-vision", file=sys.stderr)
         return 2
@@ -882,7 +948,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     data_dir = settings.data_dir
     handlers: dict[str, Callable[[], int]] = {
         "ingest": lambda: _ingest(args, data_dir / "bronze"),
-        "silver": lambda: _silver_build(data_dir, args.symbol, args.interval),
+        "silver": lambda: _silver_build(data_dir, args.symbol, args.interval, args.exchange),
         "gold": lambda: _gold(args.action, data_dir, getattr(args, "out", GOLD_DOCS)),
         "research": lambda: _research(args, settings, argv),
         "report": lambda: (
