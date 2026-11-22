@@ -196,6 +196,10 @@ def _add_operations(commands: Commands) -> None:
         "inputs", help="Escribe cifras, tablas y figuras del informe"
     )
     inputs.add_argument("--out", type=Path, default=Path("reports/storytelling"))
+    public = report_actions.add_parser(
+        "public", help="Página pública de resultados para el jurado (PQ-89)"
+    )
+    public.add_argument("--out", type=Path, default=Path("docs/resultados.md"))
 
     paper = commands.add_parser("paper", help="Paper trading: kill-switch y estado (PQ-53)")
     paper_actions = paper.add_subparsers(dest="action", required=True)
@@ -644,6 +648,14 @@ def _report_inputs(data_dir: Path, out: Path) -> int:
     return 0
 
 
+def _report_public(data_dir: Path, out: Path) -> int:
+    from prometheus_platform.api.report import build_public_page  # noqa: PLC0415
+
+    out.write_text(build_public_page(data_dir, Path.cwd(), SystemClock().now()), encoding="utf-8")
+    print(f"página pública en {out}: revísala y súbela con su PR")
+    return 0
+
+
 def _paper_watchdog(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:
     if args.interval <= 0:
         print("ERROR --interval debe ser positivo", file=sys.stderr)
@@ -873,7 +885,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "silver": lambda: _silver_build(data_dir, args.symbol, args.interval),
         "gold": lambda: _gold(args.action, data_dir, getattr(args, "out", GOLD_DOCS)),
         "research": lambda: _research(args, settings, argv),
-        "report": lambda: _report_inputs(data_dir, args.out),
+        "report": lambda: (
+            _report_inputs(data_dir, args.out)
+            if args.action == "inputs"
+            else _report_public(data_dir, args.out)
+        ),
         "paper": lambda: _paper(args, settings, notifier),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
     }

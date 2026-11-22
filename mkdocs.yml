@@ -60,6 +60,7 @@ validation:
 
 nav:
   - Inicio: README.md
+  - Resultados (para el jurado): resultados.md
   - Arquitectura:
       - arquitectura/README.md
       - Diagramas C4: arquitectura/c4.md

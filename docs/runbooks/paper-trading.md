@@ -172,6 +172,22 @@ para elegirlas: la añade la primera estrategia real (PQ-82, tendencia).
 El estado interno de una estrategia con memoria se reconstruye con su ventana `lookback` en la
 primera decisión tras un reinicio. La prueba de contrato garantiza que con esa ventana decide igual.
 
+## Página pública de resultados (PQ-89)
+
+[Resultados](../resultados.md) es la página estática que ve el jurado. El QR del póster apunta a
+<https://prometheusquant.github.io/prometheus-platform/resultados/>. Muestra los gates, la
+validación estadística, la simulación y el paper trading **agregado por día**: sin ids de órdenes,
+claves ni cuentas. No expone el dashboard ni el servidor.
+
+Se regenera desde los artefactos y se publica con el workflow de Docs al fusionar el PR:
+
+```bash
+uv run pq report public          # escribe docs/resultados.md; no lo edites a mano
+```
+
+Mientras no haya servidor se regenera a mano antes de cada demo. Con el servidor (PQ-57), un cron
+allí la regenerará y la subirá sola.
+
 ## Limitaciones conocidas
 
 - Ejecutar al precio actual no es el precio real de Binance Demo: esa diferencia la mide PQ-95.
