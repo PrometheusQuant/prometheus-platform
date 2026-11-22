@@ -745,3 +745,42 @@ def test_sizing_stays_at_one_times_even_if_the_risk_allows_more(tmp_path: Path) 
     assert report.equity is not None
     gross = (positions[SPOT] - positions[PERP]) * Decimal(100)
     assert gross / report.equity < Decimal(1)
+
+
+def test_a_late_settlement_alerts_once_and_pauses_new_decisions(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PQ-98: la liquidación de las 00:00 no llega; pasado el margen, alerta y no decide."""
+    from prometheus_platform.api.paper import runner as runner_module  # noqa: PLC0415
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    monkeypatch.setattr(runner_module.log, "error", lambda event, **_: errors.append(event))
+    monkeypatch.setattr(runner_module.log, "warning", lambda event, **_: warnings.append(event))
+    entered(rig)
+    next_settlement = T0 + timedelta(hours=24)
+    late = next_settlement + rig.runner.config.funding_max_delay + timedelta(minutes=1)
+
+    rig.at(late)
+    first = rig.runner.tick()
+    rig.at(late + timedelta(minutes=1))
+    second = rig.runner.tick()
+
+    assert not first.ok
+    assert "atrasada" in first.detail
+    assert not second.ok
+    # ERROR (el AlertForwarder lo manda a Telegram), una vez por transición y no una por minuto.
+    assert errors.count("paper_data_stale") == 1
+
+    rig.market.add(next_settlement, Decimal("0.00001"))  # llega tarde: se procesa y se recupera
+    rig.at(late + timedelta(minutes=2))
+    report = rig.runner.tick()
+    assert report.ok
+    assert report.settlements == 1
+    assert "paper_data_recovered" in warnings
+
+
+def test_a_settlement_within_the_margin_is_not_late(rig: Rig) -> None:
+    entered(rig)
+    rig.at(T0 + timedelta(hours=24) + rig.runner.config.funding_max_delay)
+    assert rig.runner.tick().ok
