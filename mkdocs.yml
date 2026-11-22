@@ -98,6 +98,7 @@ nav:
       - estrategias/README.md
       - Registro de ensayos (N): estrategias/registro-de-ensayos.md
       - "Carry · pre-registro": estrategias/01-carry/pre-registro.md
+      - "Carry · pre-registro de H3 (ML)": estrategias/01-carry/pre-registro-h3.md
       - "Carry · evaluación": estrategias/01-carry/evaluacion.md
       - "Carry · decisión": estrategias/01-carry/decision.md
       - "Tendencia · pre-registro": estrategias/02-tendencia/pre-registro.md
