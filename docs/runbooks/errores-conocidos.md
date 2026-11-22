@@ -21,9 +21,9 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-011 | La tabla oficial de comisiones de futuros no se lee sin sesión | Abierto |
 | KE-012 | Dependencias de desarrollo con CVE (`filelock`, `virtualenv`) | Resuelto |
 | KE-013 | Los tests leían el `.env` real de quien los ejecuta | Resuelto |
-| KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Abierto |
+| KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Corregido en código; reejecución pendiente |
 | KE-015 | `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS | Workaround |
-| KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Abierto |
+| KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Corregido en código; reejecución pendiente |
 
 ---
 
@@ -139,6 +139,11 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
     al preparar la evaluación del holdout.
   - Sea como sea, la evaluación del holdout debe contar esa liquidación como suya, y la del
     desarrollo no.
+- **Corregido en código (PQ-66, 2026-11-21):** con `end`, `simulate_symbol` ya no cobra ni decide
+  con la liquidación de `end`; la última valoración sigue en `end`. Prueba de regresión:
+  `test_development_does_not_collect_or_decide_at_the_boundary`. **Los artefactos actuales siguen
+  siendo los de antes**: la reejecución única de H1 y H2, que cuenta en N, espera a que PQ-17 confirme
+  las comisiones (enmienda 1.11). Pasa a *Resuelto* con esa reejecución.
 
 ### KE-015: `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS
 
@@ -173,6 +178,11 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 - **Decisión (titular, 2026-11-07):** el backtest no se toca en PQ-54. Se corrige junto con KE-014,
   en la misma reejecución (PQ-50 o la que pida PQ-17), que cuenta en N. El runner de paper
   (PQ-54) ya aplica la latencia de 1 h.
+- **Corregido en código (PQ-66, 2026-11-21):** la orden de una decisión en *t* se ejecuta al `open`
+  de la vela que abre en *t* + 1 h, o de la siguiente con precio. `SymbolResult.executions` registra
+  cada ejecución para auditarlo. Pruebas: `test_orders_fill_at_the_open_of_the_bar_one_hour_after_the_decision`
+  y `test_a_missing_bar_at_t_plus_one_fills_at_the_next_one`. Igual que KE-014, pasa a *Resuelto* con
+  la reejecución.
 
 ### KE-017: los logs no enmascaraban secretos dentro de textos libres
 
