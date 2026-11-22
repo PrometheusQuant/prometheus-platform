@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report poster e2e screenshots orquestador
+.PHONY: help setup lint format typecheck arch test check audit mutation docs docs-build dashboard report poster e2e screenshots orquestador
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -55,6 +55,16 @@ report: ## Genera el informe ejecutivo en PDF desde los resultados (Quarto + Typ
 	cd reports/storytelling && quarto render informe.qmd --to typst
 	cp reports/storytelling/informe.pdf docs/academico/informe-ejecutivo.pdf
 	@echo "Informe en docs/academico/informe-ejecutivo.pdf"
+
+MUTANTES = "prometheus_platform.portfolio_risk.*" "prometheus_platform.research.validation.*" \
+	"prometheus_platform.data_platform.gold.x_validate__*" "prometheus_platform.data_platform.gold.x__validate_calendar__*"
+
+MUTATION_UMBRAL = 78  # score ajustado mínimo (%); trinquete: docs/metodologia/mutation-testing.md
+
+mutation: ## Mutation testing del riesgo y la validación con mutmut (~10 min en 8 núcleos; PQ-99)
+	rm -rf mutants
+	uv run mutmut run $(MUTANTES)
+	uv run python scripts/mutmut_informe.py --umbral $(MUTATION_UMBRAL) --salida mutmut-informe.md
 
 audit: ## Busca vulnerabilidades conocidas en las dependencias del uv.lock (pip-audit)
 	uv export --frozen --no-emit-project --format requirements-txt -o .audit-requirements.txt

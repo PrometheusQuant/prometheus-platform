@@ -55,3 +55,7 @@ notebooklm/
 *.tfstate.*
 .terraform.lock.hcl
 deploy/oci/*.zip
+
+# Mutation testing (PQ-99): copia de trabajo de mutmut e informe
+mutants/
+mutmut-informe.md
