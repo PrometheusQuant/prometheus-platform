@@ -40,6 +40,7 @@ dev = [
     "commitizen>=4.19",
     "hypothesis>=6.170",
     "import-linter>=2.15",
+    "mutmut>=3.8",
     "mypy>=2.4",
     "pre-commit>=4.7",
     "pyarrow-stubs>=20.0.0.20260819",
@@ -177,3 +178,22 @@ tag_format = "v$version"
 version_provider = "pep621"
 version_files = ["src/prometheus_platform/__init__.py:__version__"]
 update_changelog_on_bump = true
+
+# --- Mutation testing (PQ-99): job semanal, no en cada PR -------------------------
+
+[tool.mutmut]
+# Código que protege el dinero (riesgo, kill switch, contraparte, presupuesto) y el protocolo
+# (validación, gold.validate). De gold.py solo se ejecutan los mutantes de validate (ver Makefile).
+source_paths = [
+    "src/prometheus_platform/portfolio_risk/",
+    "src/prometheus_platform/research/validation.py",
+    "src/prometheus_platform/data_platform/gold.py",
+]
+also_copy = ["src/prometheus_platform/", "tests/", "docs/"]
+pytest_add_cli_args = ["--no-cov", "-p", "no:cacheprovider"]
+pytest_add_cli_args_test_selection = [
+    "tests/unit/portfolio_risk/",
+    "tests/unit/research/test_validation.py",
+    "tests/unit/data_platform/test_gold.py",
+    "tests/unit/api/",
+]
