@@ -1,6 +1,6 @@
 [project]
 name = "prometheus-platform"
-version = "0.2.0"
+version = "0.3.0"
 description = "Plataforma de trading multiestrategia de PrometheusQuant: datos, investigación, backtesting, paper y ejecución en vivo."
 readme = "README.md"
 license = "Apache-2.0"
