@@ -103,6 +103,11 @@ uv run pq paper bot
 
 ### Asistente `/pregunta` (PQ-90)
 
+!!! note "Mejora opcional, sin activar"
+    El código está fusionado, pero la clave no se configuró: el titular lo aplazó el 2026-11-23
+    porque la API se factura aparte de la suscripción de Claude. Cómo activarlo y con qué
+    precauciones de gasto: paso 3 de [pasos del titular](../compliance/pasos-del-titular.md).
+
 Para la demo: el jurado pregunta, por ejemplo, «¿por qué no hay posición abierta hoy?», y el bot
 responde con el estado real. Lo responde Claude (`claude-opus-5-5`, esfuerzo bajo) con tres
 herramientas **de solo lectura**: el estado del paper, las decisiones recientes y las evaluaciones
