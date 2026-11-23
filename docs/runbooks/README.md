@@ -10,6 +10,7 @@ Cada runbook indica: cuándo aplica, pasos exactos, cómo verificar que funcion�
 - [Dashboard de investigación](dashboard.md): abrirlo en local o con Docker.
 - [Orquestación (Dagster)](orquestacion.md): actualizar el lakehouse, ver linaje y checks, activar el schedule diario.
 - [Alertas a Telegram](alertas.md): configurar el bot y probar el canal.
+- [Observabilidad](observabilidad.md): métricas del runner, Prometheus, Grafana y Alertmanager, por túnel SSH.
 - [Monitoreo de drift](drift.md): datos, modelo y desempeño frente a lo esperado; qué hacer con una alerta.
 - [Análisis de impacto (BIA)](analisis-de-impacto.md): MTPD y RTO por proceso, riesgos y mitigación.
 - [Kill-switch](kill-switch.md): detener toda la operación, verificar, rearmar y el simulacro.

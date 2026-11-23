@@ -1,4 +1,8 @@
 # Dashboard de solo lectura (PQ-34):  docker compose up --build  ->  http://127.0.0.1:8501
+# Observabilidad (PQ-71):  docker compose --profile observability up -d
+#   Prometheus, Alertmanager y Grafana en la red del host, escuchando solo en 127.0.0.1
+#   (Grafana :3000, Prometheus :9090, Alertmanager :9093). En la VM se llega por túnel SSH:
+#   docs/runbooks/observabilidad.md
 services:
   dashboard:
     build: .
@@ -14,3 +18,75 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: [observability]
+    network_mode: host          # lee /metrics del runner en 127.0.0.1:9108
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=1GB
+      - --web.listen-address=127.0.0.1:9090
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alertas.yml:/etc/prometheus/alertas.yml:ro
+      - prometheus-data:/prometheus
+    mem_limit: 256m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    profiles: [observability]
+    network_mode: host
+    environment:                # solo las dos variables de Telegram, no todo el .env
+      PQ_TELEGRAM_BOT_TOKEN: ${PQ_TELEGRAM_BOT_TOKEN:-}
+      PQ_TELEGRAM_CHAT_ID: ${PQ_TELEGRAM_CHAT_ID:-0}
+    entrypoint: ["/bin/sh", "/etc/alertmanager/arrancar.sh"]
+    volumes:
+      - ./deploy/observability/alertmanager.yml.tmpl:/etc/alertmanager/alertmanager.yml.tmpl:ro
+      - ./deploy/observability/alertmanager-arrancar.sh:/etc/alertmanager/arrancar.sh:ro
+      - alertmanager-data:/alertmanager
+    tmpfs:
+      - /tmp                    # la configuración con el token vive solo en memoria
+    mem_limit: 64m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: [observability]
+    network_mode: host
+    environment:
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_SECURITY_ADMIN_PASSWORD: ${PQ_GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/paper-trading.json
+    # Sin PQ_GRAFANA_ADMIN_PASSWORD, grafana-arrancar.sh genera una al azar: nunca queda admin/admin.
+    entrypoint: ["/bin/sh", "/etc/grafana/arrancar.sh"]
+    volumes:
+      - ./deploy/observability/grafana-arrancar.sh:/etc/grafana/arrancar.sh:ro
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    mem_limit: 192m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:

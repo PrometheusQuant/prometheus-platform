@@ -1,0 +1,17 @@
+# Alertmanager → Telegram, el mismo grupo que las alertas de la plataforma (PQ-38).
+# Plantilla: al arrancar, el contenedor reemplaza __BOT_TOKEN__ y __CHAT_ID__ con
+# PQ_TELEGRAM_BOT_TOKEN y PQ_TELEGRAM_CHAT_ID del .env y escribe el resultado en /tmp
+# (tmpfs, fuera del repo y del disco). Nunca pongas el token en este archivo.
+route:
+  receiver: telegram
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: "__BOT_TOKEN__"
+        chat_id: __CHAT_ID__
+        send_resolved: true

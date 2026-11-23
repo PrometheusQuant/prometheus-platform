@@ -226,3 +226,18 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
   (`monkeypatch.setattr(runner_module.log, "<nivel>", …)`), que no depende del orden de las
   pruebas. Una corrección de fondo sería no parchear el proxy en `test_paper_monitoring.py`.
   **Resuelto** (PQ-98).
+
+### KE-020: en Docker Desktop, la «red del host» no es la de WSL
+
+- **Síntoma:** al probar el perfil `observability` en la laptop (PQ-71), Prometheus no podía leer
+  `127.0.0.1:9108` del runner (`connection refused`). Desde WSL tampoco respondían Grafana ni
+  Prometheus en `127.0.0.1`, aunque los contenedores estaban sanos.
+- **Causa:** con `network_mode: host`, Docker Desktop usa el espacio de red de **su** VM
+  (`docker-desktop`). Su `127.0.0.1` no es el de la distro de WSL donde corre el runner. En una VM
+  Linux con Docker Engine (el servidor, PQ-57), el host es la propia VM y funciona como está
+  diseñado.
+- **Solución:** en la laptop, para probar la pila, el exportador corre en un contenedor con
+  `--network host` y la imagen del proyecto, y las consultas se hacen con `docker exec` desde un
+  contenedor de la pila (ver «Verificación de la pila» en el
+  [runbook de observabilidad](observabilidad.md#verificacion-de-la-pila)). En el servidor no
+  hace falta nada. **Workaround documentado.**

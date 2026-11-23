@@ -133,6 +133,7 @@ nav:
       - Clave de API comprometida: runbooks/clave-comprometida.md
       - Desconexión del exchange: runbooks/desconexion-exchange.md
       - Datos desactualizados: runbooks/datos-desactualizados.md
+      - Observabilidad (Prometheus y Grafana): runbooks/observabilidad.md
       - Monitoreo de drift: runbooks/drift.md
   - Investigación:
       - investigacion/README.md
