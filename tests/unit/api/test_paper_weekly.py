@@ -11,6 +11,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
+import numpy as np
+import polars as pl
 import pytest
 from pydantic import SecretStr
 from tests.unit.api.test_paper_monitoring import runner_with
@@ -20,6 +22,7 @@ from prometheus_platform.adapters.in_memory import FixedClock, RecordingNotifier
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.adapters.notifiers import TelegramNotifier
 from prometheus_platform.api.cli import main
+from prometheus_platform.api.dashboard.artifacts import Artifacts
 from prometheus_platform.api.paper import weekly
 from prometheus_platform.api.paper.report import (
     iso_week,
@@ -361,3 +364,86 @@ def test_telegram_document_failures_never_leak_the_token(tmp_path: Path) -> None
     assert notifier.send_document(tmp_path / "no-existe.pdf", "x") is False
     assert TOKEN not in fallback.getvalue()
     assert "HTTP 413" in fallback.getvalue()
+
+
+# --- incidentes, costes frente al modelo y paridad con el backtest ---------------------------
+
+
+def test_incidents_of_the_week_list_breaches_and_kill_switch_changes() -> None:
+    inside = WEEK_START + timedelta(days=2)
+    summary = weekly_summary(journal_events(), MONDAY)
+
+    assert [(i.at, i.kind, i.detail) for i in summary.incidents] == [
+        (inside, "riesgo", "max_drawdown: x"),
+        (inside, "kill-switch", "activado por cli: prueba"),
+    ]
+    assert weekly_summary(journal_events(), MONDAY + timedelta(days=7)).incidents == ()
+
+
+def test_costs_are_compared_with_the_model_of_each_symbol() -> None:
+    (row,) = weekly_summary(journal_events(), MONDAY).costs
+
+    # 1 SOL de contado a 110: el modelo de las alts cobra 10 pb de comisión y 5 pb de slippage
+    assert row.leg == "contado"
+    assert row.notional == D(110)
+    assert (row.fee, row.fee_model) == (D("0.20"), D("0.1100"))
+    assert (row.slippage, row.slippage_model) == (D("0.01"), D("0.0550"))
+    details = weekly_summary(journal_events(), MONDAY).details()
+    assert details["costes reales / modelo"] == "1.27x"
+
+
+def test_without_fills_there_is_no_cost_ratio() -> None:
+    assert (
+        weekly_summary(journal_events(), date(2026, 10, 5)).details()["costes reales / modelo"]
+        == "n/d"
+    )
+
+
+def test_parity_places_the_week_inside_or_outside_the_backtest_band() -> None:
+    summary = weekly_summary(journal_events(), MONDAY)  # la semana rindió +5 %
+    calm = np.full(200, 0.0001)  # el backtest esperaba ~+0,07 % por semana
+
+    parity = weekly.parity(summary, calm)
+
+    assert parity is not None
+    assert parity.paper == D("0.05")
+    assert parity.p5 == pytest.approx(1.0001**7 - 1)
+    assert parity.p95 == pytest.approx(1.0001**7 - 1)
+    assert parity.verdict == "por encima de la banda"
+    assert weekly.parity(summary, np.full(5, 0.0001)) is None  # muy poca historia
+    assert weekly.parity(weekly_summary([], MONDAY), calm) is None  # sin variación
+
+
+def test_inputs_include_costs_incidents_and_parity(tmp_path: Path) -> None:
+    summary = weekly_summary(journal_events(), MONDAY)
+    out = tmp_path / "W47"
+    weekly.build_inputs(summary, out, "simulado", weekly.parity(summary, np.full(200, 0.0001)))
+
+    values = json.loads((out / "_semana.yml").read_text("utf-8"))["s"]
+    assert values["paridad"] == "por encima de la banda"
+    assert values["costes_ratio"] == "1.27x"
+    assert "| contado | 110.00 |" in (out / "_tablas" / "costes.md").read_text("utf-8")
+    assert "max_drawdown: x" in (out / "_tablas" / "incidentes.md").read_text("utf-8")
+
+    weekly.build_inputs(weekly_summary([], MONDAY), out, None, None)
+    values = json.loads((out / "_semana.yml").read_text("utf-8"))["s"]
+    assert values["paridad"].startswith("n/d")
+    assert "Sin incidentes" in (out / "_tablas" / "incidentes.md").read_text("utf-8")
+
+
+def test_cli_uses_the_h2_development_returns_for_parity(
+    lake: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    days = [date(2023, 1, 1) + timedelta(days=i) for i in range(200)]
+    art = Artifacts(
+        carry={"H2": {"selected": "k3"}},
+        carry_returns={"H2": pl.DataFrame({"date": [str(d) for d in days], "k3": [0.0001] * 200})},
+    )
+    monkeypatch.setattr(
+        "prometheus_platform.api.dashboard.artifacts.load_artifacts", lambda data_dir: art
+    )
+
+    assert main(["paper", "weekly-report", "--week", "2026-W47"]) == 0
+
+    out = lake / "informes" / "paper" / "2026-W47" / "_semana.yml"
+    assert json.loads(out.read_text("utf-8"))["s"]["paridad"] == "por encima de la banda"

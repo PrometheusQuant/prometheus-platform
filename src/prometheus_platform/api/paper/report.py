@@ -28,7 +28,8 @@ from prometheus_platform.domain.events import (
     SignalGenerated,
 )
 from prometheus_platform.domain.model import InstrumentId, Side
-from prometheus_platform.strategies.carry import perp_instrument, symbol_of
+from prometheus_platform.research.carry_evaluation import costs_for
+from prometheus_platform.strategies.carry import is_perp, perp_instrument, symbol_of
 
 UNASSIGNED = "sin asignar"
 
@@ -321,6 +322,25 @@ class StrategyWeek:
 
 
 @dataclass(frozen=True, slots=True)
+class Incident:
+    at: datetime
+    kind: str  # «riesgo» o «kill-switch»
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class CostRow:
+    """Costes reales de una pata frente a los que cobra el modelo del backtest (``CostModel``)."""
+
+    leg: str  # «contado» o «perpetuo»
+    notional: Decimal
+    fee: Decimal
+    fee_model: Decimal
+    slippage: Decimal
+    slippage_model: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class WeeklySummary:
     week: str
     start: date  # lunes
@@ -336,6 +356,15 @@ class WeeklySummary:
     kill_trips: int
     strategies: tuple[StrategyWeek, ...]
     curve: tuple[tuple[datetime, Decimal], ...]
+    incidents: tuple[Incident, ...] = ()
+    costs: tuple[CostRow, ...] = ()
+
+    @property
+    def cost_ratio(self) -> Decimal | None:
+        """Costes reales sobre los del modelo (1 = como el backtest); ``None`` sin operaciones."""
+        model = sum((r.fee_model + r.slippage_model for r in self.costs), ZERO)
+        real = sum((r.fee + r.slippage for r in self.costs), ZERO)
+        return real / model if model > 0 else None
 
     @property
     def change(self) -> Decimal | None:
@@ -357,6 +386,7 @@ class WeeklySummary:
             "caída máxima en la semana": f"{self.max_drawdown:.2%}",
             "violaciones de riesgo": str(self.breaches),
             "kill-switch activado": trips,
+            "costes reales / modelo": f"{ratio:.2f}x" if (ratio := self.cost_ratio) else "n/d",
         }
         for row in self.strategies:
             details[f"PnL {row.strategy} ({row.exchange})"] = f"{row.pnl:+.2f} USD"
@@ -380,6 +410,50 @@ def _strategy_weeks(before: PaperView, after: PaperView) -> tuple[StrategyWeek, 
             )
         )
     return tuple(rows)
+
+
+def _incidents(view: PaperView, opens: datetime) -> tuple[Incident, ...]:
+    found = [
+        Incident(b.occurred_at, "riesgo", f"{b.rule}: {b.detail}")
+        for b in view.breaches
+        if b.occurred_at >= opens
+    ]
+    for event in view.kill_events:
+        if event.occurred_at < opens:
+            continue
+        detail = (
+            f"activado por {event.source}: {event.reason}"
+            if isinstance(event, KillSwitchTripped)
+            else f"rearmado por {event.by}"
+        )
+        found.append(Incident(event.occurred_at, "kill-switch", detail))
+    return tuple(sorted(found, key=lambda i: i.at))
+
+
+def cost_comparison(fills: Iterable[Fill]) -> tuple[CostRow, ...]:
+    """Comisión y slippage reales por pata frente a los del ``CostModel`` de cada símbolo.
+
+    Con el bróker simulado coinciden por construcción (cobra con el mismo modelo); la comparación
+    dice algo cuando los fills vienen de un exchange (Binance Demo, PQ-52 y PQ-95).
+    """
+    acc: dict[str, list[Decimal]] = {}
+    for fill in fills:
+        model = costs_for(symbol_of(fill.instrument))
+        perp = is_perp(fill.instrument)
+        notional = fill.quantity * fill.price
+        rate = Decimal(str(model.perp_fee if perp else model.spot_fee))
+        row = acc.setdefault("perpetuo" if perp else "contado", [ZERO] * 5)
+        for i, value in enumerate(
+            (
+                notional,
+                fill.fee,
+                notional * rate,
+                fill.slippage,
+                notional * Decimal(str(model.slippage)),
+            )
+        ):
+            row[i] += value
+    return tuple(CostRow(leg, *values) for leg, values in sorted(acc.items()))
 
 
 def weekly_summary(events: Iterable[DomainEvent], monday: date) -> WeeklySummary:
@@ -418,6 +492,8 @@ def weekly_summary(events: Iterable[DomainEvent], monday: date) -> WeeklySummary
         ),
         strategies=_strategy_weeks(before, after),
         curve=tuple(curve),
+        incidents=_incidents(after, opens),
+        costs=cost_comparison(after.fills[len(before.fills) :]),
     )
 
 
