@@ -179,6 +179,16 @@ def _add_research(commands: Commands) -> None:
         "trend", help="Tendencia (T1 y T2): periodo de desarrollo, las 12 configuraciones (PQ-68)"
     )
     trend.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    trend_holdout = studies.add_parser(
+        "trend-holdout",
+        help="Tendencia: abre el holdout UNA SOLA VEZ con la configuración elegida (PQ-68)",
+    )
+    trend_holdout.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    trend_holdout.add_argument(
+        "--confirmo-un-solo-uso",
+        action="store_true",
+        help="obligatorio: el holdout se abre una vez y no tiene vuelta atrás",
+    )
     eda = studies.add_parser("eda", help="Estadística descriptiva y correlaciones de las features")
     eda.add_argument("--figures", type=Path, required=True)
     model = studies.add_parser("funding-model", help="Modelo predictivo del funding (cap. 5)")
@@ -451,6 +461,57 @@ def _research_carry(
     return 0
 
 
+def _research_trend_holdout(
+    data_dir: Path, figures: Path | None, confirmed: bool, ledger: TrialLedger
+) -> int:
+    """Abre el holdout de tendencia una sola vez (pre-registro §7), sin re-ajustes ni repetirlo."""
+    import json  # noqa: PLC0415
+
+    from prometheus_platform.research import trend_evaluation as te  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_holdout,
+        write_holdout_outputs,
+    )
+
+    if not confirmed:
+        print("El holdout se abre una sola vez: repite con --confirmo-un-solo-uso", file=sys.stderr)
+        return 2
+    opened = [
+        r
+        for r in read_rows(ledger.directory)
+        if r.familia == ledger.familia and r.nombre == te.HOLDOUT_EXECUTION
+    ]
+    if opened:
+        print(
+            f"El holdout de tendencia ya se abrió el {opened[0].fecha} ({opened[0].carril}):"
+            " no se repite.",
+            file=sys.stderr,
+        )
+        return 2
+    development = data_dir / "research" / "trend" / "T1" / "summary.json"
+    if not development.exists():
+        print(f"Falta la evaluación de desarrollo: {development}", file=sys.stderr)
+        return 2
+    summary = json.loads(development.read_text(encoding="utf-8"))
+    if not summary.get("passed"):
+        print("T1 no pasó los gates de desarrollo: el holdout no se abre (§8).", file=sys.stderr)
+        return 2
+    config = te.selected_config(str(summary["selected"]))
+    # Primero la fila: desde aquí el holdout cuenta como abierto aunque algo falle después.
+    ledger.log_execution(te.HOLDOUT_EXECUTION, params={"configuracion": config.name})
+    data = [te.load_market_holdout(data_dir / "silver", s) for s in te.SYMBOLS]
+    evaluation = te.evaluate_holdout(data, config)
+    path = write_holdout_outputs(evaluation, data_dir / "research" / "trend" / "holdout")
+    if figures is not None:
+        plot_holdout(evaluation, figures / "holdout-curva.png")
+    verdict = "PASA" if evaluation.passed else "NO PASA"
+    print(f"Holdout {config.name}: {verdict} resumen={path}")
+    for criterion in evaluation.criteria:
+        mark = "OK " if criterion.passed else "NO "
+        print(f"  {criterion.name} {mark}{criterion.criterion}: {criterion.value:.4f}")
+    return 0
+
+
 def _research_trend(data_dir: Path, figures: Path | None, ledger: TrialLedger) -> int:
     from prometheus_platform.research import trend_evaluation as te  # noqa: PLC0415
     from prometheus_platform.research.reporting import (  # noqa: PLC0415
@@ -694,6 +755,9 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
         return _research_carry(data_dir, args.hypothesis, args.figures, ledger)
     if args.study == "trend":
         return _research_trend(data_dir, args.figures, _ledger(settings, "tendencia", command))
+    if args.study == "trend-holdout":
+        ledger = _ledger(settings, "tendencia", command)
+        return _research_trend_holdout(data_dir, args.figures, args.confirmo_un_solo_uso, ledger)
     if args.study == "funding-model":
         ledger = _ledger(settings, "modelo-funding", command)
         return _research_model(data_dir, args.figures, args.target_mode, ledger)
