@@ -23,13 +23,13 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 
-from prometheus_platform.domain.protocol import HOLDOUT_START
+from prometheus_platform.domain.protocol import HOLDOUT_END, HOLDOUT_START
 from prometheus_platform.research.backtest import MAIN_COSTS, MAKER_COSTS, CostModel
 from prometheus_platform.research.carry_evaluation import (
     DSR_GATE,
@@ -48,6 +48,7 @@ from prometheus_platform.research.trend import (
     L_GRID,
     SIGMA_GRID,
     Hypothesis,
+    Period,
     SymbolMarket,
     TrendConfig,
     run_and_register,
@@ -254,3 +255,89 @@ def _evaluate(  # noqa: PLR0913 - keyword-only salvo los datos de la hipótesis
 
 def splits(n_obs: int) -> list[Split]:
     return cpcv_splits(n_obs, n_groups=6, n_test_groups=2, purge=PURGE_DAYS, embargo=EMBARGO)
+
+
+# --- Holdout (pre-registro §7 y §8): un solo uso, configuración elegida, sin re-ajustes ---------
+
+# Fin exclusivo: la vela que abre a las 23:00 del 30-09 cierra a las 00:00 del 01-10 y da la última
+# valoración del holdout (mismo criterio que HOLDOUT_START en el desarrollo, KE-014).
+HOLDOUT_STOP = HOLDOUT_END + timedelta(seconds=1)
+HOLDOUT_SHARPE = 0.5  # §8: criterio de éxito en el holdout
+HOLDOUT_CAGR = STABLECOIN_HURDLE
+HOLDOUT_MAX_DRAWDOWN = -0.30
+HOLDOUT_EXECUTION = "holdout"  # nombre de la fila del registro que marca el holdout como abierto
+
+
+@dataclass
+class HoldoutEvaluation:
+    selected: str
+    period: tuple[datetime, datetime]
+    dates: list[str]
+    returns: np.ndarray
+    performance: Performance
+    benchmark_returns: np.ndarray
+    benchmark: Performance
+    sharpe_maker: float
+    criteria: list[Gate]
+
+    @property
+    def passed(self) -> bool:
+        return all(c.passed for c in self.criteria)
+
+
+def load_market_holdout(silver_root: Path, symbol: str) -> SymbolMarket:
+    """Velas y funding hasta el fin del holdout: la historia previa solo sirve de calentamiento."""
+    spot, perp, funding = load_silver(silver_root, symbol)
+    hourly = hourly_prices(spot, perp).filter(pl.col("open_time") < HOLDOUT_STOP)
+    settlements = funding.filter(pl.col("funding_time") < HOLDOUT_STOP).select(
+        "funding_time", "funding_rate"
+    )
+    return SymbolMarket(symbol, hourly, settlements)
+
+
+def selected_config(name: str) -> TrendConfig:
+    """La configuración elegida en desarrollo, por nombre; nunca una nueva."""
+    for hypothesis in Hypothesis:
+        for config in configs(hypothesis):
+            if config.name == name:
+                return config
+    raise ValueError(f"{name!r} no es una de las 12 configuraciones pre-registradas")
+
+
+def evaluate_holdout(
+    data: Sequence[SymbolMarket], config: TrendConfig, *, costs: CostModel = MAIN_COSTS
+) -> HoldoutEvaluation:
+    """Evalúa la configuración elegida en el holdout con los criterios fijados en el §8."""
+
+    def run(cfg: TrendConfig, model: CostModel) -> pl.DataFrame:
+        frame, _ = run_config(
+            data, cfg, model, start=HOLDOUT_START, end=HOLDOUT_STOP, period=Period.HOLDOUT
+        )
+        return frame
+
+    frame = run(config, costs)
+    returns = frame["ret"].to_numpy()
+    perf = performance(returns)
+    b1_frame = run(TrendConfig(1, 1.0, buy_and_hold=True), costs)
+    maker_frame = run(config, MAKER_COSTS)
+    criteria = [
+        Gate("H1", f"Sharpe neto > {HOLDOUT_SHARPE}", perf.sharpe, perf.sharpe > HOLDOUT_SHARPE),
+        Gate("H2", f"CAGR neto > {HOLDOUT_CAGR:.0%}", perf.cagr, perf.cagr > HOLDOUT_CAGR),
+        Gate(
+            "H3",
+            f"Drawdown máximo < {-HOLDOUT_MAX_DRAWDOWN:.0%}",
+            perf.max_drawdown,
+            perf.max_drawdown > HOLDOUT_MAX_DRAWDOWN,
+        ),
+    ]
+    return HoldoutEvaluation(
+        selected=config.name,
+        period=(HOLDOUT_START, HOLDOUT_STOP),
+        dates=[str(d) for d in frame["date"].to_list()],
+        returns=returns,
+        performance=perf,
+        benchmark_returns=b1_frame["ret"].to_numpy(),
+        benchmark=performance(b1_frame["ret"].to_numpy()),
+        sharpe_maker=performance(maker_frame["ret"].to_numpy()).sharpe,
+        criteria=criteria,
+    )

@@ -18,7 +18,7 @@ from scipy import stats
 from prometheus_platform.research.carry_evaluation import HypothesisEvaluation
 from prometheus_platform.research.funding_model import ModelStudy
 from prometheus_platform.research.simulation import REGIME_NAMES, Regime, SimulationStudy
-from prometheus_platform.research.trend_evaluation import TrendEvaluation
+from prometheus_platform.research.trend_evaluation import HoldoutEvaluation, TrendEvaluation
 
 
 def summary(evaluation: HypothesisEvaluation) -> dict[str, Any]:
@@ -257,3 +257,49 @@ def plot_simulation(study: SimulationStudy, figures: Path) -> list[Path]:
         _plot_montecarlo(study, figures / "montecarlo-retornos.png"),
         _plot_frontier(study, figures / "asignacion-frontera.png"),
     ]
+
+
+def write_holdout_outputs(evaluation: HoldoutEvaluation, out_dir: Path) -> Path:
+    """Resumen JSON y retornos diarios del holdout de tendencia (pre-registro §7 y §8)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(
+        {
+            "date": evaluation.dates,
+            evaluation.selected: evaluation.returns,
+            "B1": evaluation.benchmark_returns,
+        }
+    ).write_parquet(out_dir / "daily_returns.parquet")
+    payload = {
+        "periodo": "holdout",
+        "seleccionada": evaluation.selected,
+        "desde": evaluation.period[0],
+        "hasta_exclusivo": evaluation.period[1],
+        "dias": len(evaluation.returns),
+        "rendimiento": asdict(evaluation.performance),
+        "benchmark_B1": asdict(evaluation.benchmark),
+        "sensibilidad": {"sharpe_maker": evaluation.sharpe_maker},
+        "criterios": [asdict(c) for c in evaluation.criteria],
+        "pasa": evaluation.passed,
+    }
+    path = out_dir / "summary.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    return path
+
+
+def plot_holdout(evaluation: HoldoutEvaluation, path: Path) -> Path:
+    """Curva de capital del holdout: la configuración elegida frente a B1."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dates = np.array([d[:10] for d in evaluation.dates], dtype="datetime64[D]")
+    fig, ax = plt.subplots(figsize=(9, 4.5), dpi=150)
+    ax.plot(dates, np.cumprod(1 + evaluation.returns), color="#c2410c", linewidth=2.2,
+            label=f"{evaluation.selected} (elegida en desarrollo)")  # fmt: skip
+    ax.plot(dates, np.cumprod(1 + evaluation.benchmark_returns), color="#1d4ed8", linewidth=1.4,
+            linestyle="--", label="B1 comprar y mantener")  # fmt: skip
+    ax.set_title("Tendencia · holdout (2024-07-01 → 2026-09-30), neto de costes")
+    ax.set_ylabel("Capital (inicio = 1)")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="upper left", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+    return path

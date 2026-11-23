@@ -142,6 +142,11 @@ class TrialLedger:
         self.familia, self.carril, self.autor, self.comando = familia, carril, autor, comando
         self.commit = commit or git_commit()
 
+    @property
+    def directory(self) -> Path:
+        """Carpeta del registro compartido (las filas de todos los carriles)."""
+        return self._dir
+
     # --- puerto ExperimentRegistry ---------------------------------------------------------
 
     def log_trial(self, trial: TrialRecord) -> None:
