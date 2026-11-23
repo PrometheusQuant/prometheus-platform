@@ -92,11 +92,15 @@ class JsonlEventJournal:
             fh.seek(-1, os.SEEK_END)
             return fh.read(1) != b"\n"
 
-    def replay(self) -> Iterator[DomainEvent]:
+    def replay(self, *, concurrent: bool = False) -> Iterator[DomainEvent]:
         """Eventos tipados en orden. Una línea corrupta detiene la lectura (no se adivina).
 
         Única excepción: una **última** línea sin salto de línea es una escritura que un corte
         dejó a medias; se omite con una alerta CRITICAL para que el proceso pueda reiniciar.
+
+        ``concurrent=True`` es para quien lee mientras el runner escribe (las métricas, PQ-71):
+        ahí una última línea a medias es una escritura en curso, no un corte, y se omite sin
+        alerta. El runner, al arrancar, lee sin esa opción.
         """
         if not self._path.exists():
             return
@@ -105,7 +109,7 @@ class JsonlEventJournal:
         for number, line in enumerate(lines, start=1):
             if line.strip():
                 yield self._parse(line, number)
-        if truncated.strip():
+        if truncated.strip() and not concurrent:
             log.critical("journal_truncated_line", path=str(self._path), line=len(lines) + 1)
 
     def _parse(self, line: str, number: int) -> DomainEvent:

@@ -220,3 +220,19 @@ def test_paper_run_serves_metrics_while_it_runs(
 
     assert cli.main(["paper", "run", "--once"]) == 0
     assert len(servers) == 1  # sin --metrics-port no se abre nada
+
+
+def test_a_write_in_progress_is_not_reported_as_a_corrupt_journal(
+    paths: PaperPaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from prometheus_platform.adapters import jsonl_journal  # noqa: PLC0415
+
+    critical: list[str] = []
+    monkeypatch.setattr(jsonl_journal.log, "critical", lambda event, **kw: critical.append(event))
+    with paths.journal.open("a", encoding="utf-8") as fh:
+        fh.write('{"type": "PortfolioVal')  # el runner está escribiendo esta línea
+
+    assert registry_for(paths).get_sample_value("pq_paper_equity_usd") == 990
+    assert critical == []  # sin falsa alarma de corrupción
+    list(JsonlEventJournal(paths.journal).replay())  # el arranque del runner sí alerta
+    assert critical == ["journal_truncated_line"]

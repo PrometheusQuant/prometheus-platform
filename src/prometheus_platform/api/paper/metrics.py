@@ -68,7 +68,7 @@ class PaperCollector(Collector):
 
     def _rebuild(self) -> None:
         events = (
-            list(JsonlEventJournal(self._paths.journal).replay())
+            list(JsonlEventJournal(self._paths.journal).replay(concurrent=True))
             if self._paths.journal.exists()
             else []
         )
