@@ -394,7 +394,9 @@ def weekly_summary(events: Iterable[DomainEvent], monday: date) -> WeeklySummary
     before = build_view(e for e in history if e.occurred_at < opens)
     after = build_view(history)
     inside = [v for v in after.valuations if v.occurred_at >= opens]
-    equity_start = before.equity or (inside[0].equity if inside else None)
+    equity_start = before.equity
+    if equity_start is None and inside:  # el runner arrancó durante la semana
+        equity_start = inside[0].equity
     curve: list[tuple[datetime, Decimal]] = (
         [] if before.equity is None else [(opens, before.equity)]
     )
