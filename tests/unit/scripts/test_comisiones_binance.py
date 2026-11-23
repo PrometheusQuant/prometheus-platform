@@ -53,7 +53,7 @@ def _comision_spot(simbolo: str) -> dict[str, Any]:
             "enabledForAccount": True,
             "enabledForSymbol": True,
             "discountAsset": "BNB",
-            "discount": "0.25000000",
+            "discount": "0.75000000",
         },
     }
 
@@ -118,7 +118,8 @@ def test_lee_comisiones_y_productos_con_una_clave_de_solo_lectura(script: Module
     assert (informe.vip, informe.margin, informe.futuros) == (0, True, True)
     tabla = informe.markdown()
     assert "| Nivel VIP | VIP 0 |" in tabla
-    assert "spot BTCUSDT maker / taker | 0,100 % / 0,100 % (BNB 25,000 % de descuento)" in tabla
+    assert "spot BTCUSDT maker / taker | 0,100 % / 0,100 % (con BNB se paga el 75,000 %: " in tabla
+    assert "25,000 % de descuento)" in tabla
     assert "USDⓈ-M BTCUSDT maker / taker | 0,020 % / 0,050 %" in tabla
     assert CLAVE not in tabla
     assert SECRETO not in tabla

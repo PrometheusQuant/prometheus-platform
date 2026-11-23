@@ -6,7 +6,7 @@ fuente**, porque las condiciones cambian.
 | Documento | Ticket | Estado |
 |---|---|---|
 | [`pasos-del-titular.md`](pasos-del-titular.md): **todo lo que solo puede hacer el titular**, paso a paso | PQ-17 y otros | Vigente (2026-11-22) |
-| [`binance.md`](binance.md): productos habilitados, comisiones y entornos de prueba | PQ-17 | Parcial: falta la verificación desde la cuenta |
+| [`binance.md`](binance.md): productos habilitados, comisiones y entornos de prueba | PQ-17 | Verificado (2026-11-23): VIP 0, futuros habilitados, comisiones iguales al modelo; faltan las claves Demo |
 | [`polymarket.md`](polymarket.md): elegibilidad desde Bolivia y costes | PQ-26 | Verificado (2026-10-30): Bolivia no está restringida |
 | `tributacion.md`: obligaciones sobre ganancias en exchanges extranjeros | PQ-27 | Pendiente |
 | [`go-no-go-capital-real.md`](go-no-go-capital-real.md): qué tiene que cumplirse antes de operar con dinero real | PQ-104 | Definida; decisión vigente: NO-GO (1 de 11 criterios) |
