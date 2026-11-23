@@ -55,3 +55,25 @@ groups:
         annotations:
           summary: "El riesgo pre-trade rechazó órdenes ({{ $labels.rule }}) en la última hora"
           runbook: "docs/runbooks/paper-trading.md"
+
+  # SLO de disponibilidad (PQ-97): el runner tiene heartbeat fresco (< 10 min) el 99 % de la
+  # semana. Si Prometheus no puede leer al runner, ese minuto cuenta como caído. Si la VM entera
+  # cae, Prometheus tampoco mide: eso lo cubre la verificación externa (Healthchecks.io).
+  - name: slo
+    rules:
+      - record: pq:heartbeat_ok:bool
+        expr: >-
+          (min(time() - pq_paper_heartbeat_timestamp_seconds) < bool 600)
+          * min(up{job="pq-runner"})
+          or on() vector(0)
+
+      - record: pq:slo_heartbeat:ratio_7d
+        expr: avg_over_time(pq:heartbeat_ok:bool[7d])
+
+      - alert: SLOHeartbeatIncumplido  # objetivo: 99 % semanal (≈ 1 h 41 min de caída por semana)
+        expr: pq:slo_heartbeat:ratio_7d < 0.99
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Disponibilidad del runner en 7 días por debajo del 99 % ({{ $value | humanizePercentage }})"
+          runbook: "docs/runbooks/observabilidad.md"

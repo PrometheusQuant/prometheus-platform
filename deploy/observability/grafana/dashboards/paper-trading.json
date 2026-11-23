@@ -7,7 +7,7 @@
   ],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "refresh": "1m",
   "time": {
@@ -580,6 +580,100 @@
         "overrides": []
       },
       "options": {}
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Disponibilidad 7 días (SLO 99 %)",
+      "description": "Heartbeat fresco (< 10 min) y runner leído por Prometheus. Objetivo: 99 % semanal (PQ-97).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pq-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pq-prometheus"
+          },
+          "expr": "pq:slo_heartbeat:ratio_7d"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 14,
+      "type": "logs",
+      "title": "Logs de advertencia y error (Loki)",
+      "description": "Líneas JSON de los procesos con level warning, error o critical. Sin secretos: redact_text.",
+      "datasource": {
+        "type": "loki",
+        "uid": "pq-loki"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 28,
+        "w": 18,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "pq-loki"
+          },
+          "expr": "{job=\"prometheusquant\", level=~\"warning|error|critical\"}"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     }
   ],
   "templating": {
