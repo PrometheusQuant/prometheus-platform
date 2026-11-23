@@ -66,6 +66,7 @@ por el navegador:
 | Resumen diario: órdenes, funding, comisiones, slippage, equity | INFO | El runner, al cambiar el día UTC |
 | Resumen semanal: lo mismo para la semana ISO, más la caída máxima, el kill-switch y el PnL por estrategia | INFO | El runner, al terminar el domingo UTC ([informe semanal](paper-trading.md#informe-semanal-pq-85)) |
 | El runner volvió a reportar | INFO | `pq paper watchdog` |
+| Drift de datos, modelo o desempeño | WARNING | `pq monitor drift --send` ([umbrales](drift.md)) |
 
 Las alertas INFO no salen de los logs: el runner y el vigilante las envían directamente al canal.
 Ninguna orden individual genera alerta: van en el resumen diario.

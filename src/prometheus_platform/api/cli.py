@@ -292,9 +292,25 @@ def _add_operations(commands: Commands) -> None:
         "--send", action="store_true", help="envía el PDF (o, sin --pdf, el resumen) al canal"
     )
 
+    _add_monitor_parser(commands)
+
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
     alert_actions.add_parser("test", help="Envía una alerta de prueba por el canal configurado")
+
+
+def _add_monitor_parser(commands: Commands) -> None:
+    monitor = commands.add_parser("monitor", help="Monitoreo de la fase 6 de CRISP-ML(Q)")
+    monitor_actions = monitor.add_subparsers(dest="action", required=True)
+    drift = monitor_actions.add_parser(
+        "drift", help="Drift de datos, modelo y desempeño frente a lo esperado (PQ-86)"
+    )
+    drift.add_argument(
+        "--send", action="store_true", help="alerta al canal si algo cruza su umbral"
+    )
+    drift.add_argument(
+        "--ticket", action="store_true", help="abre un issue de GitHub por alerta (con gh)"
+    )
 
 
 def http_client() -> httpx.Client:
@@ -994,6 +1010,59 @@ def _paper_kill(args: argparse.Namespace, paths: PaperPaths, journal: JsonlEvent
     return 0
 
 
+def _monitor_drift(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:
+    """Corre los tres detectores; código 1 si alguno cruza su umbral (útil en cron)."""
+    from prometheus_platform.api import drift  # noqa: PLC0415
+    from prometheus_platform.api.dashboard import portfolio  # noqa: PLC0415
+    from prometheus_platform.api.dashboard.artifacts import load_artifacts  # noqa: PLC0415
+    from prometheus_platform.api.paper.report import build_view  # noqa: PLC0415
+    from prometheus_platform.research.nowcast import tuned_params  # noqa: PLC0415
+
+    data_dir = settings.data_dir
+    report = drift.DriftReport(generated_at=SystemClock().now())
+    try:
+        panels = drift.load_panels(data_dir)
+    except (OSError, ValueError, pl.exceptions.PolarsError) as exc:
+        report.skipped["datos y modelo"] = f"no se pudo leer silver ({type(exc).__name__})"
+        panels = {}
+    if panels:
+        drift.check_data(report, panels)
+        try:
+            drift.check_model(report, panels, tuned_params(data_dir))
+        except (OSError, ValueError) as exc:
+            report.skipped["modelo"] = f"falta el estudio del modelo ({type(exc).__name__})"
+    art = load_artifacts(data_dir)
+    evaluation, returns = art.carry.get("H2"), art.carry_returns.get("H2")
+    daily = (
+        portfolio.development_returns(returns, str(evaluation.get("selected")))
+        if evaluation is not None and returns is not None
+        else None
+    )
+    view = build_view(JsonlEventJournal(PaperPaths(data_dir / PAPER_DIR).journal).replay())
+    drift.check_performance(report, view, daily)
+
+    path = drift.write_report(report, data_dir / "monitoring" / "drift")
+    for line in drift.summary_lines(report):
+        print(line)
+    print(f"informe en {path}")
+    alerts = report.alerts(settings.environment.value)
+    for found in alerts:
+        alert = found
+        if args.ticket:
+            try:
+                alert = replace(
+                    found, details={**found.details, "ticket": drift.open_ticket(found)}
+                )
+            except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+                print(f"ERROR no se pudo abrir el issue: {exc}", file=sys.stderr)
+        print(f"ALERTA {alert.title}: {alert.details.get('ticket', 'sin ticket')}")
+        if args.send and notifier is not None:
+            notifier.notify(alert)
+    if not alerts:
+        print("sin drift: ningún detector cruzó su umbral")
+    return 1 if alerts else 0
+
+
 def _alert_test(notifier: Notifier | None, environment: str) -> int:
     if notifier is None:
         print("sin canal de alertas: configura PQ_TELEGRAM_BOT_TOKEN y PQ_TELEGRAM_CHAT_ID")
@@ -1050,6 +1119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else _report_public(data_dir, args.out)
         ),
         "paper": lambda: _paper(args, settings, notifier),
+        "monitor": lambda: _monitor_drift(args, settings, notifier),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
     }
     return handlers[args.command]()

@@ -130,6 +130,7 @@ nav:
       - Clave de API comprometida: runbooks/clave-comprometida.md
       - Desconexión del exchange: runbooks/desconexion-exchange.md
       - Datos desactualizados: runbooks/datos-desactualizados.md
+      - Monitoreo de drift: runbooks/drift.md
   - Investigación:
       - investigacion/README.md
       - "2026-10-16 Plataforma multiestrategia": investigacion/2026-10-16-plataforma-multiestrategia.md
