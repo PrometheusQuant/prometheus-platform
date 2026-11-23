@@ -107,9 +107,25 @@ Lo medido está en la [verificación](#verificacion-de-la-pila).
 
 ## Verificación de la pila
 
-*Por verificar* con Docker. La sección se completa con:
+Prueba del 23-nov-2026 en la laptop (Docker 28.5.1), con el diario real del paper:
 
-- `promtool check config` y `promtool check rules`;
-- `amtool check-config`;
-- la pila levantada con el runner de la laptop;
-- `docker stats --no-stream`.
+| Comprobación | Resultado |
+|---|---|
+| `promtool check rules` y `check config` | 7 reglas, configuración válida |
+| `amtool check-config` | 1 receptor (Telegram), válido |
+| Prometheus lee `/metrics` del runner | `up{job="pq-runner"} = 1`; `pq_paper_equity_usd = 1000`, la misma cifra del dashboard |
+| Reglas | Las 7 con `health = ok` e inactivas (paper sano) |
+| Grafana | Tablero «PrometheusQuant · Paper trading» con 12 paneles; la fuente de datos responde; `admin/admin` da 401 |
+| Camino de alerta | Exportador detenido a las 18:38:52 UTC. `RunnerSinMetricas` llega a Alertmanager a las 18:44:53 (5 min de `for` más un ciclo) y se intenta enviar a Telegram (rechazado: token falso a propósito) |
+| Memoria (`docker stats`) | Prometheus 27 MB, Alertmanager 32 MB, Grafana 104 MB: **≈ 162 MB**, dentro de sus límites (256/64/192 MB) y de los 6 GB de la VM A1 |
+
+En producción, el *collector* corre dentro del proceso del runner: no suma otro proceso de Python.
+
+En la laptop, `network_mode: host` de Docker Desktop no ve el `127.0.0.1` de WSL
+([KE-020](errores-conocidos.md#ke-020-en-docker-desktop-la-red-del-host-no-es-la-de-wsl)). Para
+repetir la prueba allí:
+
+- el exportador corre en un contenedor con `--network host` y la imagen del proyecto;
+- las consultas se hacen con `docker exec <contenedor de prometheus> wget -qO- 127.0.0.1:9090/...`.
+
+En la VM Linux del servidor no hace falta nada de eso.
