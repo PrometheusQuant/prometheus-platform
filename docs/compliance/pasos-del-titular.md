@@ -17,7 +17,7 @@ escribir **«listo, paso N»** en el chat de Claude: el agente comprueba y conti
 |---|---|---|---|
 | [1](#paso-1-comisiones-reales-de-binance-pq-17) | Comisiones reales de Binance, sin operar | 15 min | 5 evaluaciones retenidas (PQ-68, PQ-66, PQ-69, PQ-114, PQ-94), lo que depende de ellas (PQ-82, PQ-101) y el holdout del carry |
 | [2](#paso-2-claves-de-binance-demo-pq-51-pq-52-pq-95) | Claves de Binance Demo | 10 min | PQ-51, PQ-52 y PQ-95 (ejecución en Demo) |
-| [3](#paso-3-clave-de-anthropic-para-pregunta-pq-90) | Clave de Anthropic para `/pregunta` | 10 min | El asistente del bot de Telegram (PQ-90) |
+| [3](#paso-3-opcional-clave-de-anthropic-para-pregunta-pq-90) | **Opcional, aplazado:** clave de Anthropic para `/pregunta` | 10 min | El asistente del bot de Telegram (PQ-90) |
 | [4](#paso-4-prueba-de-usabilidad-con-3-personas-pq-76) | Prueba de usabilidad con 3 personas | 1 h y media | PQ-76 (cap. 7.2 del informe) |
 | [5](#paso-5-claves-de-bybit-testnet-pq-100) | Claves de Bybit testnet | 10 min | PQ-100 (segundo exchange en paper) |
 | [6](#paso-6-hacer-publica-la-imagen-del-dashboard-pq-81) | Hacer pública la imagen del dashboard en GHCR | 2 min | El despliegue en la VM sin credenciales (PQ-57) |
@@ -190,7 +190,19 @@ cuenta real.
    `PQ_BINANCE_TESTNET=true` hace que la configuración rechace cualquier intento de usarlas
    fuera de Demo (PQ-15).
 
-## Paso 3. Clave de Anthropic para `/pregunta` (PQ-90)
+## Paso 3 (opcional). Clave de Anthropic para `/pregunta` (PQ-90)
+
+!!! info "Aplazado por decisión del titular (2026-11-23)"
+    Queda como **mejora opcional**, por ejemplo para la demostración en la feria. La API de
+    Anthropic se factura aparte de la suscripción de Claude que usamos en Claude Code, con crédito
+    prepagado en la cuenta de Console de quien la pague. Sin la clave no se rompe nada:
+
+    - el paper trading, las alertas y el resto de comandos del bot funcionan igual;
+    - `/pregunta` responde que el asistente no está configurado.
+
+    Si se activa, que sea con una cuenta de Console **propia** (no compartida), con 5 USD
+    **sin recarga automática** y con un límite mensual en *Settings* → *Limits*. Además está el tope
+    diario del propio bot.
 
 El bot de Telegram ya tiene el comando `/pregunta`. Responde preguntas en lenguaje natural sobre
 el paper trading con herramientas de solo lectura, y tiene un tope de gasto diario. Solo le falta
