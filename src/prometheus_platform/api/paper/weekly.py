@@ -11,14 +11,53 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
+import numpy as np
 from matplotlib.figure import Figure
 
 from prometheus_platform.api.paper.report import WeeklySummary
+from prometheus_platform.portfolio_risk.budget import BLOCK_DAYS, bootstrap_bands
 
 TEMPLATE = Path(__file__).with_name("semana.qmd")
 QUARTO_TIMEOUT = 300  # segundos; el informe tarda unos 10 s
+
+
+WEEK_DAYS = 7
+NO_PARITY = "n/d: falta la evaluación de H2 o la semana no tiene valoraciones"
+
+
+@dataclass(frozen=True, slots=True)
+class Parity:
+    """El retorno de la semana del paper frente a lo que esperaba el backtest a 7 días."""
+
+    paper: Decimal
+    p5: float
+    p50: float
+    p95: float
+
+    @property
+    def verdict(self) -> str:
+        if self.paper < Decimal(str(self.p5)):
+            return "por debajo de la banda"
+        if self.paper > Decimal(str(self.p95)):
+            return "por encima de la banda"
+        return "dentro de la banda"
+
+
+def parity(summary: WeeklySummary, daily: np.ndarray) -> Parity | None:
+    """Bandas p5/mediana/p95 del retorno a 7 días, remuestreando los retornos del desarrollo.
+
+    Es la misma comparación que la pestaña de cartera del dashboard (PQ-84). ``None`` si la semana
+    no tiene variación o el desarrollo es demasiado corto para remuestrear.
+    """
+    change = summary.change
+    if change is None or daily.size < BLOCK_DAYS:
+        return None
+    q05, q50, q95 = (float(q[-1]) - 1 for q in bootstrap_bands(daily, WEEK_DAYS))
+    return Parity(change, q05, q50, q95)
 
 
 class WeeklyReportError(RuntimeError):
@@ -29,7 +68,9 @@ def pdf_name(summary: WeeklySummary) -> str:
     return f"informe-paper-{summary.week}.pdf"
 
 
-def build_inputs(summary: WeeklySummary, out: Path, broker: str | None) -> None:
+def build_inputs(
+    summary: WeeklySummary, out: Path, broker: str | None, expected: Parity | None = None
+) -> None:
     """Escribe las entradas del informe y copia la plantilla en ``out``."""
     out.mkdir(parents=True, exist_ok=True)
     details = summary.details()
@@ -49,6 +90,12 @@ def build_inputs(summary: WeeklySummary, out: Path, broker: str | None) -> None:
         "violaciones": details["violaciones de riesgo"],
         "kill_switch": details["kill-switch activado"],
         "tiene_curva": len(summary.curve) > 1,
+        "costes_ratio": details["costes reales / modelo"],
+        "incidentes": str(len(summary.incidents)),
+        "paridad": expected.verdict if expected else NO_PARITY,
+        "paridad_p5": f"{expected.p5:+.3%}" if expected else "n/d",
+        "paridad_mediana": f"{expected.p50:+.3%}" if expected else "n/d",
+        "paridad_p95": f"{expected.p95:+.3%}" if expected else "n/d",
     }
     # JSON es YAML válido (como en el informe ejecutivo): no hace falta otra dependencia.
     (out / "_semana.yml").write_text(
@@ -57,6 +104,8 @@ def build_inputs(summary: WeeklySummary, out: Path, broker: str | None) -> None:
     tables = out / "_tablas"
     tables.mkdir(exist_ok=True)
     (tables / "estrategias.md").write_text(_strategies_table(summary), encoding="utf-8")
+    (tables / "costes.md").write_text(_costs_table(summary), encoding="utf-8")
+    (tables / "incidentes.md").write_text(_incidents_table(summary), encoding="utf-8")
     image = out / "_img" / "equity.png"
     image.unlink(missing_ok=True)
     if values["tiene_curva"]:
@@ -76,6 +125,35 @@ def _strategies_table(summary: WeeklySummary) -> str:
         f"| {r.strategy} | {r.exchange} | {r.pnl:+.2f} | {r.funding:+.4f} | {r.costs:.4f} "
         f"| {r.exposure:.2f} |"
         for r in summary.strategies
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _costs_table(summary: WeeklySummary) -> str:
+    if not summary.costs:
+        return "*Sin operaciones esta semana: no hay costes que comparar.*\n"
+    lines = [
+        "| Pata | Nocional operado (USD) | Comisión real | Comisión del modelo "
+        "| Slippage real | Slippage del modelo |",
+        "|---|--:|--:|--:|--:|--:|",
+    ]
+    lines += [
+        f"| {r.leg} | {r.notional:.2f} | {r.fee:.4f} | {r.fee_model:.4f} | {r.slippage:.4f} "
+        f"| {r.slippage_model:.4f} |"
+        for r in summary.costs
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _incidents_table(summary: WeeklySummary) -> str:
+    if not summary.incidents:
+        return (
+            "*Sin incidentes esta semana: ninguna violación de riesgo ni cambio del kill-switch.*\n"
+        )
+    lines = ["| Hora (UTC) | Tipo | Detalle |", "|---|---|---|"]
+    lines += [
+        f"| {i.at:%Y-%m-%d %H:%M} | {i.kind} | {i.detail.replace('|', '/')} |"
+        for i in summary.incidents
     ]
     return "\n".join(lines) + "\n"
 

@@ -25,7 +25,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import polars as pl
@@ -75,6 +75,10 @@ from prometheus_platform.ops.settings import Settings, load_settings
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch
 from prometheus_platform.research.carry_evaluation import HYPOTHESES
 from prometheus_platform.strategies.carry import H2_PARAMS
+
+if TYPE_CHECKING:
+    from prometheus_platform.api.paper.report import WeeklySummary
+    from prometheus_platform.api.paper.weekly import Parity
 
 SOURCE_NAME = "binance_data_vision"
 
@@ -817,7 +821,9 @@ def _paper_weekly_report(
     events = list(JsonlEventJournal(PaperPaths(settings.data_dir / PAPER_DIR).journal).replay())
     summary = weekly_summary(events, monday)
     out = settings.data_dir / "informes" / "paper" / summary.week
-    weekly.build_inputs(summary, out, build_view(events).broker)
+    weekly.build_inputs(
+        summary, out, build_view(events).broker, _weekly_parity(summary, settings.data_dir)
+    )
     print(f"entradas del informe {summary.week} en {out}")
     pdf = None
     if args.pdf:
@@ -842,6 +848,20 @@ def _paper_weekly_report(
         delivered = notifier.notify(alert)
     print(f"enviado: {'sí' if delivered else 'no'}")
     return 0 if delivered else 1
+
+
+def _weekly_parity(summary: WeeklySummary, data_dir: Path) -> Parity | None:
+    """Paridad con el backtest de H2; ``None`` (y un aviso) si falta su evaluación."""
+    from prometheus_platform.api.dashboard import portfolio  # noqa: PLC0415
+    from prometheus_platform.api.dashboard.artifacts import load_artifacts  # noqa: PLC0415
+    from prometheus_platform.api.paper.weekly import parity  # noqa: PLC0415
+
+    art = load_artifacts(data_dir)
+    evaluation, returns = art.carry.get("H2"), art.carry_returns.get("H2")
+    if evaluation is None or returns is None:
+        print("aviso: falta la evaluación de H2; la paridad con el backtest queda como n/d")
+        return None
+    return parity(summary, portfolio.development_returns(returns, str(evaluation.get("selected"))))
 
 
 def _paper_run(

@@ -6,9 +6,6 @@ date: today
 date-format: "D [de] MMMM [de] YYYY"
 lang: es
 metadata-files: [_semana.yml]
-language:
-  crossref-fig-title: "Figura"
-  crossref-tbl-title: "Tabla"
 format:
   typst:
     papersize: a4
@@ -39,11 +36,15 @@ los dos dicen lo mismo. Es *paper trading*: bróker {{< meta s.broker >}}, sin d
 | Slippage | {{< meta s.slippage >}} |
 | Violaciones de límites de riesgo | {{< meta s.violaciones >}} |
 | Kill-switch activado | {{< meta s.kill_switch >}} |
+| Costes reales / costes del modelo | {{< meta s.costes_ratio >}} |
+| Frente al backtest (7 días) | {{< meta s.paridad >}} |
 
 : Cifras de la semana. La equity al inicio es la del cierre de la semana anterior.
 
 ::: {.content-visible when-meta="s.tiene_curva"}
-![Equity del paper trading durante la semana (USD).](_img/equity.png)
+![](_img/equity.png)
+
+*Equity del paper trading durante la semana (USD).*
 :::
 
 # Por estrategia
@@ -53,6 +54,29 @@ incluye el funding, las comisiones y el cambio de valor de las posiciones abiert
 va dentro del precio de cada fill.
 
 {{< include _tablas/estrategias.md >}}
+
+# Costes reales frente al modelo
+
+Lo que costó operar esta semana frente a lo que cobra el modelo de costes del backtest (comisiones
+VIP0 y slippage del pre-registro). Con el bróker simulado coinciden por construcción, porque cobra
+con el mismo modelo; la comparación dice algo cuando los fills vienen de un exchange (Binance Demo).
+
+{{< include _tablas/costes.md >}}
+
+# Paridad con el backtest
+
+Retorno de la semana del paper: **{{< meta s.variacion >}}**. Para una semana, el backtest del carry
+H2 (remuestreo por bloques de los retornos diarios del desarrollo, como la pestaña de cartera del
+dashboard) esperaba entre **{{< meta s.paridad_p5 >}}** (p5) y **{{< meta s.paridad_p95 >}}** (p95),
+con mediana **{{< meta s.paridad_mediana >}}**. Veredicto: **{{< meta s.paridad >}}**.
+
+El backtest supone todo el capital en el carry; si el presupuesto deja parte en efectivo, el paper
+se mueve menos que la banda. Una semana fuera de la banda es una señal para mirar, no una prueba:
+se confirma con varias semanas seguidas.
+
+# Incidentes
+
+{{< include _tablas/incidentes.md >}}
 
 # Qué revisar
 

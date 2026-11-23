@@ -213,7 +213,7 @@ Cada semana ISO (lunes a domingo, UTC) tiene dos salidas, y las dos salen de la 
 | Salida | Cuándo | Qué trae |
 |---|---|---|
 | Resumen semanal por Telegram | Solo: el runner lo envía al terminar el domingo UTC, después del resumen diario | Órdenes, funding, comisiones, slippage, equity al cierre, variación, caída máxima dentro de la semana, violaciones de riesgo, kill-switch y PnL por estrategia |
-| PDF (Quarto + Typst) | `pq paper weekly-report --pdf` | Lo mismo, con la curva de equity de la semana y la tabla por estrategia |
+| PDF (Quarto + Typst) | `pq paper weekly-report --pdf` | Lo mismo, con la curva de equity, la tabla por estrategia, los costes reales frente al modelo, la paridad con el backtest y la lista de incidentes |
 
 ```bash
 uv run pq paper weekly-report                       # entradas de la última semana terminada
@@ -230,6 +230,13 @@ diario no cambia.
   semana, la primera valoración.
 - **PnL por estrategia:** el acumulado al cierre del domingo menos el acumulado al inicio del
   lunes, con la misma fórmula que la pestaña de cartera del dashboard (PQ-84).
+- **Costes reales frente al modelo:** comisión y slippage de cada pata frente a lo que cobraría el
+  `CostModel` del backtest para ese símbolo. Con el bróker simulado salen iguales (1,00x) por
+  construcción; la cifra dice algo con fills de Binance Demo (PQ-52, PQ-95).
+- **Paridad con el backtest:** el retorno de la semana frente a las bandas p5–p95 del carry H2 a
+  7 días (remuestreo por bloques del desarrollo, como la pestaña de cartera). Si falta la
+  evaluación de H2 queda como n/d. Una semana fuera de la banda es una señal, no una prueba.
+- **Incidentes:** violaciones de límites de riesgo y cambios del kill-switch de la semana, con su hora.
 - **`--send`:** con `--pdf` manda el PDF al grupo de alertas (`sendDocument`) con el resumen como
   pie; sin `--pdf`, solo el resumen. Sin canal configurado sale con código 1.
 
