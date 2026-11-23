@@ -14,6 +14,7 @@ FROM python:3.12-slim-bookworm
 RUN useradd --create-home --uid 10001 pq
 COPY --from=build --chown=pq:pq /app/.venv /app/.venv
 COPY --chown=pq:pq src/prometheus_platform/api/dashboard/app.py /app/app.py
+COPY --chown=pq:pq .streamlit /app/.streamlit
 ENV PATH="/app/.venv/bin:$PATH" \
     PQ_ENVIRONMENT=dev \
     PQ_DATA_DIR=/data \

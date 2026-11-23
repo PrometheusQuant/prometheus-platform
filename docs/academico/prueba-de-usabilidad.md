@@ -24,7 +24,7 @@ dashboard, las preguntas que se haría antes de invertir. Las tareas y el criter
 
 1. Dashboard abierto en http://localhost:8501 (modo normal, **no** `?modo=feria`: el recorrido
    guiado daría las respuestas).
-2. Pestaña inicial: «¿Qué pasó? Datos y calidad».
+2. Pestaña inicial: «Inicio: ¿cómo va?» (desde el rediseño de PQ-124, 2026-11-23, antes de cualquier sesión).
 3. Un cronómetro (el del celular) y esta página impresa o en otra pantalla para anotar.
 4. Para Power BI (opcional, si hay tiempo): el informe de [Power BI](dashboard-power-bi.md) abierto
    en la página principal.

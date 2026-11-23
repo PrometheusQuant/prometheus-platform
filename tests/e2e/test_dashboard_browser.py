@@ -11,7 +11,7 @@ pytest.importorskip("playwright", reason="instala el grupo e2e: uv sync --group 
 from playwright.sync_api import Page, expect
 
 TABS = {
-    "¿Qué pasó? Datos y calidad": "Calidad de la capa silver",
+    "Inicio: ¿cómo va?": "¿Cómo va?",
     "¿Funciona? Carry y gates": "Carry de funding: periodo de desarrollo",
     "¿Qué predice? Modelo": "Modelo predictivo del funding (cap. 5)",
     "¿Qué riesgo hay? Simulación": "Simulación de Markov y Monte Carlo (cap. 6)",
@@ -19,6 +19,7 @@ TABS = {
     "¿Qué predice hoy? Funding en vivo": "¿Habrá funding alto en la próxima liquidación?",
     "¿Cómo va en vivo? Paper trading": "Paper trading del carry H2 en vivo",
     "¿Cómo se reparte? Cartera": "Cartera multiestrategia: capital, PnL y riesgo",
+    "Datos y calidad (técnico)": "Calidad de la capa silver",
 }
 TIMEOUT_MS = 30_000
 
@@ -57,7 +58,7 @@ def test_fair_mode_shows_the_guided_tour_with_big_type(page: Page, base_url: str
     expect(sidebar).to_contain_text("paso 1 de 7")
     sidebar.get_by_role("button", name="Siguiente ▶").click()
     expect(sidebar).to_contain_text("paso 2 de 7")
-    expect(sidebar).to_contain_text("¿Qué pasó? Datos y calidad")
+    expect(sidebar).to_contain_text("Datos y calidad (técnico)")
     title = page.get_by_role("heading", level=1)
     size = title.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
     assert size >= 60  # 3rem sobre 22 px; el modo normal ronda los 44 px

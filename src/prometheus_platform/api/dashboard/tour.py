@@ -54,7 +54,7 @@ STEPS: tuple[TourStep, ...] = (
     ),
     TourStep(
         "Por qué fallan los minoristas",
-        "¿Qué pasó? Datos y calidad",
+        "Datos y calidad (técnico)",
         "Deciden con datos con huecos y con información del futuro sin darse cuenta. Aquí los "
         "datos son point-in-time y los huecos se informan, no se rellenan.",
         "La tabla de calidad de la capa silver y la columna de huecos.",

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 import altair as alt
 import polars as pl
@@ -18,7 +19,7 @@ import streamlit as st
 
 from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
-from prometheus_platform.api.dashboard import portfolio, tour
+from prometheus_platform.api.dashboard import portfolio, style, tour
 from prometheus_platform.api.dashboard.artifacts import (
     Artifacts,
     equity_curves,
@@ -28,6 +29,7 @@ from prometheus_platform.api.dashboard.artifacts import (
     performance_table,
     quality_table,
     scenario_table,
+    strategy_overview,
     transition_table,
     validation_table,
 )
@@ -46,7 +48,7 @@ from prometheus_platform.research.simulation import WeeklyRegimeModel
 
 # Patrón F de storytelling: cada pestaña responde una pregunta del jurado, en orden.
 LABELS = [
-    "¿Qué pasó? Datos y calidad",
+    "Inicio: ¿cómo va?",
     "¿Funciona? Carry y gates",
     "¿Qué predice? Modelo",
     "¿Qué riesgo hay? Simulación",
@@ -54,6 +56,7 @@ LABELS = [
     "¿Qué predice hoy? Funding en vivo",
     "¿Cómo va en vivo? Paper trading",
     "¿Cómo se reparte? Cartera",
+    "Datos y calidad (técnico)",
 ]
 
 
@@ -77,27 +80,105 @@ def _tab_data(art: Artifacts) -> None:
     )
 
 
+# Insignias de estado: icono propio de Streamlit (funciona sin internet) + texto + color.
+BadgeColor = Literal["green", "orange", "red"]
+BADGES: dict[str, tuple[str, BadgeColor]] = {
+    "ok": (":material/check_circle:", "green"),
+    "warn": (":material/schedule:", "orange"),
+    "bad": (":material/cancel:", "red"),
+}
+
+
+def _growth_chart(curve: pl.DataFrame, name: str) -> None:
+    """Crecimiento de 1 USD: línea de la marca, ejes discretos, fechas en español."""
+    chart = (
+        alt.Chart(curve)
+        .mark_line()
+        .encode(
+            x=alt.X("fecha:T", title=None, axis=alt.Axis(format="%b %Y")),
+            y=alt.Y(f"{name}:Q", scale=alt.Scale(zero=False), title="Valor de 1 USD invertido"),
+            color=alt.value(style.BRAND),
+            tooltip=[
+                alt.Tooltip("fecha:T", format="%d %b %Y"),
+                alt.Tooltip(f"{name}:Q", format=".3f"),
+            ],
+        )
+        .properties(height=260)
+    )
+    st.altair_chart(chart, width="stretch", theme=None)
+
+
+def _tab_home(data_dir: Path, art: Artifacts, max_age_minutes: int) -> None:
+    """Portada (patrón Dashboard): ¿cómo va todo?, en diez segundos y sin jerga."""
+    st.subheader("¿Cómo va?")
+    st.markdown(
+        "PrometheusQuant prueba estrategias de inversión en cripto con **reglas fijadas antes de "
+        "ver los resultados**, y solo las lleva a operar si superan una prueba final con datos que "
+        "nunca vio. Aquí está el estado de cada una."
+    )
+    paths = PaperPaths(data_dir / "paper")
+    view = build_view(JsonlEventJournal(paths.journal).replay())
+    beat = read_heartbeat(paths.heartbeat)
+    live = st.container(border=True)
+    live.markdown("##### Paper trading (dinero simulado, precios reales)")
+    if not view.valuations:
+        live.info("Aún no hay paper trading. Se arranca con `uv run pq paper run`.")
+    else:
+        age = None if beat is None else (SystemClock().now() - beat["at"]).total_seconds() / 60
+        running = age is not None and age <= max_age_minutes and bool(beat and beat.get("ok"))
+        equity, initial = float(view.equity or 0), float(view.initial_equity or 0)
+        cols = live.columns(4)
+        cols[0].markdown("Estado del runner")
+        if running:
+            cols[0].badge("En marcha", icon=":material/check_circle:", color="green")
+        else:
+            cols[0].badge("Detenido", icon=":material/cancel:", color="red")
+        cols[1].metric("Capital", style.usd(equity))
+        cols[2].metric("Ganancia acumulada", style.usd(equity - initial, signed=True))
+        cols[3].metric("Peor caída", style.pct(float(view.drawdown), 2))
+    st.markdown("##### Estrategias")
+    overview = strategy_overview(art)
+    if not overview:
+        st.info("Aún no hay evaluaciones. Se generan con `uv run pq research carry` y `trend`.")
+    for column, item in zip(st.columns(max(len(overview), 1)), overview, strict=False):
+        card = column.container(border=True)
+        card.markdown(f"**{item.name}**")
+        icon, color = BADGES[item.level]
+        card.badge(item.stage, icon=icon, color=color)
+        card.caption(item.summary)
+    with st.expander("¿Qué significa cada término?"):
+        for term, meaning in style.GLOSSARY.items():
+            st.markdown(f"**{term}.** {meaning}")
+
+
 def _tab_carry(art: Artifacts) -> None:
     st.subheader("Carry de funding: periodo de desarrollo")
-    st.caption("El holdout (2024-07-01 → 2026-09-30) sigue cerrado hasta verificar comisiones.")
+    st.caption(
+        "Resultados del periodo de desarrollo (hasta el 2024-06-30). La prueba final con datos "
+        "nunca vistos (holdout, 2024-07-01 → 2026-09-30) se abre una sola vez y con el titular."
+    )
     for hyp in ("H1", "H2"):
         summary = art.carry.get(hyp)
         if summary is None:
             _missing(art, f"carry {hyp}")
             continue
-        verdict = "pasa los 4 gates" if summary.get("passed") else "no pasa todos los gates"
-        st.markdown(f"#### {hyp}: {', '.join(summary.get('symbols', []))}: **{verdict}**")
+        verdict = style.status(bool(summary.get("passed")))
+        st.markdown(f"#### {hyp} · {', '.join(summary.get('symbols', []))} · {verdict}")
         left, mid, right = st.columns(3)
-        left.metric("Configuración elegida (CPCV)", summary.get("selected", "?"))
-        mid.metric("PBO", f"{summary.get('pbo', float('nan')):.1%}")
-        right.metric("Deflated Sharpe", f"{summary.get('dsr', float('nan')):.3f}")
+        left.metric("Configuración elegida", summary.get("selected", "?"))
+        mid.metric("PBO", style.pct(summary.get("pbo")), help=style.GLOSSARY["PBO"])
+        right.metric(
+            "Deflated Sharpe",
+            style.number(summary.get("dsr"), 3),
+            help=style.GLOSSARY["Deflated Sharpe"],
+        )
         st.dataframe(gates_table(summary), hide_index=True, width="stretch")
         st.dataframe(performance_table(summary), hide_index=True, width="stretch")
         returns = art.carry_returns.get(hyp)
         if returns is not None:
             curve = equity_curves(returns, str(summary.get("selected")))
             if curve.height:
-                st.line_chart(curve, x="fecha", y=str(summary.get("selected")))
+                _growth_chart(curve, str(summary.get("selected")))
 
 
 def _tab_model(art: Artifacts) -> None:
@@ -322,7 +403,32 @@ def _live_curve(view: PaperView, cagr: float | None) -> None:
                 [float(start.equity) * (1 + cagr) ** (d / 365.25) for d in days],
             )
         )
-    st.line_chart(curve, x="hora (UTC)")
+    long = curve.unpivot(index="hora (UTC)", variable_name="serie", value_name="capital (USD)")
+    chart = (
+        alt.Chart(long)
+        .mark_line()
+        .encode(
+            x=alt.X("hora (UTC):T", title=None, axis=alt.Axis(format="%d %b")),
+            y=alt.Y("capital (USD):Q", scale=alt.Scale(zero=False), title="Capital (USD)"),
+            color=alt.Color(
+                "serie:N",
+                sort=["paper trading", "esperado según el backtest"],
+                scale=alt.Scale(range=[style.BRAND, style.NEUTRAL]),
+            ),
+            strokeDash=alt.StrokeDash(
+                "serie:N",
+                sort=["paper trading", "esperado según el backtest"],
+                scale=alt.Scale(range=[[1, 0], [5, 4]]),
+            ),
+            tooltip=[
+                alt.Tooltip("hora (UTC):T", format="%d %b %Y %H:%M"),
+                "serie:N",
+                alt.Tooltip("capital (USD):Q", format=",.2f"),
+            ],
+        )
+        .properties(height=280)
+    )
+    st.altair_chart(chart, width="stretch", theme=None)
     if cagr is not None:
         st.caption(
             f"«Esperado» es el CAGR de la configuración elegida en el periodo de desarrollo "
@@ -411,15 +517,16 @@ def _tab_live(
         )
     equity, initial = view.equity or 0, view.initial_equity or 0
     cols = st.columns(5)
-    cols[0].metric("Equity", f"{equity:,.2f} USD")
-    cols[1].metric("PnL acumulado", f"{equity - initial:+,.2f} USD")
-    cols[2].metric("Funding neto", f"{view.funding:+,.4f} USD")
+    cols[0].metric("Capital", style.usd(float(equity)))
+    cols[1].metric("Ganancia acumulada", style.usd(float(equity - initial), signed=True))
+    cols[2].metric("Funding cobrado", style.usd(float(view.funding), signed=True))
     cols[3].metric(
         "Comisiones y slippage",
-        f"{view.costs:,.4f} USD",
-        help=f"Comisiones {view.fees:,.4f} USD + slippage {view.slippage:,.4f} USD",
+        style.usd(float(view.costs)),
+        help=f"Comisiones {style.usd(float(view.fees), 4)} + slippage "
+        f"{style.usd(float(view.slippage), 4)}",
     )
-    cols[4].metric("Drawdown", f"{view.drawdown:.2%}")
+    cols[4].metric("Peor caída", style.pct(float(view.drawdown), 2))
     _live_status(paths, max_age_minutes)
     _live_curve(view, _expected_cagr(art))
     _live_tables(view)
@@ -550,20 +657,22 @@ def _sidebar_tour() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="PrometheusQuant", layout="wide")
+    st.set_page_config(page_title="PrometheusQuant", page_icon="📈", layout="wide")
+    style.enable_altair_theme()
     fair = tour.is_fair_mode(st.query_params.to_dict())
     if fair:
         st.markdown(tour.FAIR_CSS, unsafe_allow_html=True)
         _sidebar_tour()
-    st.title("PrometheusQuant: tablero de investigación")
+    st.title("PrometheusQuant: tablero de investigación")  # el e2e busca este título
     settings = load_settings()
     data_dir = settings.data_dir
     art = load_artifacts(data_dir)
     st.caption(f"Artefactos leídos de `{data_dir}` (solo lectura).")
     tabs = st.tabs(LABELS)
-    for tab, render in zip(
-        tabs[:4], (_tab_data, _tab_carry, _tab_model, _tab_simulation), strict=True
-    ):
+    max_age = settings.paper_heartbeat_max_age_minutes
+    with tabs[0]:
+        _tab_home(data_dir, art, max_age)
+    for tab, render in zip(tabs[1:4], (_tab_carry, _tab_model, _tab_simulation), strict=True):
         with tab:
             render(art)
     with tabs[4]:
@@ -571,7 +680,6 @@ def main() -> None:
     with tabs[5]:
         _tab_nowcast(data_dir)
     with tabs[6]:
-        max_age = settings.paper_heartbeat_max_age_minutes
         if fair:  # se redibuja sola, sin recargar el resto del tablero
             st.fragment(run_every=tour.LIVE_REFRESH)(_tab_live)(
                 data_dir, art, max_age, auto_refresh=True
@@ -580,6 +688,8 @@ def main() -> None:
             _tab_live(data_dir, art, max_age)
     with tabs[7]:
         _tab_portfolio(data_dir, art)
+    with tabs[8]:
+        _tab_data(art)
 
 
 main()
