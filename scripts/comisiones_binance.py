@@ -128,7 +128,10 @@ class Informe:
             std = datos["standardCommission"]
             desc = datos.get("discount", {})
             bnb = (
-                f"BNB {porcentaje(desc['discount'])} de descuento"
+                # `discount` es el multiplicador que se paga con BNB (0.75 = se paga el 75 %),
+                # no la fracción descontada (doc de Query Commission Rates).
+                f"con BNB se paga el {porcentaje(desc['discount'])}: "
+                f"{porcentaje(1 - Decimal(desc['discount']))} de descuento"
                 if desc.get("enabledForAccount") and desc.get("enabledForSymbol")
                 else "sin descuento BNB activo"
             )
