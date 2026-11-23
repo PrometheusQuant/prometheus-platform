@@ -107,6 +107,8 @@ nav:
       - "Carry · decisión": estrategias/01-carry/decision.md
       - "Tendencia · pre-registro": estrategias/02-tendencia/pre-registro.md
       - "Tendencia · evaluación": estrategias/02-tendencia/evaluacion.md
+      - "Tendencia · holdout": estrategias/02-tendencia/holdout.md
+      - "Tendencia · decisión": estrategias/02-tendencia/decision.md
       - "Momentum transversal · pre-registro": estrategias/03-momentum-transversal/pre-registro.md
   - Compliance:
       - compliance/README.md
