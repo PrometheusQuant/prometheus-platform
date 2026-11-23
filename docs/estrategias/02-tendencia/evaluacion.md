@@ -105,3 +105,8 @@ ver el resultado, sería ajustar el método a los datos.
 - **Abrir el holdout es irreversible. Lo hace el titular presente**, y su resultado irá en
   `holdout.md`. Dadas las fragilidades 1 a 3, el holdout es la única prueba fuera de muestra que
   tiene esta estrategia.
+
+## Resultado del holdout (2026-11-23)
+
+**No pasa:** Sharpe 0,29 y CAGR 2,8 %, frente a los umbrales de 0,5 y 4 %. T1 se descarta. Ver
+[holdout.md](holdout.md) y [decision.md](decision.md).

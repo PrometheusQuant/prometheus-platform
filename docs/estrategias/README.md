@@ -19,4 +19,4 @@ El commit del `pre-registro.md` es la evidencia fechada de que la hipótesis no 
 | Estrategia | Pre-registro | Evaluación | Holdout | Decisión |
 |---|---|---|---|---|
 | 1 · Carry de funding con entrada por umbral | [2026-10-23](01-carry/pre-registro.md) (PQ-18), enmiendas 1 y 2 | [2026-10-30](01-carry/evaluacion.md) | Pendiente (PQ-17) | [H1 descartada, H2 a holdout](01-carry/decision.md) |
-| 2 · Tendencia con volatility targeting (BTC/ETH) | [2026-11-06](02-tendencia/pre-registro.md) (PQ-64) | [2026-11-23](02-tendencia/evaluacion.md) (PQ-68): T1 pasa los gates, T2 descartada | Pendiente: lo abre el titular | Pendiente del holdout |
+| 2 · Tendencia con volatility targeting (BTC/ETH) | [2026-11-06](02-tendencia/pre-registro.md) (PQ-64) | [2026-11-23](02-tendencia/evaluacion.md) (PQ-68): T1 pasa los gates, T2 descartada | [2026-11-23](02-tendencia/holdout.md): **no pasa** (Sharpe 0,29) | [Descartada](02-tendencia/decision.md) |
