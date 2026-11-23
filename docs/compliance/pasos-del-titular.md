@@ -23,6 +23,7 @@ escribir **«listo, paso N»** en el chat de Claude: el agente comprueba y conti
 | [6](#paso-6-hacer-publica-la-imagen-del-dashboard-pq-81) | Hacer pública la imagen del dashboard en GHCR | 2 min | El despliegue en la VM sin credenciales (PQ-57) |
 | [7](#paso-7-mantener-la-laptop-encendida) | Mantener la laptop encendida | 5 min | Que el paper trading siga 24/7 mientras no hay VM |
 | [8](#paso-8-opcional-revisar-los-pre-registros) | Opcional: revisar los pre-registros | 20 min | Nada; da tranquilidad antes de las ejecuciones que cuentan en N |
+| [9](#paso-9-verificacion-externa-de-disponibilidad-pq-97) | Cuenta gratuita de Healthchecks.io | 10 min | La alerta si la VM o la laptop dejan de responder (PQ-97) |
 
 Sin el paso 1 no se puede correr ninguna evaluación de investigación: cada una cuenta en N y no
 tiene vuelta atrás.
@@ -335,6 +336,31 @@ qué criterio. Están fijados antes de ver resultados:
 
 Si quieres cambiar algo, **dilo antes de la primera ejecución**: después ya cuenta como una
 enmienda con ensayos nuevos en N.
+
+## Paso 9. Verificación externa de disponibilidad (PQ-97)
+
+Una alerta que llega aunque la VM o la laptop se apaguen del todo. El vigilante hace un «ping»
+cada 1 o 2 minutos a Healthchecks.io; si los pings dejan de llegar, Healthchecks avisa al grupo de
+Telegram. Es gratis (hasta 20 verificaciones) y no abre ningún puerto.
+
+1. Crea una cuenta en <https://healthchecks.io> (con tu correo o GitHub).
+2. En el proyecto, **Add Check** con:
+    - **Name:** `paper trading PrometheusQuant`;
+    - **Period:** 5 minutes;
+    - **Grace Time:** 10 minutes.
+
+    Así avisa si pasan 15 minutos sin noticias.
+3. **Integrations → Telegram → Add Integration**. Te da un enlace para agregar su bot al grupo
+   **«PrometheusQuant Alertas»**; agrégalo y confirma desde el grupo.
+4. Copia la **ping URL** del check (empieza con `https://hc-ping.com/`). **No la pegues en el
+   chat**: es un secreto. Ponla en el `.env` de `~/code/prometheus-platform`:
+
+    ```bash
+    PQ_HEALTHCHECK_URL=https://hc-ping.com/...
+    ```
+
+5. Escribe «listo, paso 9». El agente reinicia el vigilante y comprueba que el check pase a
+   *up* en Healthchecks, sin leer la URL.
 
 ## Lo que no necesita nada tuyo
 

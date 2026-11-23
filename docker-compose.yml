@@ -1,7 +1,8 @@
 # Dashboard de solo lectura (PQ-34):  docker compose up --build  ->  http://127.0.0.1:8501
-# Observabilidad (PQ-71):  docker compose --profile observability up -d
+# Observabilidad (PQ-71, PQ-97):
+#   docker compose --profile observability up -d prometheus alertmanager grafana loki alloy
 #   Prometheus, Alertmanager y Grafana en la red del host, escuchando solo en 127.0.0.1
-#   (Grafana :3000, Prometheus :9090, Alertmanager :9093). En la VM se llega por túnel SSH:
+#   (Grafana :3000, Prometheus :9090, Alertmanager :9093, Loki :3100). En la VM, por túnel SSH:
 #   docs/runbooks/observabilidad.md
 services:
   dashboard:
@@ -86,7 +87,47 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  loki:
+    image: grafana/loki:3.3.2
+    profiles: [observability]
+    network_mode: host          # escucha solo en 127.0.0.1:3100 (loki.yml)
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./deploy/observability/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    mem_limit: 256m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  alloy:                        # reemplaza a Promtail (obsoleto): lee los logs y los manda a Loki
+    image: grafana/alloy:v1.5.1
+    profiles: [observability]
+    network_mode: host
+    user: "473:473"             # el usuario alloy de la imagen: sin capacidades, root no entra a su carpeta
+    command:
+      - run
+      - --server.http.listen-addr=127.0.0.1:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./deploy/observability/alloy.alloy:/etc/alloy/config.alloy:ro
+      - ${PQ_LOG_DIR:-./data/logs}:/logs:ro   # un .log por proceso (runner, vigilante, bot)
+      - alloy-data:/var/lib/alloy/data
+    mem_limit: 128m
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   prometheus-data:
   alertmanager-data:
   grafana-data:
+  loki-data:
+  alloy-data:

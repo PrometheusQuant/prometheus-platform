@@ -79,6 +79,7 @@ from prometheus_platform.strategies.carry import H2_PARAMS
 if TYPE_CHECKING:
     from wsgiref.simple_server import WSGIServer
 
+    from prometheus_platform.adapters.uptime_ping import UptimePinger
     from prometheus_platform.api.paper.report import WeeklySummary
     from prometheus_platform.api.paper.weekly import Parity
 
@@ -839,15 +840,27 @@ def _paper_watchdog(args: argparse.Namespace, settings: Settings, notifier: Noti
         clock=SystemClock(),
         paths=PaperPaths(settings.data_dir / PAPER_DIR),
     )
+    pinger = _uptime_pinger(settings)
     try:
         while True:
             health = dog.check()
             print(f"runner de paper: {health.value}")
+            if pinger is not None:  # PQ-97: si los pings dejan de llegar, el servicio externo avisa
+                pinger.ping(healthy=health.value == "ok")
             if args.once:
                 return 0 if health.value == "ok" else 1
             time.sleep(args.interval)
     except KeyboardInterrupt:
         return 0
+
+
+def _uptime_pinger(settings: Settings) -> UptimePinger | None:
+    if settings.healthcheck_url is None:
+        return None
+    from prometheus_platform.adapters.uptime_ping import UptimePinger  # noqa: PLC0415
+
+    client = httpx.Client(timeout=httpx.Timeout(10.0, connect=5.0))
+    return UptimePinger(client, settings.healthcheck_url)
 
 
 def _paper_bot(args: argparse.Namespace, settings: Settings, notifier: Notifier | None) -> int:

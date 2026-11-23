@@ -1,0 +1,34 @@
+// Grafana Alloy (PQ-97): lee los logs JSON de los procesos de la plataforma y los manda a Loki.
+// Alloy reemplaza a Promtail, que Grafana declaró obsoleto. Los logs ya salen sin secretos:
+// structlog los pasa por redact_text (ops/logging.py) antes de escribirlos.
+
+local.file_match "pq" {
+  // runner.log, watchdog.log, bot.log...: uno por proceso, en PQ_LOG_DIR (montado en /logs)
+  path_targets = [{"__path__" = "/logs/*.log", "job" = "prometheusquant"}]
+  sync_period  = "15s"
+}
+
+loki.source.file "pq" {
+  targets    = local.file_match.pq.targets
+  forward_to = [loki.process.pq.receiver]
+}
+
+loki.process "pq" {
+  // Las líneas JSON de structlog traen level, component y event. Las que no son JSON (un print
+  // o un traceback) pasan igual, sin esas etiquetas.
+  stage.json {
+    expressions = {level = "level", component = "component"}
+  }
+
+  stage.labels {
+    values = {level = "", component = ""}
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://127.0.0.1:3100/loki/api/v1/push"
+  }
+}

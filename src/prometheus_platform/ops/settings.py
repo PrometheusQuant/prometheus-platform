@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     backup_age_recipient: str = ""
     backup_keep_days: int = Field(default=14, ge=1)
 
+    # Verificación externa de disponibilidad (PQ-97): URL de ping de Healthchecks.io o similar.
+    # El vigilante la llama en cada revisión; si deja de llegar, el servicio externo avisa.
+    healthcheck_url: SecretStr | None = None
+
     @field_validator("alert_timezone")
     @classmethod
     def _check_timezone(cls, value: str) -> str:
@@ -86,6 +90,15 @@ class Settings(BaseSettings):
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise ValueError(f"Zona horaria desconocida: {value!r} (usa un nombre IANA)") from exc
+        return value
+
+    @field_validator("healthcheck_url")
+    @classmethod
+    def _check_healthcheck(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None or not value.get_secret_value().strip():
+            return None
+        if not value.get_secret_value().startswith("https://"):
+            raise ValueError("PQ_HEALTHCHECK_URL debe empezar con https://")
         return value
 
     @field_validator("research_lane")
