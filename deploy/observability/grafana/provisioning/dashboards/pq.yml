@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: prometheusquant
+    folder: PrometheusQuant
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false   # el tablero se cambia en el JSON del repo, no en la interfaz
+    options:
+      path: /var/lib/grafana/dashboards

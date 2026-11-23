@@ -77,6 +77,8 @@ from prometheus_platform.research.carry_evaluation import HYPOTHESES
 from prometheus_platform.strategies.carry import H2_PARAMS
 
 if TYPE_CHECKING:
+    from wsgiref.simple_server import WSGIServer
+
     from prometheus_platform.api.paper.report import WeeklySummary
     from prometheus_platform.api.paper.weekly import Parity
 
@@ -253,6 +255,12 @@ def _add_operations(commands: Commands) -> None:
         type=_decimal_arg,
         default=None,
         help="parte del capital del carry en (0, 1]; el resto queda en efectivo (PQ-83)",
+    )
+    run.add_argument(
+        "--metrics-port",
+        type=int,
+        default=0,
+        help="sirve /metrics para Prometheus en 127.0.0.1:PUERTO (PQ-71); 0 = no",
     )
     run.add_argument(
         "--exchange-cap",
@@ -909,9 +917,14 @@ def _paper_run(
                     market_data=args.market_data,
                 )
                 print(f"runner de paper: bróker simulado, {','.join(symbols)}, {config.describe()}")
-                healthy = runner.run(
-                    interval_seconds=args.interval, max_ticks=1 if args.once else None
-                )
+                metrics = _start_metrics(paths, args.metrics_port)
+                try:
+                    healthy = runner.run(
+                        interval_seconds=args.interval, max_ticks=1 if args.once else None
+                    )
+                finally:
+                    if metrics is not None:
+                        metrics.shutdown()
         except (ValueError, RunnerAlreadyRunningError) as exc:
             print(f"ERROR {exc}", file=sys.stderr)
             return 2
@@ -919,6 +932,17 @@ def _paper_run(
             print("runner detenido a mano (el estado queda en el diario y en el bróker)")
             return 0
     return 0 if healthy else 1
+
+
+def _start_metrics(paths: PaperPaths, port: int) -> WSGIServer | None:
+    """``/metrics`` del runner en 127.0.0.1 (PQ-71); ``None`` con el puerto 0."""
+    if port <= 0:
+        return None
+    from prometheus_platform.api.paper.metrics import serve_metrics  # noqa: PLC0415
+
+    server = serve_metrics(paths, port)
+    print(f"métricas en http://127.0.0.1:{server.server_address[1]}/metrics")
+    return server
 
 
 def _exchange_caps(items: Sequence[str]) -> dict[Venue, Decimal]:

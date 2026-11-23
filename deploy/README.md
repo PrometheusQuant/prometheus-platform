@@ -13,7 +13,7 @@ código (*infrastructure as code*). La infraestructura crece por fases de presup
 deploy/
 ├── compose/        # docker compose con perfiles: research, pipeline, live, observability
 ├── systemd/        # unidades para el proceso live en el VPS
-├── observability/  # configuración de Prometheus, Grafana (dashboards) y alertas
+├── observability/  # Prometheus, reglas de alerta, Alertmanager → Telegram y tablero de Grafana (PQ-71)
 └── runbooks/ →     # los procedimientos de operación viven en docs/runbooks/
 ```
 

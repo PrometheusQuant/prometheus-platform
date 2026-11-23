@@ -1,0 +1,57 @@
+# Reglas de alerta (PQ-71). Los umbrales son los mismos que usan el runner y el vigilante
+# (ops/settings.py): si cambian allí, cambian aquí. Alertmanager las reenvía a Telegram.
+groups:
+  - name: paper-trading
+    rules:
+      - alert: RunnerSinMetricas
+        expr: up{job="pq-runner"} == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Prometheus no puede leer /metrics del runner desde hace 5 min"
+          runbook: "docs/runbooks/observabilidad.md"
+
+      - alert: HeartbeatViejo  # PQ_PAPER_HEARTBEAT_MAX_AGE_MINUTES = 10
+        expr: time() - pq_paper_heartbeat_timestamp_seconds > 600
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "El runner no escribe heartbeat desde hace más de 10 min"
+          runbook: "docs/runbooks/paper-trading.md"
+
+      - alert: CicloConFallos
+        expr: pq_paper_heartbeat_ok == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "El último ciclo del runner terminó con fallos durante 10 min"
+          runbook: "docs/runbooks/paper-trading.md"
+
+      - alert: KillSwitchActivo
+        expr: pq_paper_kill_switch_active == 1
+        labels: {severity: critical}
+        annotations:
+          summary: "El kill-switch global está activado"
+          runbook: "docs/runbooks/kill-switch.md"
+
+      - alert: CoberturaDesbalanceada  # PQ_RISK_MAX_HEDGE_IMBALANCE = 0,15
+        expr: pq_paper_hedge_imbalance_ratio > 0.15
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "Desbalance spot/perp de {{ $labels.symbol }} mayor que 15 % durante 15 min"
+          runbook: "docs/runbooks/paper-trading.md"
+
+      - alert: DrawdownAlto  # PQ_PAPER_DRAWDOWN_ALERT = 0,03
+        expr: pq_paper_drawdown_ratio > 0.03
+        labels: {severity: warning}
+        annotations:
+          summary: "Caída del paper mayor que 3 % desde el máximo"
+          runbook: "docs/runbooks/incidentes.md"
+
+      - alert: RechazosDeRiesgo
+        expr: increase(pq_paper_risk_rejections_total[1h]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "El riesgo pre-trade rechazó órdenes ({{ $labels.rule }}) en la última hora"
+          runbook: "docs/runbooks/paper-trading.md"
