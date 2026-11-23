@@ -54,7 +54,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from prometheus_platform.api.paper.executor import Account, StrategyExecutor
-from prometheus_platform.api.paper.report import build_view, daily_summary
+from prometheus_platform.api.paper.report import build_view, daily_summary, weekly_summary
 from prometheus_platform.domain.alerts import Alert, AlertSeverity
 from prometheus_platform.domain.carry_rules import CarryAction, CarryParams, needs_rebalance
 from prometheus_platform.domain.events import (
@@ -100,6 +100,7 @@ from prometheus_platform.strategies.carry import (
 )
 
 ZERO = Decimal(0)
+SUNDAY = 6  # date.weekday() del domingo: al terminar, se envía el resumen semanal (PQ-85)
 # Enmienda 1.1 del pre-registro: las órdenes se ejecutan en la vela que abre en t + 1 h.
 EXECUTION_DELAY = timedelta(hours=1)
 log = get_logger(component="paper_runner")
@@ -887,13 +888,16 @@ class PaperRunner:
     def _roll_day(self, now: datetime, equity: Decimal) -> None:
         """Equity de referencia de la pérdida diaria: la primera valoración del día UTC.
 
-        Al cambiar de día se envía el resumen del día anterior (alerta INFO, PQ-55).
+        Al cambiar de día se envía el resumen del día anterior (alerta INFO, PQ-55) y, si ese día
+        era domingo, el de la semana ISO que terminó (PQ-85).
         """
         if self._day != now.date() or self._day_start is None:
             finished = self._day
             self._day, self._day_start = now.date(), equity
             if finished is not None and finished < now.date():
                 self._send_daily_summary(finished, now)
+                if finished.weekday() == SUNDAY:
+                    self._send_weekly_summary(finished - timedelta(days=SUNDAY), now)
 
     def _send_daily_summary(self, day: date, now: datetime) -> None:
         if self._notifier is None:
@@ -911,6 +915,23 @@ class PaperRunner:
             )
         except Exception as exc:  # el resumen nunca detiene el ciclo
             log.error("paper_daily_summary_failed", error=type(exc).__name__)
+
+    def _send_weekly_summary(self, monday: date, now: datetime) -> None:
+        if self._notifier is None:
+            return
+        try:
+            summary = weekly_summary(self._journal.replay(), monday)
+            self._notifier.notify(
+                Alert(
+                    severity=AlertSeverity.INFO,
+                    title=f"resumen semanal del paper trading ({self._broker.name})",
+                    occurred_at=now,
+                    environment=self._environment,
+                    details=summary.details(),
+                )
+            )
+        except Exception as exc:  # el resumen nunca detiene el ciclo
+            log.error("paper_weekly_summary_failed", error=type(exc).__name__)
 
     def _watch_drawdown(self, equity: Decimal) -> None:
         """Alerta ERROR al cruzar el umbral; se rearma al recuperar la mitad (sin repetirla)."""

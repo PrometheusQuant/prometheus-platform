@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -280,3 +280,149 @@ def read_heartbeat(path: Path) -> dict[str, Any] | None:
     except (OSError, ValueError, KeyError, TypeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+# --- informe semanal (PQ-85) ----------------------------------------------------------------
+
+WEEK = timedelta(days=7)
+
+
+def iso_week(monday: date) -> str:
+    """Etiqueta ISO de la semana, p. ej. ``2026-W47``."""
+    year, week, _ = monday.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def parse_iso_week(text: str) -> date:
+    """El lunes de una semana ``AAAA-Www``."""
+    try:
+        year, _, week = text.strip().upper().partition("-W")
+        return date.fromisocalendar(int(year), int(week), 1)
+    except ValueError as exc:
+        raise ValueError(f"semana {text!r}: usa AAAA-Www, p. ej. 2026-W47") from exc
+
+
+def last_complete_week(now: datetime) -> date:
+    """El lunes de la última semana ISO (lunes a domingo, UTC) que ya terminó."""
+    today = now.astimezone(UTC).date()
+    return today - timedelta(days=today.weekday()) - WEEK
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyWeek:
+    """Lo que hizo una estrategia en un exchange durante la semana."""
+
+    strategy: str
+    exchange: str
+    pnl: Decimal
+    funding: Decimal
+    costs: Decimal
+    exposure: Decimal  # nocional bruto abierto al cierre de la semana
+
+
+@dataclass(frozen=True, slots=True)
+class WeeklySummary:
+    week: str
+    start: date  # lunes
+    end: date  # domingo
+    orders: int
+    funding: Decimal
+    fees: Decimal
+    slippage: Decimal
+    equity_start: Decimal | None  # cierre de la semana anterior (o primera valoración)
+    equity_end: Decimal | None
+    max_drawdown: Decimal  # de pico a valle dentro de la semana
+    breaches: int
+    kill_trips: int
+    strategies: tuple[StrategyWeek, ...]
+    curve: tuple[tuple[datetime, Decimal], ...]
+
+    @property
+    def change(self) -> Decimal | None:
+        if not self.equity_start or self.equity_end is None:
+            return None
+        return self.equity_end / self.equity_start - 1
+
+    def details(self) -> dict[str, str]:
+        change = self.change
+        trips = "1 vez" if self.kill_trips == 1 else f"{self.kill_trips} veces"
+        details = {
+            "semana": f"{self.week} ({self.start} a {self.end}, UTC)",
+            "órdenes ejecutadas": str(self.orders),
+            "funding neto": f"{self.funding:.4f} USD",
+            "comisiones": f"{self.fees:.4f} USD",
+            "slippage": f"{self.slippage:.4f} USD",
+            "equity al cierre": f"{self.equity_end:.2f} USD" if self.equity_end else "n/d",
+            "variación semanal": f"{change:+.3%}" if change is not None else "n/d",
+            "caída máxima en la semana": f"{self.max_drawdown:.2%}",
+            "violaciones de riesgo": str(self.breaches),
+            "kill-switch activado": trips,
+        }
+        for row in self.strategies:
+            details[f"PnL {row.strategy} ({row.exchange})"] = f"{row.pnl:+.2f} USD"
+        return details
+
+
+def _strategy_weeks(before: PaperView, after: PaperView) -> tuple[StrategyWeek, ...]:
+    """PnL de la semana = acumulado al cierre menos acumulado al inicio, por estrategia."""
+    start = {(r.strategy, r.exchange): r for r in strategy_breakdown(before)}
+    rows = []
+    for row in strategy_breakdown(after):
+        prev = start.get((row.strategy, row.exchange))
+        rows.append(
+            StrategyWeek(
+                row.strategy,
+                row.exchange,
+                row.pnl - (prev.pnl if prev else ZERO),
+                row.funding - (prev.funding if prev else ZERO),
+                row.costs - (prev.costs if prev else ZERO),
+                row.exposure,
+            )
+        )
+    return tuple(rows)
+
+
+def weekly_summary(events: Iterable[DomainEvent], monday: date) -> WeeklySummary:
+    """Cifras de la semana ISO que empieza en ``monday``, a partir de los eventos del diario.
+
+    Todo sale de comparar dos vistas del diario: al inicio del lunes y al final del domingo
+    (UTC). Así las cifras de la semana cuadran con las acumuladas del dashboard.
+    """
+    opens = datetime.combine(monday, time(), UTC)
+    closes = opens + WEEK
+    history = [e for e in events if e.occurred_at < closes]
+    before = build_view(e for e in history if e.occurred_at < opens)
+    after = build_view(history)
+    inside = [v for v in after.valuations if v.occurred_at >= opens]
+    equity_start = before.equity or (inside[0].equity if inside else None)
+    curve: list[tuple[datetime, Decimal]] = (
+        [] if before.equity is None else [(opens, before.equity)]
+    )
+    curve += [(v.occurred_at, v.equity) for v in inside]
+    return WeeklySummary(
+        week=iso_week(monday),
+        start=monday,
+        end=monday + timedelta(days=6),
+        orders=len(after.fills) - len(before.fills),
+        funding=after.funding - before.funding,
+        fees=after.fees - before.fees,
+        slippage=after.slippage - before.slippage,
+        equity_start=equity_start,
+        equity_end=after.equity,
+        max_drawdown=_max_drawdown([equity for _, equity in curve]),
+        breaches=len(after.breaches) - len(before.breaches),
+        kill_trips=sum(
+            isinstance(e, KillSwitchTripped) for e in after.kill_events[len(before.kill_events) :]
+        ),
+        strategies=_strategy_weeks(before, after),
+        curve=tuple(curve),
+    )
+
+
+def _max_drawdown(values: Iterable[Decimal]) -> Decimal:
+    peak, worst = None, ZERO
+    for value in values:
+        peak = value if peak is None else max(peak, value)
+        if peak > 0:
+            worst = max(worst, 1 - value / peak)
+    return worst

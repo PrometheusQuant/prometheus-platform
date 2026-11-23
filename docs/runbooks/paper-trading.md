@@ -24,8 +24,9 @@ uv run pq paper run --capital 1000 --interval 60 --symbols SOLUSDT,BNBUSDT,XRPUS
 ## Vigilarlo
 
 - **Dashboard:** pestaña «¿Cómo va en vivo?» (`make dashboard`).
-- **Telegram:** kill-switch, pata sin cubrir, drawdown y resumen diario. Ver
+- **Telegram:** kill-switch, pata sin cubrir, drawdown, resumen diario y resumen semanal. Ver
   [alertas del paper trading](alertas.md#alertas-del-paper-trading-pq-55).
+- **Informe semanal en PDF:** ver [abajo](#informe-semanal-pq-85).
 - **Vigilante:** un proceso caído no puede avisar de su propia caída. Junto al runner, corre:
 
     ```bash
@@ -203,6 +204,44 @@ uv run pq report public          # escribe docs/resultados.md; no lo edites a ma
 
 Mientras no haya servidor se regenera a mano antes de cada demo. Con el servidor (PQ-57), un cron
 allí la regenerará y la subirá sola.
+
+## Informe semanal (PQ-85)
+
+Cada semana ISO (lunes a domingo, UTC) tiene dos salidas, y las dos salen de la misma función
+(`weekly_summary`), así que nunca dan cifras distintas:
+
+| Salida | Cuándo | Qué trae |
+|---|---|---|
+| Resumen semanal por Telegram | Solo: el runner lo envía al terminar el domingo UTC, después del resumen diario | Órdenes, funding, comisiones, slippage, equity al cierre, variación, caída máxima dentro de la semana, violaciones de riesgo, kill-switch y PnL por estrategia |
+| PDF (Quarto + Typst) | `pq paper weekly-report --pdf` | Lo mismo, con la curva de equity de la semana y la tabla por estrategia |
+
+```bash
+uv run pq paper weekly-report                       # entradas de la última semana terminada
+uv run pq paper weekly-report --pdf                 # y el PDF (necesita Quarto)
+uv run pq paper weekly-report --week 2026-W47 --pdf --send   # una semana concreta, y al grupo
+make informe-semanal                                # lo mismo que --pdf, para la última semana
+```
+
+Todo queda en `data/informes/paper/<AAAA-Www>/` (el PDF es `informe-paper-<AAAA-Www>.pdf`), fuera
+de `data/paper/` para no inflar los respaldos cifrados. Se puede regenerar cuando se quiera: el
+diario no cambia.
+
+- **Equity al inicio:** la del cierre de la semana anterior; si el runner arrancó durante la
+  semana, la primera valoración.
+- **PnL por estrategia:** el acumulado al cierre del domingo menos el acumulado al inicio del
+  lunes, con la misma fórmula que la pestaña de cartera del dashboard (PQ-84).
+- **`--send`:** con `--pdf` manda el PDF al grupo de alertas (`sendDocument`) con el resumen como
+  pie; sin `--pdf`, solo el resumen. Sin canal configurado sale con código 1.
+
+En el servidor (PQ-57), un cron lo envía cada lunes, cuando ya están las liquidaciones del domingo:
+
+```bash
+# los lunes a las 06:30 UTC; necesita Quarto instalado en el servidor
+30 6 * * 1 cd /ruta/prometheus-platform && uv run pq paper weekly-report --pdf --send >> ~/informe-semanal.log 2>&1
+```
+
+Mientras no haya servidor, el resumen por Telegram ya llega solo desde la laptop. El PDF se genera a
+mano con `make informe-semanal`.
 
 ## Limitaciones conocidas
 

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit mutation docs docs-build dashboard report poster e2e screenshots orquestador
+.PHONY: help setup lint format typecheck arch test check audit mutation docs docs-build dashboard report informe-semanal poster e2e screenshots orquestador
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -48,6 +48,9 @@ orquestador: ## Interfaz de Dagster en http://127.0.0.1:3000: assets del lakehou
 	mkdir -p data/.dagster
 	DAGSTER_HOME=$(CURDIR)/data/.dagster uv run dagster dev \
 		-m prometheus_platform.api.orquestacion.definitions -h 127.0.0.1 -p 3000
+
+informe-semanal: ## PDF del paper trading de la última semana ISO terminada (PQ-85)
+	uv run pq paper weekly-report --pdf
 
 report: ## Genera el informe ejecutivo en PDF desde los resultados (Quarto + Typst)
 	@command -v quarto >/dev/null || { echo "Falta Quarto: https://quarto.org/docs/get-started/"; exit 1; }

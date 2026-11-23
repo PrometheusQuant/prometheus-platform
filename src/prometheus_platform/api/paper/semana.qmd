@@ -1,0 +1,61 @@
+---
+title: "Informe semanal del paper trading"
+subtitle: "Semana {{< meta s.semana >}}: del {{< meta s.desde >}} al {{< meta s.hasta >}} (UTC)"
+author: "PrometheusQuant"
+date: today
+date-format: "D [de] MMMM [de] YYYY"
+lang: es
+metadata-files: [_semana.yml]
+language:
+  crossref-fig-title: "Figura"
+  crossref-tbl-title: "Tabla"
+format:
+  typst:
+    papersize: a4
+    margin:
+      x: 2cm
+      y: 2cm
+    fontsize: 10.5pt
+---
+
+::: {.callout-note}
+## Cómo se hizo este informe
+Ninguna cifra está escrita a mano. `pq paper weekly-report` lee el diario de eventos del paper
+trading y arma este documento. El resumen semanal de Telegram sale de la misma función, así que
+los dos dicen lo mismo. Es *paper trading*: bróker {{< meta s.broker >}}, sin dinero real.
+:::
+
+# Resumen de la semana
+
+| Indicador | Valor |
+|---|--:|
+| Equity al inicio | {{< meta s.equity_inicio >}} |
+| Equity al cierre | {{< meta s.equity_cierre >}} |
+| Variación semanal | {{< meta s.variacion >}} |
+| Caída máxima dentro de la semana | {{< meta s.caida_maxima >}} |
+| Órdenes ejecutadas | {{< meta s.ordenes >}} |
+| Funding neto cobrado | {{< meta s.funding >}} |
+| Comisiones | {{< meta s.comisiones >}} |
+| Slippage | {{< meta s.slippage >}} |
+| Violaciones de límites de riesgo | {{< meta s.violaciones >}} |
+| Kill-switch activado | {{< meta s.kill_switch >}} |
+
+: Cifras de la semana. La equity al inicio es la del cierre de la semana anterior.
+
+::: {.content-visible when-meta="s.tiene_curva"}
+![Equity del paper trading durante la semana (USD).](_img/equity.png)
+:::
+
+# Por estrategia
+
+El PnL de la semana es el acumulado al cierre del domingo menos el acumulado al inicio del lunes:
+incluye el funding, las comisiones y el cambio de valor de las posiciones abiertas. El slippage ya
+va dentro del precio de cada fill.
+
+{{< include _tablas/estrategias.md >}}
+
+# Qué revisar
+
+- Si hubo violaciones de riesgo o se activó el kill-switch, el detalle está en el diario
+  (`data/paper/diario.jsonl`) y en los runbooks de incidentes.
+- La comparación con lo esperado por el backtest está en la pestaña de cartera del dashboard.
