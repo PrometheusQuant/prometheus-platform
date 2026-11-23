@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -276,6 +277,16 @@ def _add_operations(commands: Commands) -> None:
     restore.add_argument("archive", type=Path, help="paper-<fecha>.tar.gz.age")
     restore.add_argument("--identity", type=Path, required=True, help="clave privada age")
     restore.add_argument("--force", action="store_true", help="reemplaza el diario existente")
+    weekly = paper_actions.add_parser(
+        "weekly-report", help="Informe semanal del paper trading: PDF y envío a Telegram (PQ-85)"
+    )
+    weekly.add_argument(
+        "--week", default="", help="semana ISO AAAA-Www; por defecto, la última ya terminada"
+    )
+    weekly.add_argument("--pdf", action="store_true", help="genera el PDF con Quarto")
+    weekly.add_argument(
+        "--send", action="store_true", help="envía el PDF (o, sin --pdf, el resumen) al canal"
+    )
 
     alert = commands.add_parser("alert", help="Canal de alertas (PQ-38)")
     alert_actions = alert.add_subparsers(dest="action", required=True)
@@ -779,6 +790,60 @@ def _paper_backup(args: argparse.Namespace, settings: Settings, notifier: Notifi
     return 0
 
 
+def _paper_weekly_report(
+    args: argparse.Namespace, settings: Settings, notifier: Notifier | None
+) -> int:
+    from prometheus_platform.adapters.notifiers import TelegramNotifier  # noqa: PLC0415
+    from prometheus_platform.api.paper import weekly  # noqa: PLC0415
+    from prometheus_platform.api.paper.report import (  # noqa: PLC0415
+        build_view,
+        last_complete_week,
+        parse_iso_week,
+        weekly_summary,
+    )
+
+    now = SystemClock().now()
+    try:
+        monday = parse_iso_week(args.week) if args.week else last_complete_week(now)
+    except ValueError as exc:
+        print(f"ERROR {exc}", file=sys.stderr)
+        return 2
+    if args.send and notifier is None:
+        print(
+            "ERROR sin canal: configura PQ_TELEGRAM_BOT_TOKEN y PQ_TELEGRAM_CHAT_ID",
+            file=sys.stderr,
+        )
+        return 1
+    events = list(JsonlEventJournal(PaperPaths(settings.data_dir / PAPER_DIR).journal).replay())
+    summary = weekly_summary(events, monday)
+    out = settings.data_dir / "informes" / "paper" / summary.week
+    weekly.build_inputs(summary, out, build_view(events).broker)
+    print(f"entradas del informe {summary.week} en {out}")
+    pdf = None
+    if args.pdf:
+        try:
+            pdf = weekly.render_pdf(summary, out)
+        except (weekly.WeeklyReportError, OSError, subprocess.SubprocessError) as exc:
+            print(f"ERROR {exc}", file=sys.stderr)
+            return 2
+        print(f"PDF en {pdf}")
+    if not args.send or notifier is None:
+        return 0
+    alert = Alert(
+        severity=AlertSeverity.INFO,
+        title=f"informe semanal del paper trading {summary.week}",
+        occurred_at=now,
+        environment=settings.environment.value,
+        details=summary.details(),
+    )
+    if pdf is not None and isinstance(notifier, TelegramNotifier):
+        delivered = notifier.send_document(pdf, alert.render(settings.alert_tz))
+    else:
+        delivered = notifier.notify(alert)
+    print(f"enviado: {'sí' if delivered else 'no'}")
+    return 0 if delivered else 1
+
+
 def _paper_run(
     args: argparse.Namespace, settings: Settings, notifier: Notifier | None = None
 ) -> int:
@@ -853,6 +918,7 @@ def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | No
         "watchdog": _paper_watchdog,
         "bot": _paper_bot,
         "backup": _paper_backup,
+        "weekly-report": _paper_weekly_report,
     }
     if args.action in processes:
         return processes[args.action](args, settings, notifier)

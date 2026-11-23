@@ -1,7 +1,8 @@
 """Adaptadores del puerto ``Notifier``: consola y Telegram (PQ-38).
 
-Telegram usa la Bot API (``sendMessage``). El token va en la URL, así que **nunca** se escribe el
-texto de una excepción de httpx (podría contenerla): solo el tipo de error o el código HTTP.
+Telegram usa la Bot API (``sendMessage``; ``sendDocument`` para el informe semanal, PQ-85). El
+token va en la URL, así que **nunca** se escribe el texto de una excepción de httpx (podría
+contenerla): solo el tipo de error o el código HTTP.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import sys
 from datetime import tzinfo
+from pathlib import Path
 from typing import TextIO
 
 import httpx
@@ -20,6 +22,7 @@ from prometheus_platform.ops.settings import Environment, Settings
 
 TELEGRAM_API = "https://api.telegram.org"
 TELEGRAM_MAX_CHARS = 4096
+TELEGRAM_MAX_CAPTION = 1024
 
 
 class ConsoleNotifier:
@@ -66,6 +69,29 @@ class TelegramNotifier:
         }
         try:
             response = self._client.post(url, json=payload)
+        except httpx.HTTPError as exc:
+            self._warn(f"error de red ({type(exc).__name__})")
+            return False
+        if response.status_code != httpx.codes.OK:
+            self._warn(f"HTTP {response.status_code}")
+            return False
+        return True
+
+    def send_document(self, path: Path, caption: str) -> bool:
+        """Envía un archivo (el PDF semanal) al mismo chat. Como ``notify``, nunca lanza."""
+        url = f"{TELEGRAM_API}/bot{self._token.get_secret_value()}/sendDocument"
+        try:
+            content = path.read_bytes()
+        except OSError as exc:
+            self._warn(f"no se pudo leer el documento ({type(exc).__name__})")
+            return False
+        try:
+            response = self._client.post(
+                url,
+                data={"chat_id": self._chat_id, "caption": caption[:TELEGRAM_MAX_CAPTION]},
+                files={"document": (path.name, content, "application/pdf")},
+                timeout=httpx.Timeout(30.0, connect=3.0),
+            )
         except httpx.HTTPError as exc:
             self._warn(f"error de red ({type(exc).__name__})")
             return False

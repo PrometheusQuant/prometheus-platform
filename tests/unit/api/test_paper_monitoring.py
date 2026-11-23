@@ -119,7 +119,7 @@ def test_daily_summary_is_sent_when_the_utc_day_changes(rig: Rig) -> None:
     rig.at(T0 + timedelta(days=1, minutes=1))
     runner.tick()
 
-    (summary,) = notifier.alerts
+    summary, _weekly = notifier.alerts  # T0 es domingo: también va el semanal (PQ-85)
     assert summary.severity is AlertSeverity.INFO
     assert summary.details["día (UTC)"] == T0.date().isoformat()
     assert summary.details["órdenes ejecutadas"] == "2"

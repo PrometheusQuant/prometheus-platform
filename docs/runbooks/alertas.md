@@ -64,6 +64,7 @@ por el navegador:
 | Ciclo con fallos (API, un símbolo, un hueco) | ERROR | `pq paper watchdog` y `paper_symbol_failed` |
 | Drawdown mayor que `PQ_PAPER_DRAWDOWN_ALERT` | ERROR | `paper_drawdown`, una vez por cruce; se rearma al recuperar la mitad |
 | Resumen diario: órdenes, funding, comisiones, slippage, equity | INFO | El runner, al cambiar el día UTC |
+| Resumen semanal: lo mismo para la semana ISO, más la caída máxima, el kill-switch y el PnL por estrategia | INFO | El runner, al terminar el domingo UTC ([informe semanal](paper-trading.md#informe-semanal-pq-85)) |
 | El runner volvió a reportar | INFO | `pq paper watchdog` |
 
 Las alertas INFO no salen de los logs: el runner y el vigilante las envían directamente al canal.
