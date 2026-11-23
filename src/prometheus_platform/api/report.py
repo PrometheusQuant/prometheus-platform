@@ -303,7 +303,7 @@ def build_report_inputs(data_dir: Path, repo_root: Path, out_dir: Path) -> list[
     for hyp in ("H1", "H2"):
         summary = art.carry.get(hyp)
         text = (
-            to_markdown(gates_table(summary), {"valor": "num"})
+            to_markdown(gates_table(summary), {})  # la tabla ya viene formateada (PQ-124)
             if summary
             else pending.format(f"carry {hyp}")
         )

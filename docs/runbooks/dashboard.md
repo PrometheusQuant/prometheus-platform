@@ -30,7 +30,7 @@ Para la pantalla grande de la feria, abre **<http://localhost:8501/?modo=feria>*
 | Paso | Sección del pitch | Pestaña |
 |---|---|---|
 | 1 | El problema | (el título del tablero) |
-| 2 | Por qué fallan los minoristas | ¿Qué pasó? Datos y calidad |
+| 2 | Por qué fallan los minoristas | Datos y calidad (técnico) |
 | 3 | Nuestra respuesta | ¿Funciona? Carry y gates |
 | 4 | La evidencia | ¿Qué riesgo hay? Simulación |
 | 5 | Demo en vivo | ¿Cómo va en vivo? Paper trading |

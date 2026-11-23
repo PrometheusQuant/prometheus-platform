@@ -116,8 +116,11 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
 
     assert quality_table(art.quality).row(0, named=True)["desde"] == "2020-09-13"
     h2 = art.carry["H2"]
-    assert gates_table(h2)["pasa"].to_list() == ["sí"]
-    assert performance_table(h2)["B1 siempre activo"][0] == 0.6
+    assert gates_table(h2)["resultado"].to_list() == ["✅ pasa"]
+    perf = performance_table(h2)
+    assert perf["métrica"][0] == "Sharpe"
+    assert perf["referencia: siempre invertido"][0] == "0,60"
+    assert perf["qué significa"][0].startswith("Rentabilidad por unidad de riesgo")
     curve = equity_curves(art.carry_returns["H2"], "k9-theta20")
     assert curve["k9-theta20"].to_list() == pytest.approx([1.01, 1.01 * 1.02])
     assert equity_curves(art.carry_returns["H2"], "no-existe").is_empty()
@@ -141,7 +144,7 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
 
 def app_labels() -> list[str]:
     return [
-        "¿Qué pasó? Datos y calidad",
+        "Inicio: ¿cómo va?",
         "¿Funciona? Carry y gates",
         "¿Qué predice? Modelo",
         "¿Qué riesgo hay? Simulación",
@@ -149,6 +152,7 @@ def app_labels() -> list[str]:
         "¿Qué predice hoy? Funding en vivo",
         "¿Cómo va en vivo? Paper trading",
         "¿Cómo se reparte? Cartera",
+        "Datos y calidad (técnico)",
     ]
 
 
@@ -165,7 +169,7 @@ def test_app_renders_every_tab_with_artifacts(lake: Path, monkeypatch: pytest.Mo
     assert not at.exception
     assert [t.label for t in at.tabs] == app_labels()
     metrics = {m.label: m.value for m in at.metric}
-    assert metrics["Configuración elegida (CPCV)"] == "k9-theta20"
+    assert metrics["Configuración elegida"] == "k9-theta20"
     assert metrics["Probabilidad de quiebra anual de equilibrio"] == "0.40%"
     assert any("carry H1" in i.value for i in at.info)
 
@@ -175,9 +179,9 @@ def test_app_degrades_gracefully_without_artifacts(
 ) -> None:
     at = run_app(tmp_path / "vacio", monkeypatch)
     assert not at.exception
-    # 6 artefactos faltantes + simulador y predicción sin silver + paper trading sin diario, y en la
-    # cartera: sin operaciones y sin bandas
-    assert len(at.info) == 11
+    # 6 artefactos faltantes + simulador y predicción sin silver + paper trading sin diario, en la
+    # cartera: sin operaciones y sin bandas, y en la portada: sin paper ni evaluaciones (PQ-124)
+    assert len(at.info) == 13
     assert not at.dataframe
 
 
@@ -271,8 +275,8 @@ def test_live_tab_shows_the_paper_trading_journal(
 
     assert not at.exception
     metrics = {m.label: m.value for m in at.metric}
-    assert metrics["Equity"] == "1,001.50 USD"
-    assert metrics["PnL acumulado"] == "+1.50 USD"
-    assert metrics["Funding neto"] == "+0.0600 USD"
+    assert metrics["Capital"] == "1.001,50 USD"
+    assert metrics["Ganancia acumulada"] == "+1,50 USD"
+    assert metrics["Funding cobrado"] == "+0,06 USD"
     assert any("Runner en marcha" in m.value for m in at.success)
     assert any("Kill-switch armado" in m.value for m in at.success)

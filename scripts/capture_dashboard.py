@@ -17,8 +17,8 @@ from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 
 VIEWPORT = {"width": 1440, "height": 2400}  # alto para que entre la pestaña entera
-TIMEOUT_MS = 30_000
-SETTLE_MS = 2_000  # los gráficos de Streamlit terminan de pintarse después del DOM
+TIMEOUT_MS = 180_000  # la primera carga entrena los modelos del simulador y la predicción
+SETTLE_MS = 5_000  # los gráficos se pintan después del DOM (el de paper tiene miles de puntos)
 
 
 def slug(text: str) -> str:
@@ -35,7 +35,7 @@ def capture(url: str, out: Path) -> list[Path]:
         page.set_default_timeout(TIMEOUT_MS)
         page.goto(url)
         tabs = page.get_by_role("tab")
-        expect(tabs.first).to_be_visible()
+        expect(tabs.first).to_be_visible(timeout=TIMEOUT_MS)
         for i, name in enumerate(tabs.all_inner_texts(), start=1):
             page.get_by_role("tab", name=name).click()
             page.wait_for_timeout(SETTLE_MS)
