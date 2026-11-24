@@ -239,8 +239,10 @@ ninguna métrica de la estrategia. Según §10, no suma a N.
     - el mercado abierto más antiguo con ≥ 1.000 USD empezó el 2025-07-03;
     - el mercado cerrado con `endDate` posterior a 2026-10 que empezó antes, el 2025-07-06.
 
-   Ninguno es anterior al corte (2025-06-30). **Para el holdout habrá que repetir la comprobación**
-   y, si hace falta, ingerir también los mercados abiertos.
+   Ninguno es anterior al corte (2025-06-30). La evidencia se reproduce con
+   `scripts/verificar_universo_polymarket.py`, que guarda las consultas y sus respuestas en JSON.
+   **Para el holdout habrá que repetir la comprobación** y, si hace falta, ingerir también los
+   mercados abiertos.
 3. **Regla 4, corregida:** `["0", "0"]` se excluye solo si esa resolución ya se conocía en el
    corte. Si llegó después, en el corte el mercado seguía sin resolver y se valora al corte, como
    cualquier otro.
@@ -281,18 +283,22 @@ ninguna métrica de la estrategia. Según §10, no suma a N.
 10. **Sensibilidades, por separado:** entrada 0, entrada +0,02, salida 0, sin comisión y volumen ≥
     10.000 USD.
 11. **«Peor racha de pérdidas»** se informa de dos formas:
-    - la racha más larga de días seguidos con PnL negativo;
+    - la racha más larga de días con PnL negativo; un día sin resoluciones (PnL 0) no la corta;
     - la caída máxima del PnL acumulado.
 12. **Calibración:** se calcula sobre las apuestas resueltas, con los mismos denominadores para
     precio y pago. Cuenta como acierto un pago completo (≥ 0,999); los pagos parciales se informan
     aparte.
 13. **Duración mínima:** el retorno por dólar-año cuenta al menos 1 día de tenencia por apuesta.
 14. **Orden del registro.** Primero se calculan las 6 configuraciones, sin mirarlas. Después se
-    registran juntas. Solo entonces se calculan los gates con el N resultante. Así un fallo a mitad
-    de camino no deja filas a medias que obliguen a repetir y sumar a N.
-15. **Correlación con el carry H2 y la tendencia T1:** solo cubre su periodo de desarrollo, que se
+    registran juntas. Solo entonces se calculan los gates con el N resultante. Así, un fallo de
+    datos a mitad de camino no deja filas a medias que obliguen a repetir y sumar a N. Lo que corre
+    después del registro (B1, sensibilidades, escritura) puede fallar todavía, pero solo con datos
+    que ya pasaron los mismos cálculos.
+15. **Mercados del universo sin historial de precios:** no pueden apostarse. Se cuentan y se
+    informan, para que una ingesta incompleta no pase inadvertida.
+16. **Correlación con el carry H2 y la tendencia T1:** solo cubre su periodo de desarrollo, que se
     solapa de 2023-01 a 2024-06. Sus filas del holdout, desde 2024-07-01, no se usan (KE-014).
-16. **Lectura de G2:** con 3 bandas, el PBO sin habilidad ronda los 2/3, porque el rango mediano
+17. **Lectura de G2:** con 3 bandas, el PBO sin habilidad ronda los 2/3, porque el rango mediano
     cuenta como sobreajuste. G2 es exigente y no se relaja.
 
 **Exposición previa adicional (§11):**

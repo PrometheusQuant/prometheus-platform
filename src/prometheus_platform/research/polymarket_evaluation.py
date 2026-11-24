@@ -125,13 +125,14 @@ FEE_RATES: Mapping[str, float] = {
 def fee_rate(fee_type: str | None, tags: Sequence[str]) -> float:
     """Tasa taker de la categoría (§6).
 
-    Primero ``feeType`` (``politics_fees`` → ``politics``). Si no está, las etiquetas; si varias
-    coinciden se toma la **más alta** (pesimista). Sin coincidencias: 0,07.
+    Primero el prefijo de ``feeType`` (``politics_fees``, ``crypto_fees_v2``…). Si no está, las
+    etiquetas; si varias coinciden se toma la **más alta** (pesimista). Sin coincidencias: 0,07.
     """
     if fee_type:
-        key = fee_type.lower().removesuffix("_fees")
-        if key in FEE_RATES:
-            return FEE_RATES[key]
+        key = fee_type.lower()
+        for prefix, rate in FEE_RATES.items():
+            if key.startswith(prefix):  # crypto_fees_v2, finance_prices_fees…
+                return rate
     matches = [FEE_RATES[t.lower()] for t in tags if t.lower() in FEE_RATES]
     return max(matches) if matches else UNKNOWN_FEE
 
@@ -425,6 +426,7 @@ def daily_pnl(bets: Sequence[Bet], period: Period = EVALUATION) -> pl.DataFrame:
 
 
 def _longest_losing_streak(pnl: np.ndarray) -> int:
+    """Días con PnL negativo seguidos; un día sin resoluciones (PnL 0) no corta la racha."""
     longest = current = 0
     for value in pnl:
         current = current + 1 if value < 0 else (current if value == 0 else 0)
@@ -487,6 +489,7 @@ class PolymarketEvaluation:
     correlations: dict[str, dict[str, Any]] = field(default_factory=dict)
     excluded: dict[str, int] = field(default_factory=dict)
     off_midnight: int = 0
+    without_history: int = 0  # mercados del universo sin ninguna instantánea válida
 
     @property
     def principal(self) -> ConfigResult:
@@ -662,6 +665,9 @@ def _evaluate(  # noqa: PLR0913 - keyword-only salvo los datos de la hipótesis
         },
         excluded=exclusions(markets, category),
         off_midnight=snapshots.off_midnight,
+        without_history=sum(
+            1 for t in pool["token_ids"].to_list() if not snapshots.times.get(t[0])
+        ),
     )
 
 
@@ -781,6 +787,7 @@ def summary(evaluation: PolymarketEvaluation) -> dict[str, Any]:
         "correlaciones": evaluation.correlations,
         "excluidos_3_4": evaluation.excluded,
         "puntos_fuera_de_medianoche": evaluation.off_midnight,
+        "mercados_del_universo_sin_historial": evaluation.without_history,
         "nota_pbo": "con 3 bandas, el PBO esperado sin habilidad es ~2/3 (el rango mediano cuenta"
         " como sobreajuste): G2 es exigente",
     }

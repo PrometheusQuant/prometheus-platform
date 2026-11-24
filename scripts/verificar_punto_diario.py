@@ -17,6 +17,7 @@ import argparse
 import json
 import random
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,14 +25,26 @@ import httpx
 import polars as pl
 
 CLOB = "https://clob.polymarket.com/prices-history"
-VENTANA = 30 * 60  # segundos a cada lado del punto diario
+VENTANA = 30 * 60  # segundos antes del punto diario
+DIA = 24 * 3600  # después: el día entero, para medir la potencia de la prueba
 TOLERANCIA = 0.001  # diferencias menores son redondeo
+REINTENTOS = 5
 
 
 def serie(client: httpx.Client, token: str, params: dict[str, str | int]) -> list[dict[str, float]]:
-    r = client.get(CLOB, params={"market": token, **params})
-    r.raise_for_status()
-    return list(r.json().get("history") or [])
+    """GET con reintentos ante cortes de red, 429 y 5xx: un fallo pasajero no tira la muestra."""
+    for intento in range(REINTENTOS):
+        try:
+            r = client.get(CLOB, params={"market": token, **params})
+            if r.status_code in (429, 500, 502, 503, 504):
+                raise httpx.HTTPStatusError("reintentable", request=r.request, response=r)
+            r.raise_for_status()
+            return list(r.json().get("history") or [])
+        except (httpx.TransportError, httpx.HTTPStatusError):
+            if intento == REINTENTOS - 1:
+                raise
+            time.sleep(2 * (intento + 1))
+    return []
 
 
 def main() -> int:
@@ -67,7 +80,7 @@ def main() -> int:
                 punto = rng.choice(diaria)
                 t = int(punto["t"])
                 minuto = serie(
-                    client, tokens[0], {"startTs": t - VENTANA, "endTs": t + VENTANA, "fidelity": 1}
+                    client, tokens[0], {"startTs": t - VENTANA, "endTs": t + DIA, "fidelity": 1}
                 )
                 previos = [x for x in minuto if int(x["t"]) <= t]
                 ref = previos[-1] if previos else None
@@ -79,6 +92,13 @@ def main() -> int:
                         "minuto_previo": ref["p"] if ref else None,
                         "segundos_antes": t - int(ref["t"]) if ref else None,
                         "coincide": ref is not None and abs(ref["p"] - punto["p"]) <= TOLERANCIA,
+                        # Potencia: solo distingue «precio de las 00:00» de «precio posterior» si
+                        # el precio cambió en las 24 h siguientes.
+                        "discrimina": any(
+                            abs(x["p"] - punto["p"]) > TOLERANCIA
+                            for x in minuto
+                            if t < int(x["t"]) <= t + DIA
+                        ),
                     }
                 )
     comparados = [r for r in resultados if r["minuto_previo"] is not None]
@@ -90,6 +110,8 @@ def main() -> int:
         "comparados": len(comparados),
         "sin_minuto_previo": len(resultados) - len(comparados),
         "no_coinciden": len(fallos),
+        "discriminan": sum(1 for r in comparados if r["discrimina"]),
+        "discriminan_y_coinciden": sum(1 for r in comparados if r["discrimina"] and r["coincide"]),
         "fallos": fallos,
     }
     a.out.write_text(json.dumps({"resumen": resumen, "puntos": resultados}, indent=1))

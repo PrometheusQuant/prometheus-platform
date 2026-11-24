@@ -71,6 +71,9 @@ class Registry:
         (None, ["Geopolitics"], 0.0),
         (None, ["All", "Weird"], 0.07),  # desconocida: 0,07
         ("unknown_fees", ["Sports"], 0.05),
+        ("crypto_fees_v2", [], 0.07),  # prefijo de feeType
+        ("finance_prices_fees", ["Sports"], 0.04),
+        ("geopolitics_fees", ["Politics"], 0.0),
     ],
 )
 def test_fee_rate_follows_section_6(fee_type: str | None, tags: list[str], rate: float) -> None:
@@ -344,5 +347,13 @@ def test_evaluate_registers_six_trials_and_reports_five_gates() -> None:
     assert p1.correlations["carry_H2"]["dias_comunes"] > 60
     assert p1.correlations["tendencia_T1"]["correlacion"] is None  # serie ausente: se dice
     assert p1.excluded["pago_no_valido"] == 0
+    assert p1.without_history == 0
     assert 0 <= p1.pbo <= 1
     assert result[Category.P2].principal.stats.n_bets == 10
+
+
+def test_universe_markets_without_history_are_counted() -> None:
+    markets = silver_markets(raw_market("con"), raw_market("sin"))
+    prices = silver_prices(markets, {"con": [0.85]})
+    result = evaluate(markets, prices, Registry())
+    assert result[Category.P1].without_history == 1
