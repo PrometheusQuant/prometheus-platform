@@ -194,6 +194,15 @@ def _add_research(commands: Commands) -> None:
         action="store_true",
         help="obligatorio: el holdout se abre una vez y no tiene vuelta atrás",
     )
+    polymarket = studies.add_parser(
+        "polymarket",
+        help="Polymarket (P1 y P2): las 6 configuraciones pre-registradas (PQ-93)",
+    )
+    polymarket.add_argument(
+        "--repetir",
+        action="store_true",
+        help="permite ejecutar aunque ya haya ensayos de Polymarket (cada ejecución suma a N)",
+    )
     eda = studies.add_parser("eda", help="Estadística descriptiva y correlaciones de las features")
     eda.add_argument("--figures", type=Path, required=True)
     model = studies.add_parser("funding-model", help="Modelo predictivo del funding (cap. 5)")
@@ -550,6 +559,37 @@ def _research_trend(data_dir: Path, figures: Path | None, ledger: TrialLedger) -
     return 0
 
 
+def _research_polymarket(data_dir: Path, ledger: TrialLedger, *, repeat: bool) -> int:
+    from prometheus_platform.research import polymarket_evaluation as pe  # noqa: PLC0415
+
+    previous = ledger.trials()
+    if previous and not repeat:
+        print(
+            f"ERROR ya hay {len(previous)} ensayos de Polymarket en el registro: la evaluación se"
+            " ejecuta una vez (pre-registro §5). Usa --repetir solo si es a propósito: suma a N.",
+            file=sys.stderr,
+        )
+        return 2
+    markets, prices = pe.load_silver(data_dir / "silver")
+    # Las 6 configuraciones se registran (N) antes de evaluar cualquiera de las dos hipótesis.
+    evaluations = pe.evaluate(
+        markets, prices, ledger, pe.load_other_strategies(data_dir / "research")
+    )
+    for category, evaluation in evaluations.items():
+        name = "P1" if category is pe.Category.P1 else "P2"
+        path = pe.write_outputs(evaluation, data_dir / "research" / "polymarket" / name)
+        st = evaluation.principal.stats
+        verdict = "PASA" if evaluation.passed else "NO PASA"
+        print(
+            f"{name} ({category}): {evaluation.principal.name}, {st.n_bets} apuestas,"
+            f" retorno por apuesta {st.mean_return:.4f}, gates={verdict} resumen={path}"
+        )
+        for gate in evaluation.gates:
+            mark = "OK " if gate.passed else "NO "
+            print(f"  {gate.name} {mark}{gate.criterion}: {gate.value:.4f}")
+    return 0
+
+
 def _development_panel(data_dir: Path) -> pl.DataFrame:
     from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
     from prometheus_platform.research.panel import development_only  # noqa: PLC0415
@@ -755,7 +795,7 @@ def _ledger(settings: Settings, familia: str, comando: str) -> TrialLedger:
     )
 
 
-def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str]) -> int:
+def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str]) -> int:  # noqa: PLR0911 - un retorno por estudio
     """Cada ejecución deja su fila en el registro compartido **antes** de investigar (PQ-112)."""
     data_dir = settings.data_dir
     if args.study == "registro":
@@ -769,6 +809,9 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
     if args.study == "trend-holdout":
         ledger = _ledger(settings, "tendencia", command)
         return _research_trend_holdout(data_dir, args.figures, args.confirmo_un_solo_uso, ledger)
+    if args.study == "polymarket":
+        ledger = _ledger(settings, "polymarket", command)
+        return _research_polymarket(data_dir, ledger, repeat=args.repetir)
     if args.study == "funding-model":
         ledger = _ledger(settings, "modelo-funding", command)
         return _research_model(data_dir, args.figures, args.target_mode, ledger)
