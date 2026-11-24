@@ -9,19 +9,20 @@ un icono y un texto, nunca solo con el color.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, cast
 
 import altair as alt
 
-BRAND = "#2a78d6"
-SERIES = ("#2a78d6", "#eb6834", "#1baf7a")  # 1 azul, 2 naranja, 3 aguamarina
+BRAND = "#266ec6"  # el azul de la paleta, un 7 % más oscuro: texto con contraste AA (PQ-126)
+SERIES = ("#266ec6", "#eb6834", "#1baf7a")  # 1 azul, 2 naranja, 3 aguamarina
 NEUTRAL = "#8a8985"  # referencias y benchmarks: gris, para no competir con la serie principal
 GRID = "#e6e5e1"
 TEXT = "#0b0b0b"
 TEXT_SECONDARY = "#52514e"
 FONT = "Source Sans Pro, Segoe UI, Helvetica, Arial, sans-serif"
 
-OK, WARN, BAD = "✅", "⚠️", "❌"
+CHECK, CROSS = "✓", "✗"
 
 # Locale de Vega en español para fechas y números de los ejes (sin depender del navegador).
 _LOCALE = {
@@ -128,7 +129,23 @@ def pct(value: float | None, decimals: int = 1, *, signed: bool = False) -> str:
 
 
 def status(passed: bool) -> str:
-    return f"{OK} pasa" if passed else f"{BAD} no pasa"
+    """Veredicto para tablas. ✓ y ✗ existen en las fuentes de texto normales; los emojis ✅ ❌
+    salen como un cuadrado en un navegador sin fuente de emojis (PQ-125, hallazgo 8)."""
+    return f"{CHECK} pasa" if passed else f"{CROSS} no pasa"
+
+
+def status_icon(passed: bool) -> str:
+    """Veredicto para Markdown (títulos y textos): icono Material, que viene con Streamlit."""
+    return ":material/check_circle: pasa" if passed else ":material/cancel: no pasa"
+
+
+_DECIMAL_DOT = re.compile(r"(?<=\d)\.(?=\d)")
+_PERCENT = re.compile(r"(?<=\d)%")
+
+
+def localize(text: str) -> str:
+    """Cifras de un texto a formato español: «0.95» → «0,95» y «4%» → «4 %»."""
+    return _PERCENT.sub(" %", _DECIMAL_DOT.sub(",", text))
 
 
 # --- Lenguaje simple ---------------------------------------------------------------------------

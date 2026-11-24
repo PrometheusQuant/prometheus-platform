@@ -181,7 +181,7 @@ def quality_table(quality: list[dict[str, Any]]) -> pl.DataFrame:
             "filas": q.get("rows", 0),
             "huecos": q.get("gaps", 0),
             "periodos faltantes": q.get("missing_periods", 0),
-            "hueco mayor (h)": q.get("largest_gap_hours", 0.0),
+            "hueco mayor (h)": style.number(q.get("largest_gap_hours", 0.0), 1),
             "outliers": q.get("outliers", 0),
             "desde": str(q.get("first", ""))[:10],
             "hasta": str(q.get("last", ""))[:10],
@@ -196,8 +196,8 @@ def gates_table(summary: dict[str, Any]) -> pl.DataFrame:
         [
             {
                 "condición": g["name"],
-                "criterio": g["criterion"],
-                "valor": style.number(float(g["value"]), 3),
+                "criterio": style.localize(str(g["criterion"])),
+                "valor": style.number(float(g["value"]), 2),
                 "resultado": style.status(bool(g["passed"])),
             }
             for g in summary.get("gates", [])
@@ -238,9 +238,9 @@ def model_tables(model: dict[str, Any]) -> tuple[pl.DataFrame, pl.DataFrame]:
         [
             {
                 "modelo": r["name"] + (" (ajustado)" if r.get("tuned") else ""),
-                "RMSE": _num(r.get("rmse")),
-                "MAE": _num(r.get("mae")),
-                "R²": _num(r.get("r2")),
+                "RMSE": style.number(_num(r.get("rmse")), 3),
+                "MAE": style.number(_num(r.get("mae")), 3),
+                "R²": style.number(_num(r.get("r2")), 3),
             }
             for r in model.get("regression", [])
         ]
@@ -249,8 +249,8 @@ def model_tables(model: dict[str, Any]) -> tuple[pl.DataFrame, pl.DataFrame]:
         [
             {
                 "modelo": c["name"] + (" (ajustado)" if c.get("tuned") else ""),
-                "AUC": _num(c.get("auc")),
-                "F1": _num(c.get("f1")),
+                "AUC": style.number(_num(c.get("auc")), 3),
+                "F1": style.number(_num(c.get("f1")), 3),
             }
             for c in model.get("classification", [])
         ]
@@ -262,11 +262,11 @@ def scenario_table(simulation: dict[str, Any]) -> pl.DataFrame:
     rows = [
         {
             "escenario": name,
-            "media": _num(s.get("media")),
-            "mediana": _num(s.get("mediana")),
-            "P(< 4 %)": _num(s.get("prob_bajo_hurdle")),
-            "P(pérdida)": _num(s.get("prob_perdida")),
-            "CVaR 95 %": _num(s.get("cvar95")),
+            "retorno medio": style.pct(_num(s.get("media")), 2),
+            "retorno mediano": style.pct(_num(s.get("mediana")), 2),
+            "prob. de rendir menos del 4 %": style.pct(_num(s.get("prob_bajo_hurdle"))),
+            "prob. de perder": style.pct(_num(s.get("prob_perdida"))),
+            "pérdida media en el peor 5 %": style.pct(_num(s.get("cvar95"))),
         }
         for name, s in simulation.get("escenarios", {}).items()
     ]
@@ -278,9 +278,9 @@ def validation_table(simulation: dict[str, Any]) -> pl.DataFrame:
         [
             {
                 "modelo": v["model"],
-                "ciclos/año": _num(v.get("cycles")),
-                "retorno medio": _num(v.get("mean_return")),
-                "tiempo invertido": _num(v.get("invested")),
+                "ciclos por año": style.number(_num(v.get("cycles")), 1),
+                "retorno medio": style.pct(_num(v.get("mean_return")), 2),
+                "tiempo invertido": style.pct(_num(v.get("invested"))),
             }
             for v in simulation.get("validacion", [])
         ]
@@ -296,7 +296,7 @@ def transition_table(simulation: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "desde \\ hacia": states,
-            **{s: [_num(r[j]) for r in matrix] for j, s in enumerate(states)},
+            **{s: [style.pct(_num(r[j])) for r in matrix] for j, s in enumerate(states)},
         }
     )
 

@@ -12,7 +12,7 @@ from playwright.sync_api import Page, expect
 
 TABS = {
     "Inicio: ¿cómo va?": "¿Cómo va?",
-    "¿Funciona? Carry y gates": "Carry de funding: periodo de desarrollo",
+    "¿Funciona? Carry y gates": "Carry de funding",
     "¿Qué predice? Modelo": "Modelo predictivo del funding (cap. 5)",
     "¿Qué riesgo hay? Simulación": "Simulación de Markov y Monte Carlo (cap. 6)",
     "¿Y si invierto? Simula tu inversión": "Simula tu inversión en el carry (H2)",
@@ -56,7 +56,7 @@ def test_fair_mode_shows_the_guided_tour_with_big_type(page: Page, base_url: str
     page.goto(f"{base_url}/?modo=feria")
     sidebar = page.get_by_test_id("stSidebar")
     expect(sidebar).to_contain_text("paso 1 de 7")
-    sidebar.get_by_role("button", name="Siguiente ▶").click()
+    sidebar.get_by_role("button", name="Siguiente").click()  # el nombre incluye el icono
     expect(sidebar).to_contain_text("paso 2 de 7")
     expect(sidebar).to_contain_text("Datos y calidad (técnico)")
     title = page.get_by_role("heading", level=1)

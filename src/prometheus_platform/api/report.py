@@ -303,7 +303,7 @@ def build_report_inputs(data_dir: Path, repo_root: Path, out_dir: Path) -> list[
     for hyp in ("H1", "H2"):
         summary = art.carry.get(hyp)
         text = (
-            to_markdown(gates_table(summary), {})  # la tabla ya viene formateada (PQ-124)
+            to_markdown(gates_table(summary))  # la tabla ya viene formateada (PQ-124)
             if summary
             else pending.format(f"carry {hyp}")
         )
@@ -317,25 +317,13 @@ def build_report_inputs(data_dir: Path, repo_root: Path, out_dir: Path) -> list[
     )
     sim = art.simulation
     (tables / "escenarios.md").write_text(
-        to_markdown(
-            scenario_table(sim),
-            {
-                "media": "pct2",
-                "mediana": "pct2",
-                "P(< 4 %)": "pct",
-                "P(pérdida)": "pct",
-                "CVaR 95 %": "pct",
-            },
-        )
+        to_markdown(scenario_table(sim))  # ya viene en formato español (PQ-126)
         if sim
         else pending.format("simulación"),
         encoding="utf-8",
     )
     (tables / "validacion.md").write_text(
-        to_markdown(
-            validation_table(sim),
-            {"ciclos/año": "num", "retorno medio": "pct", "tiempo invertido": "pct"},
-        )
+        to_markdown(validation_table(sim))  # ya viene en formato español (PQ-126)
         if sim
         else pending.format("simulación"),
         encoding="utf-8",
@@ -457,11 +445,7 @@ def build_public_page(data_dir: Path, repo_root: Path, now: datetime) -> str:
         ]
     )
     h2_summary = art.carry.get("H2")
-    gates = (
-        to_markdown(gates_table(h2_summary), {"valor": "num"})
-        if h2_summary
-        else "*Artefacto no disponible.*\n"
-    )
+    gates = to_markdown(gates_table(h2_summary)) if h2_summary else "*Artefacto no disponible.*\n"
     tests = pl.DataFrame(
         [
             {

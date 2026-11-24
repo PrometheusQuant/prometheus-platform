@@ -23,8 +23,8 @@ def test_porcentajes_signos_y_numeros() -> None:
     assert style.pct(-0.1455, 2) == "-14,55 %"
     assert style.usd(0.0, signed=True) == "0,00 USD"  # el cero no lleva signo
     assert style.number(16.3182, 3) == "16,318"
-    assert style.status(True) == "✅ pasa"
-    assert style.status(False) == "❌ no pasa"
+    assert style.status(True) == "✓ pasa"
+    assert style.status(False) == "✗ no pasa"
 
 
 def test_metricas_con_etiqueta_y_ayuda() -> None:

@@ -110,3 +110,15 @@ Para no pisar PQ-124, se propone:
 - La accesibilidad se comprobó de forma automática. No hubo pruebas con un lector de pantalla
   real (VoiceOver, NVDA) ni solo con teclado.
 - No hubo usuarios: eso es PQ-76.
+
+## Después de PQ-126
+
+Capturas del 24-nov-2026 con los hallazgos 1, 5 a 8 y 12 a 17 resueltos. Las de «antes» están en
+`img/ux-segunda-opinion/`.
+
+| Pestaña | Antes | Después |
+|---|---|---|
+| Inicio | ![](img/ux-segunda-opinion/01-inicio-como-va.png) | ![](img/pq-126/01-inicio-como-va.png) |
+| Carry y gates | ![](img/ux-segunda-opinion/02-funciona-carry-y-gates.png) | ![](img/pq-126/02-funciona-carry-y-gates.png) |
+| Paper trading | ![](img/ux-segunda-opinion/07-como-va-en-vivo-paper-trading.png) | ![](img/pq-126/07-como-va-en-vivo-paper-trading.png) |
+| Cartera | ![](img/ux-segunda-opinion/08-como-se-reparte-cartera.png) | ![](img/pq-126/08-como-se-reparte-cartera.png) |
