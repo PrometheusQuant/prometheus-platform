@@ -304,11 +304,16 @@ def ingest_trades(  # noqa: PLR0913 - parámetros de la ingesta, todos con nombr
     return report
 
 
-def read_bronze(bronze_root: Path, dataset: str, fidelity: int | None = None) -> pl.DataFrame:
+def bronze_files(bronze_root: Path, dataset: str, fidelity: int | None = None) -> list[Path]:
     base = bronze_root / f"source={SOURCE}" / f"dataset={dataset}"
     if fidelity is not None:
         base /= f"fidelity={fidelity}"
-    files = sorted(base.glob("year=*/month=*/*.parquet"))
+    return sorted(base.glob("year=*/month=*/*.parquet"))
+
+
+def read_bronze(bronze_root: Path, dataset: str, fidelity: int | None = None) -> pl.DataFrame:
+    """Todo el dataset en memoria. Para los mercados usar ``build_markets_from_files`` (KE-017)."""
+    files = bronze_files(bronze_root, dataset, fidelity)
     if not files:
         return pl.DataFrame()
     return pl.concat([pl.read_parquet(f) for f in files], how="vertical")
@@ -420,21 +425,51 @@ _MARKET_SCHEMA: dict[str, pl.DataType] = {
 }
 
 
+MARKETS_TABLE = "polymarket/markets"
+BATCH_ROWS = (
+    5000  # filas de bronze por tanda al tipar: el JSON crudo nunca se carga entero (KE-017)
+)
+
+
+def _typed(raws: Iterable[Any], fetched: Iterable[Any]) -> pl.DataFrame:
+    """Una tanda de JSON crudo → catálogo tipado. El crudo se descarta al salir."""
+    records = [_market_record(json.loads(raw), at) for raw, at in zip(raws, fetched, strict=True)]
+    return pl.DataFrame(records, schema=_MARKET_SCHEMA)
+
+
 def build_markets(bronze: pl.DataFrame) -> tuple[pl.DataFrame, QualityReport]:
-    """Catálogo tipado. Un mercado descargado varias veces se queda con la última descarga."""
-    table = "polymarket/markets"
-    report = QualityReport(table=table)
+    """Catálogo tipado desde un bronze ya en memoria (tests y tablas pequeñas)."""
     if bronze.is_empty():
-        raise SilverValidationError(table, "bronze vacío", "no hay mercados ingeridos")
-    records = [
-        _market_record(json.loads(raw), fetched)
-        for raw, fetched in bronze.select("raw", "fetched_at").iter_rows()
-    ]
-    frame = pl.DataFrame(records, schema=_MARKET_SCHEMA)
-    frame = frame.sort("fetched_at").unique(
+        raise SilverValidationError(MARKETS_TABLE, "bronze vacío", "no hay mercados ingeridos")
+    return _check_markets(_typed(bronze["raw"].to_list(), bronze["fetched_at"].to_list()))
+
+
+def build_markets_from_files(files: Iterable[Path]) -> tuple[pl.DataFrame, QualityReport]:
+    """Catálogo tipado leyendo bronze archivo por archivo y por tandas (KE-017).
+
+    Con el catálogo completo (unos 400.000 mercados) cargar el JSON crudo de una vez pedía unos
+    8 GB y tumbó WSL. Así solo vive en memoria una tanda de crudo y el catálogo ya tipado.
+    """
+    parts = []
+    for file in files:
+        parquet = pq.ParquetFile(file)
+        for batch in parquet.iter_batches(batch_size=BATCH_ROWS, columns=["raw", "fetched_at"]):
+            parts.append(
+                _typed(batch.column("raw").to_pylist(), batch.column("fetched_at").to_pylist())
+            )
+    if not parts:
+        raise SilverValidationError(MARKETS_TABLE, "bronze vacío", "no hay mercados ingeridos")
+    return _check_markets(pl.concat(parts, how="vertical"))
+
+
+def _check_markets(typed: pl.DataFrame) -> tuple[pl.DataFrame, QualityReport]:
+    """Deduplica (la descarga más reciente gana), valida e informa. Comparte las dos entradas."""
+    table = MARKETS_TABLE
+    report = QualityReport(table=table)
+    frame = typed.sort("fetched_at").unique(
         subset=["condition_id"], keep="last", maintain_order=True
     )
-    report.duplicates_removed = len(records) - frame.height
+    report.duplicates_removed = typed.height - frame.height
     report.checks.append("un registro por condition_id (la descarga más reciente)")
 
     missing_id = frame.filter(pl.col("condition_id").is_null())
@@ -589,7 +624,7 @@ def silver_dir(data_dir: Path) -> Path:
 
 
 def build_markets_silver(data_dir: Path) -> tuple[pl.DataFrame, QualityReport]:
-    frame, report = build_markets(read_bronze(data_dir / "bronze", "markets"))
+    frame, report = build_markets_from_files(bronze_files(data_dir / "bronze", "markets"))
     write_silver(
         frame, report, silver_dir(data_dir) / "markets.parquet", data_dir / "silver" / "_quality"
     )

@@ -428,3 +428,29 @@ def test_report_counts_points_far_from_midnight() -> None:
     points = [("111", "0x1", T0 + 3, 0.4), ("111", "0x1", T0 + DAY + 3600, 0.5)]
     _, report = build_prices(bronze_prices(points), markets)
     assert "puntos a más de 1 min de las 00:00 UTC: 1" in report.checks
+
+
+def test_markets_from_files_streams_in_batches_and_matches_in_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KE-017: tipar por archivos y tandas da lo mismo que cargarlo todo, sin el crudo entero."""
+    from prometheus_platform.data_platform import polymarket as pm  # noqa: PLC0415
+
+    monkeypatch.setattr(pm, "BATCH_ROWS", 1)  # una fila por tanda: fuerza varias tandas
+    src = FakeSource(
+        [market("1"), market("2"), market("3", end="2024-04-02T00:00:00Z", prices='["0", "0"]')]
+    )
+    ingest_markets(
+        src, tmp_path, [date(2024, 3, 1), date(2024, 4, 1)], min_volume=0, clock=FixedClock()
+    )
+    streamed, streamed_report = pm.build_markets_from_files(pm.bronze_files(tmp_path, "markets"))
+    in_memory, memory_report = build_markets(read_bronze(tmp_path, "markets"))
+    assert streamed.equals(in_memory)
+    assert streamed_report.checks == memory_report.checks
+
+
+def test_markets_from_no_files_is_an_error() -> None:
+    from prometheus_platform.data_platform import polymarket as pm  # noqa: PLC0415
+
+    with pytest.raises(SilverValidationError, match="vacío"):
+        pm.build_markets_from_files([])
