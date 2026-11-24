@@ -1,11 +1,13 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import polars as pl
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from prometheus_platform.api.dashboard import style
 from prometheus_platform.api.dashboard.artifacts import (
     equity_curves,
     gates_table,
@@ -170,7 +172,7 @@ def test_app_renders_every_tab_with_artifacts(lake: Path, monkeypatch: pytest.Mo
     assert [t.label for t in at.tabs] == app_labels()
     metrics = {m.label: m.value for m in at.metric}
     assert metrics["Configuración elegida"] == "k9-theta20"
-    assert metrics["Probabilidad de quiebra anual de equilibrio"] == "0.40%"
+    assert metrics["Probabilidad de quiebra anual de equilibrio"] == "0,40 %"
     assert any("carry H1" in i.value for i in at.info)
 
 
@@ -278,5 +280,38 @@ def test_live_tab_shows_the_paper_trading_journal(
     assert metrics["Capital"] == "1.001,50 USD"
     assert metrics["Ganancia acumulada"] == "+1,50 USD"
     assert metrics["Funding cobrado"] == "+0,06 USD"
-    assert any("Runner en marcha" in m.value for m in at.success)
-    assert any("Kill-switch armado" in m.value for m in at.success)
+    # Estado normal: insignias (Markdown), no recuadros de éxito (PQ-126).
+    badges = [m.value for m in at.markdown]
+    assert any("Runner en marcha" in b for b in badges)
+    assert any("Kill-switch armado" in b for b in badges)
+    assert not at.success
+
+
+def test_no_table_shows_a_decimal_point_or_a_raw_float(lake: Path) -> None:
+    """PQ-126: las cifras de las tablas van en español. La tabla de Streamlit formatea los floats
+    en inglés, así que ninguna columna puede ser numérica decimal ni llevar «0.95» en un texto."""
+    art = load_artifacts(lake)
+    assert art.model is not None
+    assert art.simulation is not None
+    tables = [
+        quality_table(art.quality),
+        gates_table(art.carry["H2"]),
+        performance_table(art.carry["H2"]),
+        *model_tables(art.model),
+        transition_table(art.simulation),
+        validation_table(art.simulation),
+        scenario_table(art.simulation),
+    ]
+    decimal_point = re.compile(r"\d\.\d")
+    for table in tables:
+        for name, dtype in table.schema.items():
+            assert not dtype.is_float(), f"{name}: número decimal sin formatear"
+            if dtype == pl.String:
+                bad = [v for v in table[name].to_list() if v and decimal_point.search(v)]
+                assert not bad, f"{name}: punto decimal en {bad}"
+
+
+def test_localize_turns_decimal_points_and_percent_signs_into_spanish() -> None:
+    assert style.localize("Deflated Sharpe > 0.95 (N = 29)") == "Deflated Sharpe > 0,95 (N = 29)"
+    assert style.localize("Sharpe > B1 (8.75) y CAGR > 4%") == "Sharpe > B1 (8,75) y CAGR > 4 %"
+    assert style.localize("H2 · SOL.USDT") == "H2 · SOL.USDT"  # un punto entre letras no cambia

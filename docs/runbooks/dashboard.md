@@ -69,6 +69,27 @@ recomendado al 100 % en efectivo. Las capturas de todas las pestañas se regener
 `uv run --group e2e python scripts/capture_dashboard.py --url http://127.0.0.1:8501` en
 `reports/storytelling/_img/dashboard/`, que no se versiona.
 
+## Accesibilidad y formato (PQ-126)
+
+- **Formato español:** todas las cifras de las tablas salen ya formateadas (`style.pct`,
+  `style.usd`, `style.number`). Si se dejaran como números, la tabla de Streamlit las mostraría con
+  punto decimal. Un test falla si aparece un número con punto en una tabla.
+- **Veredictos:**
+    - en las tablas, `✓ pasa` / `✗ no pasa`, que existen en las fuentes normales;
+    - en los títulos, iconos Material, que vienen con Streamlit.
+
+  Los emojis (✅ ❌) se veían como un cuadrado en un navegador sin fuente de emojis, que es lo que
+  pasa en las capturas generadas en WSL.
+- **Textos alternativos:** cada gráfico y cada tabla llevan `alt=`, con la conclusión cuando la
+  hay.
+- **Contraste:** el azul de marca es `#266ec6`, con 4,96:1 sobre el fondo y 4,54:1 sobre la
+  superficie secundaria (WCAG 2.1 AA). El anterior `#2a78d6` daba 4,30:1 y 3,94:1.
+- **Limitación conocida:** Streamlit declara la página con `lang="en"` y no permite cambiarlo. Un
+  lector de pantalla leerá el español con pronunciación inglesa (WCAG 3.1.1). Hay que revisarlo
+  cuando Streamlit lo permita.
+- **Estado normal sin recuadros:** el runner en marcha y el kill-switch armado se muestran como
+  insignias. Los recuadros de color quedan para los fallos.
+
 ## Seguridad del contenedor
 
 - `data/` se monta con `:ro`: el panel no puede modificar el lakehouse.

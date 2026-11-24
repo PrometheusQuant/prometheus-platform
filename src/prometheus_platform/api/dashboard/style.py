@@ -14,8 +14,8 @@ from typing import Any, cast
 
 import altair as alt
 
-BRAND = "#2a78d6"
-SERIES = ("#2a78d6", "#eb6834", "#1baf7a")  # 1 azul, 2 naranja, 3 aguamarina
+BRAND = "#266ec6"  # el azul de la paleta, un 7 % más oscuro: texto con contraste AA (PQ-126)
+SERIES = ("#266ec6", "#eb6834", "#1baf7a")  # 1 azul, 2 naranja, 3 aguamarina
 NEUTRAL = "#8a8985"  # referencias y benchmarks: gris, para no competir con la serie principal
 GRID = "#e6e5e1"
 TEXT = "#0b0b0b"
