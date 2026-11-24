@@ -1,6 +1,6 @@
 # ADR-0006: NautilusTrader para backtest event-driven, paper y vivo
 
-- **Estado:** Propuesta (se decide al iniciar el sprint de ejecución)
+- **Estado:** Reemplazada por [ADR-0014](0014-ccxt-detras-de-los-puertos-para-ejecutar.md) (2026-11-24, PQ-51)
 - **Fecha:** 2026-10-16
 
 ## Contexto y problema
