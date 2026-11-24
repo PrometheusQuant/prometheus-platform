@@ -546,7 +546,7 @@ def _live_curve(view: PaperView, cagr: float | None) -> None:
 def _live_tables(view: PaperView) -> None:
     left, right = st.columns(2)
     with left:
-        st.markdown("**Posiciones por pata**")
+        st.markdown("**Posiciones abiertas**")
         if view.positions:
             st.dataframe(
                 pl.DataFrame(
