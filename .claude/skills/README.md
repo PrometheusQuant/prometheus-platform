@@ -8,6 +8,8 @@ como guía para las personas: son Markdown, sin código ejecutable.
 | [`debugging-and-error-recovery`](debugging-and-error-recovery/SKILL.md) | Falla un test, la CI, el build o algo que funcionaba |
 | [`doubt-driven-development`](doubt-driven-development/SKILL.md) | Antes de afirmar algo no trivial o de una acción irreversible |
 | [`code-review-and-quality`](code-review-and-quality/SKILL.md) | Antes de fusionar un PR; guía de revisión del equipo |
+| [`dashboard-design`](dashboard-design/SKILL.md) | Al diseñar o criticar una vista del dashboard: principios de Stephen Few (PQ-125) |
+| `developing-with-streamlit` | Al tocar el dashboard de Streamlit. No está en git: se enlaza con `make skills` (PQ-125) |
 
 ## Origen y licencia
 
@@ -15,6 +17,23 @@ Adaptadas de [addyosmani/agent-skills](https://github.com/addyosmani/agent-skill
 `301b02b12bff98e4688e6984af6556802322bbde`, bajo licencia MIT (copia en
 [`LICENSE-agent-skills`](LICENSE-agent-skills)). Cada `SKILL.md` indica qué se cambió respecto al
 original. Las adaptaciones forman parte de este repositorio (Apache-2.0).
+
+### Skills de diseño del dashboard (PQ-125)
+
+- **`developing-with-streamlit`** es la skill oficial de Streamlit. Viene **dentro del paquete**
+  (Streamlit ≥ 1.57, en `streamlit/.agents/skills/`), así que su versión sigue a la de Streamlit
+  del `uv.lock`.
+    - `make skills` crea los enlaces en `.claude/skills/` (Claude Code) y en `.agents/skills/`
+      (Codex y otros agentes).
+    - Los enlaces dependen del entorno de cada máquina y van en `.gitignore`, como recomienda la
+      propia herramienta.
+    - Hay que ejecutar `make skills` una vez por clon o worktree.
+    - Licencia Apache-2.0, la de Streamlit.
+- **`dashboard-design`** son los principios de *Information Dashboard Design* de Stephen Few.
+    - Copiada **sin cambios** de [d7mtg/dashboard-design](https://github.com/d7mtg/dashboard-design),
+      commit `c8ac077fe83297fea3c669b0a17ec8dcdf02faaa`, licencia MIT (copia en
+      [`LICENSE-dashboard-design`](LICENSE-dashboard-design)).
+    - Es solo Markdown y se leyó entera antes de incorporarla.
 
 ## Qué se descartó del repositorio original y por qué (PQ-42)
 
