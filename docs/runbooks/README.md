@@ -21,6 +21,7 @@ Cada runbook indica: cuándo aplica, pasos exactos, cómo verificar que funcion�
 - [Clave de API comprometida](clave-comprometida.md): detener, revocar en 15 min y rotar (SEV-1).
 - [Desconexión del exchange](desconexion-exchange.md): qué hace el runner solo y cómo diagnosticar (SEV-2).
 - [Datos desactualizados](datos-desactualizados.md): liquidaciones atrasadas, pausa automática y alerta (SEV-2).
+- [Datos de Polymarket](datos-polymarket.md): ingesta bronze, reglas del silver point-in-time y problemas conocidos de los datos (PQ-92).
 
 ## Runbooks pendientes
 

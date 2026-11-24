@@ -19,6 +19,7 @@ from prometheus_platform.domain.datasets import ArchiveRef, RawArchive
 from prometheus_platform.domain.events import DomainEvent, OrderFilled
 from prometheus_platform.domain.market import MarketSnapshot
 from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId, Side, Signal
+from prometheus_platform.domain.prediction_markets import RawPage
 
 
 class Clock(Protocol):
@@ -123,6 +124,32 @@ class Strategy(Protocol):
     def lookback(self) -> timedelta: ...
 
     def on_snapshot(self, snapshot: MarketSnapshot) -> list[Signal]: ...
+
+
+class PredictionMarketSource(Protocol):
+    """API pública de un mercado de predicción (Polymarket, PQ-92).
+
+    Devuelve las respuestas tal cual llegan, en ``RawPage`` con su petición, para el linaje de
+    bronze. Lanza ``PredictionMarketError`` si la API no responde algo válido.
+    """
+
+    def closed_markets(self, start: datetime, end: datetime, min_volume: float) -> list[RawPage]:
+        """Mercados cerrados cuyo ``endDate`` cae en ``[start, end]`` (ambos incluidos)."""
+        ...
+
+    def price_history(
+        self,
+        token_id: str,
+        fidelity_minutes: int,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> list[RawPage]:
+        """Serie de precios de un resultado. Sin ``start``/``end``: toda la vida del mercado."""
+        ...
+
+    def trades(self, condition_id: str, max_pages: int) -> list[RawPage]:
+        """Operaciones de un mercado, de la más reciente hacia atrás, hasta ``max_pages``."""
+        ...
 
 
 class LiveMarket(Protocol):

@@ -45,6 +45,7 @@ from prometheus_platform.adapters.trial_ledger import (
     git_author,
     read_rows,
 )
+from prometheus_platform.api import polymarket_cli
 from prometheus_platform.api.paper.compose import (
     PaperPaths,
     RunnerAlreadyRunningError,
@@ -115,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_layers(commands)
     _add_research(commands)
     _add_operations(commands)
+    polymarket_cli.add_parser(commands)
     return parser
 
 
@@ -1222,6 +1224,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "paper": lambda: _paper(args, settings, notifier),
         "monitor": lambda: _monitor_drift(args, settings, notifier),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
+        "polymarket": lambda: polymarket_cli.run(args, data_dir, http_client),
     }
     return handlers[args.command]()
 
