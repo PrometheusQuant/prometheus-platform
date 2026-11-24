@@ -204,6 +204,10 @@ def _add_research(commands: Commands) -> None:
         action="store_true",
         help="obligatorio: el holdout se abre una vez y no tiene vuelta atrás",
     )
+    studies.add_parser(
+        "momentum-universo",
+        help="Universo del momentum transversal: top 15 por volumen de dic-2020 (PQ-114)",
+    )
     eda = studies.add_parser("eda", help="Estadística descriptiva y correlaciones de las features")
     eda.add_argument("--figures", type=Path, required=True)
     model = studies.add_parser("funding-model", help="Modelo predictivo del funding (cap. 5)")
@@ -839,9 +843,54 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
         "budget": lambda: _research_budget(data_dir),
         "eda": lambda: _research_eda(data_dir, args.figures),
         "simulate": lambda: _research_simulate(data_dir, args.figures, args.paths),
+        "momentum-universo": _research_momentum_universe,
     }
     _ledger(settings, "descriptivo", command).log_execution(args.study)
     return descriptive[args.study]()
+
+
+MOMENTUM_UNIVERSE_FILE = Path("docs/estrategias/03-momentum-transversal/universo.json")
+
+
+def _research_momentum_universe() -> int:
+    """Elige el universo del pre-registro §3 y lo publica con su comprobación; no es un ensayo."""
+    import json  # noqa: PLC0415
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    from prometheus_platform.adapters.data_vision_universe import (  # noqa: PLC0415
+        list_usdm_symbols,
+        monthly_quote_volume,
+    )
+    from prometheus_platform.research import momentum_universe as mu  # noqa: PLC0415
+
+    december = date(2020, 12, 1)
+    with httpx.Client(timeout=60) as client:
+        listed = list_usdm_symbols(client)
+        source = BinanceDataVisionSource(client)
+        pool = mu.candidates(listed)
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            found = executor.map(lambda s: monthly_quote_volume(source, s, december), pool)
+            volumes = {s: v for s, v in zip(pool, found, strict=True) if v is not None}
+    universe = mu.select_universe(volumes)
+    payload = {
+        "regla": "pre-registro §3: perpetuos USDⓈ-M listados antes de 2021 (archivo diario de"
+        " 2020-12 en Data Vision), sin stablecoins ni apalancados; top 15 por volumen en USDT"
+        " de 2020-12",
+        "fecha_seleccion": datetime.now(UTC).date().isoformat(),
+        "simbolos_en_data_vision": len(listed),
+        "candidatos_por_nombre": len(pool),
+        "candidatos_con_datos_de_2020_12": universe.candidates,
+        "universo": list(universe.symbols),
+        "menor_volumen_10pb": list(universe.smallest),
+        "volumen_usdt_2020_12": dict(sorted(volumes.items(), key=lambda kv: -kv[1])),
+    }
+    MOMENTUM_UNIVERSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MOMENTUM_UNIVERSE_FILE.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    print(f"{len(listed)} símbolos en Data Vision; {universe.candidates} candidatos con 2020-12")
+    print("universo:", ", ".join(universe.symbols))
+    print("10 pb de slippage:", ", ".join(universe.smallest))
+    print(f"escrito en {MOMENTUM_UNIVERSE_FILE}")
+    return 0
 
 
 def _research_ledger(action: str, settings: Settings) -> int:
