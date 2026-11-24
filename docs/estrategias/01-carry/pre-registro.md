@@ -244,3 +244,33 @@ costes de las dos patas. No cambian la señal, los umbrales, la rejilla, los cos
 el error) se registran como ensayos adicionales: **N = 18 + 2 = 20** en el Deflated Sharpe. No se
 miraron métricas de Sharpe, drawdown ni CPCV de ninguna configuración: solo el capital final y el
 funding cobrado de esas dos ejecuciones.
+
+## 14. Enmienda 3 (2026-11-24, reejecución única tras KE-014 y KE-016)
+
+**Qué pasó.** Después de la evaluación del 2026-10-30 aparecieron dos errores de **implementación**
+(no de las reglas):
+
+- **KE-014:** la valoración del 2024-07-01 00:00 cobraba la liquidación de ese instante, que es del
+  holdout;
+- **KE-016:** el backtest ejecutaba en la vela que abre en *t* y no en *t* + 1 h, como dice la
+  enmienda 1.1.
+
+Los dos están corregidos en `simulate_symbol`, con pruebas de regresión. Además, PQ-17 verificó el
+2026-11-23 que las comisiones reales son **iguales** al escenario principal (enmienda 1.11), así que
+no hay que cambiar costes.
+
+**Qué se hace.** Se repite **una sola vez** la evaluación de desarrollo de H1 y de H2:
+
+- con las mismas reglas, rejilla, costes y fechas;
+- sin mirar antes ningún resultado del código corregido;
+- en el orden **H1 primero y H2 después**, para que H2 (la que puede ir al holdout) se evalúe con el
+  N más alto.
+
+**Conteo de ensayos (§10).** La repetición son ensayos nuevos: suma **9 por hipótesis**, que el
+registro (`docs/estrategias/ensayos/david.jsonl`) anota solo. N de la familia carry:
+
+- **H1:** 18 + 9 + 2 de la prueba de humo = **29**;
+- **H2:** 18 + 18 + 2 = **38**.
+
+Los resultados del 2026-10-30 se conservan en `evaluacion.md` como historial. Mandan los de esta
+repetición.
