@@ -36,6 +36,7 @@ GAMMA_MAX_OFFSET = 2000  # medido el 2026-11-24: offset=2001 responde 422
 CLOB_MAX_WINDOW = timedelta(days=15)
 TRADES_PAGE = 1000  # máximo documentado de /v2/trades
 MIN_SPLIT = timedelta(hours=1)
+KEYSET_MAX_PAGES = 500  # 50.000 mercados en una hora: muy por encima de lo observado
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 _HTTP_OK = 200
 
@@ -114,14 +115,46 @@ class PolymarketSource:
             if len(rows) < GAMMA_PAGE:
                 return pages
             offset += GAMMA_PAGE
-        # La ventana tiene más mercados de los que Gamma deja paginar: se parte en dos.
+        # La ventana tiene más mercados de los que Gamma deja paginar: se parte en dos. Si ya es
+        # de una hora o menos (miles de mercados que vencen a la misma hora, p. ej. a medianoche
+        # del 31-dic), se pagina con cursor, que no tiene tope de offset.
         if end - start <= MIN_SPLIT:
-            raise PredictionMarketError(
-                f"Más de {GAMMA_MAX_OFFSET + GAMMA_PAGE} mercados entre {iso(start)} e {iso(end)}"
-            )
+            return self._closed_markets_keyset(start, end, min_volume)
         middle = (start + (end - start) / 2).replace(microsecond=0)
         return self.closed_markets(start, middle, min_volume) + self.closed_markets(
             middle + timedelta(seconds=1), end, min_volume
+        )
+
+    def _closed_markets_keyset(
+        self, start: datetime, end: datetime, min_volume: float
+    ) -> list[RawPage]:
+        """``/markets/keyset`` con ``after_cursor`` (spike PQ-78): sin tope, 100 filas por página.
+
+        Sus filas no traen ``umaResolutionStatus`` ni ``enableOrderBook``; el silver toma la
+        resolución de ``outcomePrices`` y ``closedTime``, así que no hace falta.
+        """
+        pages: list[RawPage] = []
+        cursor: str | None = None
+        for _ in range(KEYSET_MAX_PAGES):
+            params: dict[str, str | int | float] = {
+                "closed": "true",
+                "volume_num_min": min_volume,
+                "end_date_min": iso(start),
+                "end_date_max": iso(end),
+                "include_tag": "true",
+                "limit": GAMMA_PAGE,
+            }
+            if cursor:
+                params["after_cursor"] = cursor
+            request, body = self._get(f"{self._gamma}/markets/keyset", params)
+            if not isinstance(body, dict) or not isinstance(body.get("markets"), list):
+                raise PredictionMarketError(f"Gamma keyset no devolvió 'markets': {request}")
+            pages.append(RawPage(request, body["markets"]))
+            cursor = body.get("next_cursor")
+            if not cursor or not body["markets"]:
+                return pages
+        raise PredictionMarketError(
+            f"La paginación con cursor no termina entre {iso(start)} e {iso(end)}"
         )
 
     def price_history(

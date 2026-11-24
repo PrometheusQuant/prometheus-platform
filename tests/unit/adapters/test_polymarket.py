@@ -81,14 +81,45 @@ def test_gamma_splits_a_window_that_exceeds_the_offset_cap(monkeypatch: pytest.M
     assert [r["id"] for p in result for r in p.rows] == ["z", "z"]
 
 
-def test_gamma_gives_up_when_one_hour_is_still_too_full(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_full_one_hour_window_falls_back_to_the_keyset_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Miles de mercados que vencen a la misma hora: se pagina con after_cursor, sin tope."""
     monkeypatch.setattr(polymarket, "GAMMA_PAGE", 1)
     monkeypatch.setattr(polymarket, "GAMMA_MAX_OFFSET", 0)
+    keyset_params: list[dict[str, str]] = []
+    keyset_pages = [
+        {"markets": [{"id": "a"}], "next_cursor": "c1"},
+        {"markets": [{"id": "b"}], "next_cursor": None},
+    ]
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/markets/keyset":
+            keyset_params.append(dict(request.url.params))
+            return httpx.Response(200, json=keyset_pages[len(keyset_params) - 1])
         return httpx.Response(200, json=[{"id": "x"}])
 
-    with pytest.raises(PredictionMarketError, match="Más de"):
+    start = JAN
+    pages = source(handler).closed_markets(start, start + timedelta(minutes=30), 0)
+
+    assert [r["id"] for p in pages for r in p.rows] == ["a", "b"]
+    assert "after_cursor" not in keyset_params[0]
+    assert keyset_params[1]["after_cursor"] == "c1"
+    assert keyset_params[0]["end_date_max"] == iso(start + timedelta(minutes=30))
+    assert keyset_params[0]["include_tag"] == "true"
+
+
+def test_a_keyset_that_never_ends_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(polymarket, "GAMMA_PAGE", 1)
+    monkeypatch.setattr(polymarket, "GAMMA_MAX_OFFSET", 0)
+    monkeypatch.setattr(polymarket, "KEYSET_MAX_PAGES", 3)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/markets/keyset":
+            return httpx.Response(200, json={"markets": [{"id": "a"}], "next_cursor": "c"})
+        return httpx.Response(200, json=[{"id": "x"}])
+
+    with pytest.raises(PredictionMarketError, match="no termina"):
         source(handler).closed_markets(JAN, JAN + timedelta(minutes=30), 0)
 
 
