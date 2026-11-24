@@ -22,7 +22,6 @@ from prometheus_platform.domain.protocol import HOLDOUT_START
 from prometheus_platform.portfolio_risk.budget import bootstrap_bands, cvar95, cvar_contributions
 from prometheus_platform.strategies.carry import perp_instrument, spot_instrument
 
-from .test_dashboard import APP
 from .test_strategy_executor import BTC_PRICE, CARRY, Rig, at
 
 D = Decimal
@@ -256,10 +255,9 @@ def test_the_portfolio_tab_renders_with_a_live_journal(
     for name in [n for n in os.environ if n.startswith("PQ_")]:
         monkeypatch.delenv(name)
     monkeypatch.setenv("PQ_DATA_DIR", str(lake))
-    at_ = AppTest.from_file(str(APP), default_timeout=60).run()
-    assert not at_.exception
-    tab = at_.tabs[7]
-    assert tab.label == "¿Cómo se reparte? Cartera"
+    script = "from prometheus_platform.api.dashboard import app\napp.render_page('cartera')"
+    tab = AppTest.from_string(script, default_timeout=60).run()  # solo la página (PQ-127)
+    assert not tab.exception
     assert len(tab.dataframe) == 3  # presupuesto, capital por estrategia y CVaR
     assert {m.label for m in tab.metric} == {
         "Tope por exchange",

@@ -24,6 +24,13 @@ FONT = "Source Sans Pro, Segoe UI, Helvetica, Arial, sans-serif"
 
 CHECK, CROSS = "✓", "✗"
 
+# En un teléfono (375 px) el título de 2,75 rem de Streamlit se partía en dos líneas (PQ-127).
+RESPONSIVE_CSS = """
+<style>
+@media (max-width: 640px) { h1 { font-size: 2rem !important; } }
+</style>
+"""
+
 # Locale de Vega en español para fechas y números de los ejes (sin depender del navegador).
 _LOCALE = {
     "number": {"decimal": ",", "thousands": ".", "grouping": [3], "currency": ["", " USD"]},
