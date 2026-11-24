@@ -22,6 +22,7 @@ from prometheus_platform.ops.settings import Settings
 from prometheus_platform.portfolio_risk.kill_switch import KillSwitch, enforce
 from prometheus_platform.portfolio_risk.risk import (
     Leg,
+    PendingOrder,
     PortfolioSnapshot,
     Position,
     ProposedOrder,
@@ -446,7 +447,10 @@ def test_pending_orders_count_so_two_closes_cannot_open_a_short() -> None:
     close = order(Side.SELL, "10")
     assert RISK.pre_trade(close, book, kill_switch_active=True).approved
     after_first = PortfolioSnapshot(
-        book.equity, book.start_of_day_equity, book.positions, pending={SPOT: D(-10)}
+        book.equity,
+        book.start_of_day_equity,
+        book.positions,
+        pending=(PendingOrder(SPOT, "SOLUSDT", Leg.SPOT, D(-10), D(100)),),
     )
     second = RISK.pre_trade(close, after_first, kill_switch_active=True)
     assert (second.approved, second.rule) == (False, "kill_switch")
