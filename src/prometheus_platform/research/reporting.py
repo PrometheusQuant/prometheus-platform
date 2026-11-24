@@ -15,7 +15,7 @@ import numpy as np
 import polars as pl
 from scipy import stats
 
-from prometheus_platform.research.carry_evaluation import HypothesisEvaluation
+from prometheus_platform.research.carry_evaluation import CarryHoldout, HypothesisEvaluation
 from prometheus_platform.research.funding_model import ModelStudy
 from prometheus_platform.research.simulation import REGIME_NAMES, Regime, SimulationStudy
 from prometheus_platform.research.trend_evaluation import HoldoutEvaluation, TrendEvaluation
@@ -259,8 +259,8 @@ def plot_simulation(study: SimulationStudy, figures: Path) -> list[Path]:
     ]
 
 
-def write_holdout_outputs(evaluation: HoldoutEvaluation, out_dir: Path) -> Path:
-    """Resumen JSON y retornos diarios del holdout de tendencia (pre-registro §7 y §8)."""
+def write_holdout_outputs(evaluation: HoldoutEvaluation | CarryHoldout, out_dir: Path) -> Path:
+    """Resumen JSON y retornos diarios de un holdout (tendencia o carry, pre-registros §7 y §8)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     pl.DataFrame(
         {
@@ -286,7 +286,9 @@ def write_holdout_outputs(evaluation: HoldoutEvaluation, out_dir: Path) -> Path:
     return path
 
 
-def plot_holdout(evaluation: HoldoutEvaluation, path: Path) -> Path:
+def plot_holdout(
+    evaluation: HoldoutEvaluation | CarryHoldout, path: Path, title: str = "Tendencia"
+) -> Path:
     """Curva de capital del holdout: la configuración elegida frente a B1."""
     path.parent.mkdir(parents=True, exist_ok=True)
     dates = np.array([d[:10] for d in evaluation.dates], dtype="datetime64[D]")
@@ -294,8 +296,8 @@ def plot_holdout(evaluation: HoldoutEvaluation, path: Path) -> Path:
     ax.plot(dates, np.cumprod(1 + evaluation.returns), color="#c2410c", linewidth=2.2,
             label=f"{evaluation.selected} (elegida en desarrollo)")  # fmt: skip
     ax.plot(dates, np.cumprod(1 + evaluation.benchmark_returns), color="#1d4ed8", linewidth=1.4,
-            linestyle="--", label="B1 comprar y mantener")  # fmt: skip
-    ax.set_title("Tendencia · holdout (2024-07-01 → 2026-09-30), neto de costes")
+            linestyle="--", label="B1 (referencia)")  # fmt: skip
+    ax.set_title(f"{title} · holdout (2024-07-01 → 2026-09-30), neto de costes")
     ax.set_ylabel("Capital (inicio = 1)")
     ax.grid(alpha=0.3)
     ax.legend(loc="upper left", fontsize=8)
