@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, timedelta
+from typing import Any
 
 import numpy as np
 import polars as pl
@@ -16,6 +17,7 @@ from prometheus_platform.research.polymarket_evaluation import (
     BANDS,
     EVALUATION,
     HOLDOUT,
+    Band,
     Bet,
     Category,
     Period,
@@ -24,14 +26,24 @@ from prometheus_platform.research.polymarket_evaluation import (
     correlation,
     daily_pnl,
     evaluate,
+    exclusions,
     fee_rate,
-    run_and_register,
+    prepare,
     universe,
 )
 
 DAY = 86_400
 B80 = BANDS[1]
 SHORT = Period("corto", D0, D0 + timedelta(days=30), D0 + timedelta(days=30))
+
+
+def bets_of(
+    markets: pl.DataFrame, prices: pl.DataFrame, band: Band | None, period: Period
+) -> list[Bet]:
+    """Universo P1 al corte del periodo, instantáneas preparadas y apuestas de la banda."""
+    pool = universe(markets, Category.P1, cutoff=period.cutoff)
+    tokens = [t[0] for t in pool["token_ids"].to_list()]
+    return build_bets(pool, prepare(prices, tokens, period.cutoff), band, period)
 
 
 class Registry:
@@ -86,7 +98,7 @@ def test_universe_rules_of_section_3() -> None:
 def test_entry_is_the_first_snapshot_in_the_band_and_pays_the_published_payout() -> None:
     markets = silver_markets(raw_market("m"))
     prices = silver_prices(markets, {"m": [0.6, 0.75, 0.82, 0.90, 0.97]})
-    [bet] = build_bets(markets, prices, B80, SHORT)
+    [bet] = bets_of(markets, prices, B80, SHORT)
     assert bet.entry_time == D0 + timedelta(days=2)  # 0,82: el primero en [0,80; 0,95)
     assert bet.favorite == 0
     assert bet.price == pytest.approx(0.82)
@@ -101,7 +113,7 @@ def test_entry_is_the_first_snapshot_in_the_band_and_pays_the_published_payout()
 def test_the_favorite_can_be_the_second_outcome() -> None:
     markets = silver_markets(raw_market("m", payouts='["0", "1"]'))
     prices = silver_prices(markets, {"m": [0.15]})  # el segundo vale 0,85
-    [bet] = build_bets(markets, prices, B80, SHORT)
+    [bet] = bets_of(markets, prices, B80, SHORT)
     assert bet.favorite == 1
     assert bet.price == pytest.approx(0.85)
     assert bet.payout == 1.0
@@ -109,27 +121,27 @@ def test_the_favorite_can_be_the_second_outcome() -> None:
 
 def test_partial_resolutions_pay_what_was_published() -> None:
     markets = silver_markets(raw_market("m", payouts='["0.5", "0.5"]'))
-    [bet] = build_bets(markets, silver_prices(markets, {"m": [0.85]}), B80, SHORT)
+    [bet] = bets_of(markets, silver_prices(markets, {"m": [0.85]}), B80, SHORT)
     assert bet.payout == 0.5
 
 
 def test_no_entry_once_the_market_is_closed() -> None:
     markets = silver_markets(raw_market("m", closed=D0 + timedelta(days=1, hours=1)))
     prices = silver_prices(markets, {"m": [0.6, 0.7, 0.85]})  # 0,85 llega después del cierre
-    assert build_bets(markets, prices, B80, SHORT) == []
+    assert bets_of(markets, prices, B80, SHORT) == []
 
 
 def test_a_first_entry_outside_the_period_does_not_belong_to_it() -> None:
     markets = silver_markets(raw_market("m"))
     prices = silver_prices(markets, {"m": [0.85]})
     later = Period("despues", D0 + timedelta(days=1), D0 + timedelta(days=30), SHORT.cutoff)
-    assert build_bets(markets, prices, B80, later) == []
+    assert bets_of(markets, prices, B80, later) == []
 
 
 def test_placeholders_never_trigger_an_entry() -> None:
     markets = silver_markets(raw_market("m"))
     prices = silver_prices(markets, {"m": [0.5, 0.5, 0.5, 0.86]})
-    [bet] = build_bets(markets, prices, None, SHORT)  # B1: primera instantánea válida
+    [bet] = bets_of(markets, prices, None, SHORT)  # B1: primera instantánea válida
     assert bet.entry_time == D0  # el primer 0,5 todavía es precio (pre-registro §4)
     assert bet.price == 0.5
 
@@ -139,7 +151,7 @@ def test_nothing_after_the_cutoff_is_used() -> None:
     cut = Period("corte", D0, D0 + timedelta(days=3), D0 + timedelta(days=3))
     markets = silver_markets(raw_market("m", closed=D0 + timedelta(days=10)))
     prices = silver_prices(markets, {"m": [0.85, 0.88, 0.90, 0.70, 0.99, 0.99]})
-    [bet] = build_bets(markets, prices, B80, cut)
+    [bet] = bets_of(markets, prices, B80, cut)
     assert not bet.resolved
     assert bet.realized_at == cut.cutoff
     assert bet.payout == pytest.approx(0.70 - 0.01)  # día 3; los 0,99 posteriores no cuentan
@@ -208,27 +220,92 @@ def test_correlation_needs_enough_common_days() -> None:
 # --- Registro y evaluación --------------------------------------------------------------------
 
 
-def test_each_configuration_is_registered_before_it_is_evaluated() -> None:
+def test_wrong_family_is_refused_before_computing_anything() -> None:
     markets = silver_markets(raw_market("m"))
-    prices = silver_prices(markets, {"m": [0.85]})
-    registry = Registry()
-    result = run_and_register(markets, prices, Category.P1, B80, registry)
-    [trial] = registry.logged
-    assert trial.name == result.name == "P1-B80"
-    assert trial.hypothesis == "P1"
-    assert trial.metrics["apuestas"] == 1
-    assert "sharpe_daily" in trial.metrics
-
-
-def test_wrong_family_or_holdout_are_refused() -> None:
-    markets = silver_markets(raw_market("m"))
-    prices = silver_prices(markets, {"m": [0.85]})
     wrong = Registry()
     wrong.familia = "carry"
     with pytest.raises(ValueError, match="familia"):
-        run_and_register(markets, prices, Category.P1, B80, wrong)
-    with pytest.raises(ValueError, match="holdout"):
-        run_and_register(markets, prices, Category.P1, B80, Registry(), period=HOLDOUT)
+        evaluate(markets, silver_prices(markets, {"m": [0.85]}), wrong)
+    assert wrong.logged == []
+
+
+def test_a_failure_while_computing_leaves_no_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Las 6 configuraciones se calculan antes de registrar la primera: nunca filas a medias."""
+    markets = silver_markets(raw_market("m"), raw_market("s", tags=("Sports",)))
+    prices = silver_prices(markets, {"m": [0.85], "s": [0.85]})
+    calls = []
+    real = pe.run_config
+
+    def flaky(*args: Any, **kwargs: Any) -> pe.ConfigResult:
+        calls.append(1)
+        if len(calls) == 5:
+            raise RuntimeError("fallo a mitad")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pe, "run_config", flaky)
+    registry = Registry()
+    with pytest.raises(RuntimeError):
+        evaluate(markets, prices, registry)
+    assert registry.logged == []
+
+
+def test_invalid_payouts_never_reach_the_universe_and_are_counted() -> None:
+    markets = silver_markets(
+        raw_market("ok"),
+        raw_market("empty", payouts="[]"),
+        raw_market("short", payouts='["1"]'),
+        raw_market("thin", volume=10.0),
+    )
+    assert set(universe(markets, Category.P1)["market_id"]) == {"ok"}
+    assert exclusions(markets, Category.P1) == {
+        "no_binarios": 0,
+        "pago_no_valido": 2,
+        "volumen_menor_1000": 1,
+        "pago_sin_definir_conocido_al_corte": 0,
+    }
+
+
+def test_undefined_payout_is_excluded_only_if_known_at_the_cutoff() -> None:
+    """Enmienda 1: un ["0","0"] que llega después del corte se valora al corte."""
+    before = raw_market("antes", payouts='["0", "0"]', closed=D0 + timedelta(days=5))
+    after = raw_market("despues", payouts='["0", "0"]', closed=D0 + timedelta(days=60))
+    markets = silver_markets(before, after)
+    assert set(universe(markets, Category.P1, cutoff=SHORT.cutoff)["market_id"]) == {"despues"}
+    prices = silver_prices(markets, {"despues": [0.85, 0.9]})
+    [bet] = bets_of(markets, prices, B80, SHORT)
+    assert not bet.resolved
+    assert bet.payout == pytest.approx(0.9 - 0.01)
+
+
+def test_snapshots_must_be_daily_points_near_midnight() -> None:
+    markets = silver_markets(raw_market("m"))
+    prices = silver_prices(markets, {"m": [0.6, 0.85]}).with_columns(
+        pl.when(pl.col("price") == 0.85)
+        .then(pl.col("knowledge_time") + timedelta(hours=6))
+        .otherwise(pl.col("knowledge_time"))
+        .alias("knowledge_time")
+    )
+    snapshots = prepare(prices, ["ma"], SHORT.cutoff)
+    assert snapshots.off_midnight == 1
+    assert bets_of(markets, prices, B80, SHORT) == []
+
+
+def test_snapshots_before_creation_are_skipped() -> None:
+    created_late = raw_market("m") | {"createdAt": (D0 + timedelta(days=1, hours=1)).isoformat()}
+    markets = silver_markets(created_late)
+    prices = silver_prices(markets, {"m": [0.85, 0.6, 0.86]})
+    [bet] = bets_of(markets, prices, B80, SHORT)
+    assert bet.entry_time == D0 + timedelta(days=2)
+
+
+def test_nan_metrics_are_not_written_to_the_ledger() -> None:
+    markets = silver_markets(raw_market("m"))
+    prices = silver_prices(markets, {"m": [0.99]})  # ninguna banda de P1 entra; P2 vacío
+    registry = Registry()
+    evaluate(markets, prices, registry)
+    for trial in registry.logged:
+        assert all(math.isfinite(v) for v in trial.metrics.values())
+        assert trial.metrics["apuestas"] == 0
 
 
 def test_evaluate_registers_six_trials_and_reports_five_gates() -> None:
@@ -262,8 +339,10 @@ def test_evaluate_registers_six_trials_and_reports_five_gates() -> None:
     assert p1.principal.name == "P1-B80"
     assert p1.principal.stats.n_bets == 30
     assert set(p1.sensitivity) == {
-        "sin_diferencial", "diferencial_0.02", "sin_comision", "volumen_10000",
+        "entrada_0", "entrada_0.02", "salida_0", "sin_comision", "volumen_10000",
     }  # fmt: skip
-    assert "carry_H2" in p1.correlations
+    assert p1.correlations["carry_H2"]["dias_comunes"] > 60
+    assert p1.correlations["tendencia_T1"]["correlacion"] is None  # serie ausente: se dice
+    assert p1.excluded["pago_no_valido"] == 0
     assert 0 <= p1.pbo <= 1
     assert result[Category.P2].principal.stats.n_bets == 10

@@ -29,7 +29,7 @@ import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -37,7 +37,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 
-from prometheus_platform.data_platform.polymarket import prices_asof, resolution_asof
+from prometheus_platform.data_platform.polymarket import resolution_asof
 from prometheus_platform.domain.protocol import HOLDOUT_START
 from prometheus_platform.research.carry_evaluation import (
     DSR_GATE,
@@ -66,6 +66,10 @@ PRINCIPAL_BAND = "B80"
 BINARY = 2
 FAVORITE_MIN = 0.5
 UNDEFINED_PAYOUT = "pago sin definir (todos 0)"  # excluded_reason del silver (PQ-92)
+MAX_PAID = 0.999  # enmienda 1: el coste por acción nunca llega a 1
+FULL_PAYOUT = 0.999  # un pago completo (los del AMM traen decimales casi 1)
+MIDNIGHT_TOLERANCE = timedelta(minutes=1)  # los puntos diarios llegan a las 00:00:0x (PQ-92)
+OTHER_STRATEGIES = ("carry_H2", "tendencia_T1")
 
 
 class Category(StrEnum):
@@ -110,10 +114,7 @@ HOLDOUT = Period(
 # §6: tasas de compliance/polymarket.md §2. Las claves son prefijos de ``feeType`` y etiquetas.
 FEE_RATES: Mapping[str, float] = {
     "politics": 0.04,
-    "elections": 0.04,
     "finance": 0.04,
-    "economy": 0.04,
-    "business": 0.04,
     "tech": 0.04,
     "sports": 0.05,
     "crypto": 0.07,
@@ -166,31 +167,122 @@ class Bet:
 
 
 def universe(
-    markets: pl.DataFrame, category: Category, min_volume: float = MIN_VOLUME
+    markets: pl.DataFrame,
+    category: Category,
+    min_volume: float = MIN_VOLUME,
+    cutoff: datetime = EVALUATION.cutoff,
 ) -> pl.DataFrame:
-    """Reglas 1 a 4 de §3.
+    """Reglas 1 a 4 de §3, con la enmienda 1.
 
-    Solo se excluye el pago sin definir (``["0", "0"]``, regla 4). Un mercado sin ``closedTime``
-    se queda: su resolución no es conocible y la apuesta se valora al corte (§4).
+    - Binarios con dos tokens y un pago publicado de dos valores sin nulos (dato válido).
+    - Volumen ≥ ``min_volume``.
+    - ``["0", "0"]`` se excluye **solo si esa resolución ya se conocía en el corte** (enmienda 1):
+      si llegó después, en el corte el mercado seguía sin resolver y se valora al corte.
+    - Un mercado sin ``closedTime`` se queda: se valora al corte.
     """
-    sports = category is Category.P2
     return markets.filter(
-        (pl.col("outcomes").list.len() == BINARY)
-        & (pl.col("token_ids").list.len() == BINARY)
-        & (pl.col("volume_usd") >= min_volume)
-        & pl.col("excluded_reason").ne(UNDEFINED_PAYOUT).fill_null(True)
-        & (pl.col("is_sports") == sports)
+        _eligible(min_volume, cutoff) & (pl.col("is_sports") == (category is Category.P2))
     )
 
 
-def _entry(
-    snapshots: pl.DataFrame, band: Band | None, closed: datetime | None, period: Period
+def _valid_payout() -> pl.Expr:
+    return (pl.col("payouts").list.len() == BINARY) & (
+        pl.col("payouts").list.eval(pl.element().is_null()).list.any().not_()
+    )
+
+
+def _undefined_known(cutoff: datetime) -> pl.Expr:
+    return (
+        pl.col("excluded_reason").eq(UNDEFINED_PAYOUT).fill_null(False)
+        & pl.col("resolution_known_at").is_not_null()
+        & (pl.col("resolution_known_at") <= cutoff)
+    )
+
+
+def _eligible(min_volume: float, cutoff: datetime) -> pl.Expr:
+    return (
+        (pl.col("outcomes").list.len() == BINARY)
+        & (pl.col("token_ids").list.len() == BINARY)
+        & _valid_payout()
+        & (pl.col("volume_usd").fill_null(0.0) >= min_volume)
+        & _undefined_known(cutoff).not_()
+    )
+
+
+def exclusions(
+    markets: pl.DataFrame, category: Category, cutoff: datetime = EVALUATION.cutoff
+) -> dict[str, int]:
+    """Cuántos mercados de la categoría quedan fuera y por qué (§3.4: se cuentan e informan)."""
+    pool = markets.filter(pl.col("is_sports") == (category is Category.P2))
+    binary = (pl.col("outcomes").list.len() == BINARY) & (pl.col("token_ids").list.len() == BINARY)
+    return {
+        "no_binarios": pool.filter(binary.not_()).height,
+        "pago_no_valido": pool.filter(binary & _valid_payout().not_()).height,
+        "volumen_menor_1000": pool.filter(
+            binary & _valid_payout() & (pl.col("volume_usd").fill_null(0.0) < MIN_VOLUME)
+        ).height,
+        "pago_sin_definir_conocido_al_corte": pool.filter(
+            binary
+            & _valid_payout()
+            & (pl.col("volume_usd").fill_null(0.0) >= MIN_VOLUME)
+            & _undefined_known(cutoff)
+        ).height,
+    }
+
+
+@dataclass
+class Snapshots:
+    """Instantáneas diarias del primer token conocidas en el corte, preparadas una sola vez.
+
+    Solo puntos con precio válido (los rellenos ya son nulos en silver), con ``knowledge_time`` ≤
+    el corte y a menos de ``MIDNIGHT_TOLERANCE`` de las 00:00 UTC (la instantánea diaria, §4).
+    """
+
+    times: dict[str, list[datetime]]
+    prices: dict[str, list[float]]
+    last_price: dict[str, float]
+    off_midnight: int
+
+
+def prepare(prices: pl.DataFrame, tokens: Sequence[str], cutoff: datetime) -> Snapshots:
+    first = prices.filter(
+        pl.col("token_id").is_in(list(tokens))
+        & (pl.col("outcome_index") == 0)
+        & pl.col("price").is_not_null()
+        & (pl.col("knowledge_time") <= cutoff)
+    ).select("token_id", "knowledge_time", "price")
+    seconds = (
+        pl.col("knowledge_time").dt.hour().cast(pl.Int32) * 3600
+        + pl.col("knowledge_time").dt.minute().cast(pl.Int32) * 60
+        + pl.col("knowledge_time").dt.second().cast(pl.Int32)
+    )
+    near = seconds <= MIDNIGHT_TOLERANCE.total_seconds()
+    off = first.filter(near.not_()).height
+    first = first.filter(near).sort("token_id", "knowledge_time")
+    grouped = first.group_by("token_id", maintain_order=True).agg("knowledge_time", "price")
+    times = dict(
+        zip(grouped["token_id"].to_list(), grouped["knowledge_time"].to_list(), strict=True)
+    )
+    values = dict(zip(grouped["token_id"].to_list(), grouped["price"].to_list(), strict=True))
+    return Snapshots(times, values, {t: v[-1] for t, v in values.items() if v}, off)
+
+
+def _entry(  # noqa: PLR0913 - el mercado y la banda
+    times: Sequence[datetime],
+    prices: Sequence[float],
+    band: Band | None,
+    *,
+    created: datetime | None,
+    closed: datetime | None,
+    period: Period,
 ) -> tuple[datetime, int, float] | None:
     """Primera instantánea en la banda (``band=None``: la primera instantánea, B1).
 
-    ``snapshots`` son los puntos válidos del primer token, ordenados por ``knowledge_time``.
+    La instantánea tiene que ser posterior a la creación y anterior al cierre (§4).
     """
-    for at, price in snapshots.select("knowledge_time", "price").iter_rows():
+    for at, price in zip(times, prices, strict=True):
+        if created is not None and at < created:
+            continue
         if closed is not None and at >= closed:
             return None  # el mercado ya estaba cerrado: no hay instantánea
         favorite, fav_price = (0, price) if price >= FAVORITE_MIN else (1, 1.0 - price)
@@ -202,8 +294,8 @@ def _entry(
 
 
 def build_bets(  # noqa: PLR0913 - keyword-only salvo los datos, la banda y el periodo
-    markets: pl.DataFrame,
-    prices: pl.DataFrame,
+    pool: pl.DataFrame,
+    snapshots: Snapshots,
     band: Band | None,
     period: Period = EVALUATION,
     *,
@@ -211,36 +303,39 @@ def build_bets(  # noqa: PLR0913 - keyword-only salvo los datos, la banda y el p
     spread_out: float = SPREAD_OUT,
     with_fees: bool = True,
 ) -> list[Bet]:
-    """Apuestas de un universo y una banda, sin usar nada posterior a ``period.cutoff``."""
-    known = prices.filter(pl.col("knowledge_time") <= period.cutoff)
-    first_token = known.filter((pl.col("outcome_index") == 0) & pl.col("price").is_not_null()).sort(
-        "token_id", "knowledge_time"
-    )
-    by_token = {key[0]: frame for key, frame in first_token.group_by("token_id")}
-    asof = resolution_asof(markets, period.cutoff)
-    last = prices_asof(first_token, period.cutoff)
-    last_price = dict(zip(last["token_id"].to_list(), last["price"].to_list(), strict=True))
+    """Apuestas de un universo y una banda, sin usar nada posterior a ``period.cutoff``.
 
+    ``pool`` es un universo (``universe``) y ``snapshots`` sale de ``prepare`` con el mismo corte.
+    La comisión usa el precio de ejecución (instantánea + diferencial), con tope de 0,999 para
+    que el coste por acción nunca llegue a 1 (enmienda 1).
+    """
     bets = []
-    for m in asof.iter_rows(named=True):
+    for m in resolution_asof(pool, period.cutoff).iter_rows(named=True):
         token0 = m["token_ids"][0]
-        snapshots = by_token.get(token0)
-        if snapshots is None:
+        times = snapshots.times.get(token0)
+        if not times:
             continue
-        entry = _entry(snapshots, band, m["closed_time"], period)
+        entry = _entry(
+            times,
+            snapshots.prices[token0],
+            band,
+            created=m["created_at"],
+            closed=m["closed_time"],
+            period=period,
+        )
         if entry is None:
             continue
         at, favorite, fav_price = entry
-        paid = min(fav_price + spread_in, 0.999)
+        paid = min(fav_price + spread_in, MAX_PAID)
         fee = fee_rate(m["fee_type"], m["tags"]) * paid * (1 - paid) if with_fees else 0.0
-        if m["resolved_asof"] and m["payouts"] is not None:
+        if m["resolved_asof"]:
             payout, realized, resolved = (
                 float(m["payouts"][favorite]),
                 m["resolution_known_at"],
                 True,
             )
         else:
-            p0 = last_price.get(token0, fav_price if favorite == 0 else 1 - fav_price)
+            p0 = snapshots.last_price[token0]
             mark = p0 if favorite == 0 else 1.0 - p0
             payout, realized, resolved = max(mark - spread_out, 0.0), period.cutoff, False
         bets.append(
@@ -271,35 +366,40 @@ class BetStats:
     t_cluster: float  # t del retorno medio, error agrupado por evento
     event_weighted_return: float  # un voto por evento padre
     dollar_year_return: float  # PnL / suma de dólares x años
-    hit_rate: float
-    mean_price: float  # calibración: precio medio del favorito
-    mean_payout: float  # calibración: pago medio
+    hit_rate: float  # resueltas con pago completo (≥ 0,999)
+    partial_payouts: int  # resueltas con pago parcial (ni 0 ni 1)
+    mean_price: float  # calibración, sobre las resueltas: precio medio del favorito
+    mean_payout: float  # calibración, sobre las mismas: pago medio
 
 
 def bet_stats(bets: Sequence[Bet]) -> BetStats:
     if not bets:
         nan = math.nan
-        return BetStats(0, 0, 0, nan, nan, nan, nan, nan, nan, nan)
+        return BetStats(0, 0, 0, nan, nan, nan, nan, nan, 0, nan, nan)
     r = np.array([b.pnl for b in bets])
-    events = np.array([b.event_id for b in bets])
+    _, group = np.unique(np.array([b.event_id for b in bets]), return_inverse=True)
+    n, g = len(r), int(group.max()) + 1
     mean = float(r.mean())
-    resolved = [b.payout for b in bets if b.resolved]
-    groups = {e: r[events == e] for e in np.unique(events)}
-    n, g = len(r), len(groups)
-    # Error estándar de la media agrupado por evento (sándwich de clústeres, corrección G/(G-1)).
-    meat = sum(float(np.sum(v - mean)) ** 2 for v in groups.values())
-    se = math.sqrt(meat) / n * math.sqrt(g / (g - 1)) if g > 1 else math.nan
+    sums = np.bincount(group, weights=r - mean)
+    sizes = np.bincount(group)
+    # Error estándar de la media agrupado por evento (sándwich de clústeres, CR1: G/(G-1)).
+    se = math.sqrt(float(np.sum(sums**2))) / n * math.sqrt(g / (g - 1)) if g > 1 else math.nan
+    event_means = np.bincount(group, weights=r) / sizes
+    resolved = [b for b in bets if b.resolved]
+    full = [b.payout >= FULL_PAYOUT for b in resolved]
+    partial = sum(1 for b in resolved if 1 - FULL_PAYOUT < b.payout < FULL_PAYOUT)
     return BetStats(
         n_bets=n,
         n_events=g,
-        n_unresolved=sum(not b.resolved for b in bets),
+        n_unresolved=n - len(resolved),
         mean_return=mean,
         t_cluster=mean / se if se and se > 0 else math.nan,
-        event_weighted_return=float(np.mean([v.mean() for v in groups.values()])),
+        event_weighted_return=float(event_means.mean()),
         dollar_year_return=float(r.sum() / sum(b.years_held for b in bets)),
-        hit_rate=float(np.mean([p >= FAVORITE_MIN for p in resolved])) if resolved else math.nan,
-        mean_price=float(np.mean([b.price for b in bets])),
-        mean_payout=float(np.mean(resolved)) if resolved else math.nan,
+        hit_rate=float(np.mean(full)) if resolved else math.nan,
+        partial_payouts=partial,
+        mean_price=float(np.mean([b.price for b in resolved])) if resolved else math.nan,
+        mean_payout=float(np.mean([b.payout for b in resolved])) if resolved else math.nan,
     )
 
 
@@ -324,13 +424,28 @@ def daily_pnl(bets: Sequence[Bet], period: Period = EVALUATION) -> pl.DataFrame:
     )
 
 
+def _longest_losing_streak(pnl: np.ndarray) -> int:
+    longest = current = 0
+    for value in pnl:
+        current = current + 1 if value < 0 else (current if value == 0 else 0)
+        longest = max(longest, current)
+    return longest
+
+
 def series_stats(pnl: np.ndarray) -> dict[str, float]:
+    """Estadísticos de la serie diaria. La curtosis es la **bruta** (la que espera el DSR)."""
     std = float(np.std(pnl, ddof=1)) if pnl.size > 1 else 0.0
     sharpe_d = sharpe_daily(pnl)
     centered = pnl - pnl.mean()
     m2 = float(np.mean(centered**2))
     skew = float(np.mean(centered**3) / m2**1.5) if m2 > 0 else 0.0
     kurt = float(np.mean(centered**4) / m2**2) if m2 > 0 else 3.0
+    cumulative = np.cumsum(pnl)
+    drawdown = (
+        float(np.max(np.maximum.accumulate(np.concatenate([[0.0], cumulative]))[1:] - cumulative))
+        if pnl.size
+        else 0.0
+    )
     return {
         "sharpe_daily": sharpe_d,
         "sharpe": sharpe_d * math.sqrt(DAYS_PER_YEAR),
@@ -339,6 +454,8 @@ def series_stats(pnl: np.ndarray) -> dict[str, float]:
         "std_daily": std,
         "pnl_total": float(pnl.sum()),
         "peor_dia": float(pnl.min()) if pnl.size else 0.0,
+        "max_caida_usd": drawdown,
+        "peor_racha_dias": float(_longest_losing_streak(pnl)),
     }
 
 
@@ -367,7 +484,9 @@ class PolymarketEvaluation:
     var_sharpe: float
     gates: list[Gate] = field(default_factory=list)
     sensitivity: dict[str, dict[str, float]] = field(default_factory=dict)
-    correlations: dict[str, float | None] = field(default_factory=dict)
+    correlations: dict[str, dict[str, Any]] = field(default_factory=dict)
+    excluded: dict[str, int] = field(default_factory=dict)
+    off_midnight: int = 0
 
     @property
     def principal(self) -> ConfigResult:
@@ -382,45 +501,49 @@ def config_name(category: Category, band: str) -> str:
     return f"{'P1' if category is Category.P1 else 'P2'}-{band}"
 
 
-def run_and_register(  # noqa: PLR0913 - cada argumento es una dimensión del ensayo
-    markets: pl.DataFrame,
-    prices: pl.DataFrame,
-    category: Category,
-    band: Band,
-    registry: ExperimentRegistry,
-    *,
-    period: Period = EVALUATION,
+def run_config(
+    pool: pl.DataFrame, snapshots: Snapshots, category: Category, band: Band
 ) -> ConfigResult:
-    """Una configuración de §5, **registrada** (suma a N) antes de que nadie la mire."""
-    familia = getattr(registry, "familia", FAMILY)
-    if familia != FAMILY:
-        raise ValueError(f"El registro es de la familia {familia!r}, no de {FAMILY!r}")
-    if period is not EVALUATION:
-        raise ValueError("Esta evaluación solo usa el periodo de evaluación; el holdout es aparte")
-    bets = build_bets(universe(markets, category), prices, band, period)
-    stats = bet_stats(bets)
-    daily = daily_pnl(bets, period)
-    series = series_stats(daily["pnl"].to_numpy())
-    name = config_name(category, band.name)
+    """Una configuración de §5, **sin registrar**: ``evaluate`` registra las 6 juntas."""
+    bets = build_bets(pool, snapshots, band, EVALUATION)
+    daily = daily_pnl(bets, EVALUATION)
+    return ConfigResult(
+        config_name(category, band.name),
+        category,
+        band,
+        bets,
+        bet_stats(bets),
+        daily,
+        series_stats(daily["pnl"].to_numpy()),
+    )
+
+
+def _register(result: ConfigResult, registry: ExperimentRegistry) -> None:
+    st = result.stats
+    metrics = {
+        **result.series,
+        "apuestas": float(st.n_bets),
+        "eventos": float(st.n_events),
+        "sin_resolver": float(st.n_unresolved),
+        "retorno_por_apuesta": st.mean_return,
+        "t_agrupado": st.t_cluster,
+        "retorno_por_evento": st.event_weighted_return,
+        "retorno_dolar_ano": st.dollar_year_return,
+    }
     registry.log_trial(
         TrialRecord(
-            hypothesis="P1" if category is Category.P1 else "P2",
-            name=name,
-            params={"banda": f"[{band.low}; {band.high})", "categoria": str(category)},
-            metrics={
-                **series,
-                "apuestas": float(stats.n_bets),
-                "eventos": float(stats.n_events),
-                "sin_resolver": float(stats.n_unresolved),
-                "retorno_por_apuesta": stats.mean_return,
-                "t_agrupado": stats.t_cluster,
-                "retorno_por_evento": stats.event_weighted_return,
-                "retorno_dolar_ano": stats.dollar_year_return,
+            hypothesis="P1" if result.category is Category.P1 else "P2",
+            name=result.name,
+            params={
+                "banda": f"[{result.band.low}; {result.band.high})",
+                "categoria": str(result.category),
             },
-            tags={"period": period.name, "costs": "principal"},
+            metrics={
+                k: v for k, v in metrics.items() if math.isfinite(v)
+            },  # el .jsonl no admite NaN
+            tags={"period": EVALUATION.name, "costs": "principal"},
         )
     )
-    return ConfigResult(name, category, band, bets, stats, daily, series)
 
 
 def evaluate(
@@ -429,11 +552,26 @@ def evaluate(
     registry: ExperimentRegistry,
     other_strategies: Mapping[str, pl.DataFrame] | None = None,
 ) -> dict[Category, PolymarketEvaluation]:
-    """Registra las 6 configuraciones y evalúa P1 y P2 con el N resultante."""
+    """Las 6 configuraciones de §5 y la evaluación de P1 y P2.
+
+    Orden pensado para no dejar nunca filas a medias en el registro: primero se calculan las 6
+    configuraciones (sin mirarlas); si algo falla, no se ha registrado nada. Después se registran
+    las 6 juntas (suman a N) y solo entonces se calculan los gates con el N resultante.
+    """
+    familia = getattr(registry, "familia", FAMILY)
+    if familia != FAMILY:
+        raise ValueError(f"El registro es de la familia {familia!r}, no de {FAMILY!r}")
+    candidates = markets.filter(_eligible(MIN_VOLUME, EVALUATION.cutoff))
+    snapshots = prepare(
+        prices, [t[0] for t in candidates["token_ids"].to_list()], EVALUATION.cutoff
+    )
+    pools = {c: universe(markets, c) for c in Category}
     results = {
-        c: {band.name: run_and_register(markets, prices, c, band, registry) for band in BANDS}
-        for c in Category
+        c: {band.name: run_config(pools[c], snapshots, c, band) for band in BANDS} for c in Category
     }
+    for c in Category:
+        for result in results[c].values():
+            _register(result, registry)
     trials = [t for t in registry.trials() if "sharpe_daily" in t.metrics]
     n_trials = max(len(registry.trials()), len(BANDS) * len(Category))
     sharpes = np.array([t.metrics["sharpe_daily"] for t in trials])
@@ -443,7 +581,8 @@ def evaluate(
             c,
             results[c],
             markets,
-            prices,
+            pools[c],
+            snapshots,
             n_trials=n_trials,
             var_sharpe=var_sharpe,
             other_strategies=other_strategies or {},
@@ -456,7 +595,8 @@ def _evaluate(  # noqa: PLR0913 - keyword-only salvo los datos de la hipótesis
     category: Category,
     by_band: dict[str, ConfigResult],
     markets: pl.DataFrame,
-    prices: pl.DataFrame,
+    pool: pl.DataFrame,
+    snapshots: Snapshots,
     *,
     n_trials: int,
     var_sharpe: float,
@@ -475,8 +615,7 @@ def _evaluate(  # noqa: PLR0913 - keyword-only salvo los datos de la hipótesis
         n_trials=n_trials,
         var_sharpe=var_sharpe,
     )
-    pool = universe(markets, category)
-    b1 = bet_stats(build_bets(pool, prices, None))
+    b1 = bet_stats(build_bets(pool, snapshots, None))
     st = principal.stats
     gates = [
         Gate("G1", f"Deflated Sharpe > {DSR_GATE}", dsr, dsr > DSR_GATE),
@@ -499,11 +638,12 @@ def _evaluate(  # noqa: PLR0913 - keyword-only salvo los datos de la hipótesis
     ]
     band = principal.band
     sensitivity = {
-        "sin_diferencial": _summary(build_bets(pool, prices, band, spread_in=0.0, spread_out=0.0)),
-        "diferencial_0.02": _summary(build_bets(pool, prices, band, spread_in=0.02)),
-        "sin_comision": _summary(build_bets(pool, prices, band, with_fees=False)),
+        "entrada_0": _summary(build_bets(pool, snapshots, band, spread_in=0.0)),
+        "entrada_0.02": _summary(build_bets(pool, snapshots, band, spread_in=0.02)),
+        "salida_0": _summary(build_bets(pool, snapshots, band, spread_out=0.0)),
+        "sin_comision": _summary(build_bets(pool, snapshots, band, with_fees=False)),
         "volumen_10000": _summary(
-            build_bets(universe(markets, category, SENSITIVITY_VOLUME), prices, band)
+            build_bets(universe(markets, category, SENSITIVITY_VOLUME), snapshots, band)
         ),
     }
     return PolymarketEvaluation(
@@ -517,8 +657,11 @@ def _evaluate(  # noqa: PLR0913 - keyword-only salvo los datos de la hipótesis
         gates=gates,
         sensitivity=sensitivity,
         correlations={
-            name: correlation(principal.daily, other) for name, other in other_strategies.items()
+            name: correlation_report(principal.daily, other_strategies.get(name))
+            for name in OTHER_STRATEGIES
         },
+        excluded=exclusions(markets, category),
+        off_midnight=snapshots.off_midnight,
     )
 
 
@@ -544,6 +687,19 @@ def correlation(pnl: pl.DataFrame, other: pl.DataFrame, min_days: int = 60) -> f
     if np.std(a) == 0 or np.std(b) == 0:
         return None
     return float(np.corrcoef(a, b)[0, 1])
+
+
+def correlation_report(pnl: pl.DataFrame, other: pl.DataFrame | None) -> dict[str, Any]:
+    """La correlación con su ventana; si falta la serie, lo dice en vez de omitirla."""
+    if other is None:
+        return {"correlacion": None, "motivo": "serie no disponible en data/research"}
+    common = pnl.join(other.with_columns(pl.col("date").cast(pl.Date)), on="date", how="inner")
+    return {
+        "correlacion": correlation(pnl, other),
+        "dias_comunes": common.height,
+        "desde": str(common["date"].min()) if common.height else None,
+        "hasta": str(common["date"].max()) if common.height else None,
+    }
 
 
 def entry_dates(bets: Sequence[Bet]) -> tuple[date | None, date | None]:
@@ -582,7 +738,7 @@ def load_other_strategies(research_dir: Path) -> dict[str, pl.DataFrame]:
     (2024-07-01, KE-014), así que se corta antes de ``HOLDOUT_START``.
     """
     out: dict[str, pl.DataFrame] = {}
-    for label, sub in (("carry_H2", "carry/H2"), ("tendencia_T1", "trend/T1")):
+    for label, sub in zip(OTHER_STRATEGIES, ("carry/H2", "trend/T1"), strict=True):
         summary_path = research_dir / sub / "summary.json"
         daily_path = research_dir / sub / "daily_returns.parquet"
         if not (summary_path.exists() and daily_path.exists()):
@@ -623,6 +779,10 @@ def summary(evaluation: PolymarketEvaluation) -> dict[str, Any]:
         "passed": evaluation.passed,
         "sensibilidad": evaluation.sensitivity,
         "correlaciones": evaluation.correlations,
+        "excluidos_3_4": evaluation.excluded,
+        "puntos_fuera_de_medianoche": evaluation.off_midnight,
+        "nota_pbo": "con 3 bandas, el PBO esperado sin habilidad es ~2/3 (el rango mediano cuenta"
+        " como sobreajuste): G2 es exigente",
     }
 
 
