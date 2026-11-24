@@ -73,3 +73,16 @@ def test_tendencia_sin_holdout_y_carry_descartado() -> None:
     assert trend.level == "warn"
     holdout_ok = Artifacts(trend={"holdout": {"pasa": True, "rendimiento": {}}})
     assert strategy_overview(holdout_ok)[0].level == "ok"
+
+
+def test_el_carry_descartado_en_el_holdout_se_rotula_como_demostracion() -> None:
+    art = Artifacts(
+        carry={"H2": {"passed": True, "selected_performance": {}}},
+        carry_holdout={"pasa": False, "rendimiento": {"cagr": 0.0022}},
+    )
+    [carry] = strategy_overview(art)
+    assert (carry.level, carry.stage) == ("bad", "Descartada en la prueba final")
+    assert "0,22 %" in carry.summary
+    assert "demostración" in carry.summary
+    aprobado = Artifacts(carry_holdout={"pasa": True, "rendimiento": {}})
+    assert strategy_overview(aprobado)[0].level == "ok"
