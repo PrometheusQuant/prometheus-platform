@@ -59,3 +59,7 @@ deploy/oci/*.zip
 # Mutation testing (PQ-99): copia de trabajo de mutmut e informe
 mutants/
 mutmut-informe.md
+
+# Skill oficial de Streamlit: enlaces a la copia de Streamlit de cada entorno; se crean con `make skills` (PQ-125)
+.agents/skills/developing-with-streamlit
+.claude/skills/developing-with-streamlit
