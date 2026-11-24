@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+import pyarrow.parquet as pq
 import pytest
 
+from prometheus_platform.data_platform import polymarket as polymarket_module
 from prometheus_platform.data_platform.polymarket import (
     MIN_MARKETS,
     bronze_path,
@@ -187,6 +190,56 @@ def test_a_failed_month_is_reported_and_not_written(tmp_path: Path) -> None:
     assert not report.ok
     assert report.failed == ["markets/2024-03"]
     assert not bronze_path(tmp_path, "markets", date(2024, 3, 1)).exists()
+
+
+class StreamingSource(FakeSource):
+    """Entrega el mes página a página y puede caerse a mitad, como el adaptador real (KE-022)."""
+
+    def __init__(self, pages: int, rows: int, *, fail_after: int | None = None) -> None:
+        super().__init__()
+        self.pages, self.rows, self.fail_after = pages, rows, fail_after
+
+    def closed_markets(  # type: ignore[override]
+        self, start: datetime, end: datetime, min_volume: float
+    ) -> Iterator[RawPage]:
+        for n in range(self.pages):
+            if self.fail_after is not None and n == self.fail_after:
+                raise PredictionMarketError("caído a mitad del mes")
+            ids = range(n * self.rows, (n + 1) * self.rows)
+            yield RawPage(
+                f"https://gamma/markets?p={n}", [{"id": i, "conditionId": f"0x{i}"} for i in ids]
+            )
+
+
+def test_a_big_month_is_written_in_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """KE-022: el mes no se junta en memoria; cada tanda es un grupo de filas del Parquet."""
+    monkeypatch.setattr(polymarket_module, "BATCH_ROWS", 250)
+    report = ingest_markets(
+        StreamingSource(pages=10, rows=100),
+        tmp_path,
+        [date(2026, 6, 1)],
+        min_volume=0,
+        clock=FixedClock(),
+    )
+    path = bronze_path(tmp_path, "markets", date(2026, 6, 1))
+    parquet = pq.ParquetFile(path)
+    assert report.rows_written == parquet.metadata.num_rows == 1000
+    assert parquet.metadata.num_row_groups == 4  # 300 + 300 + 300 + 100
+    assert pl.read_parquet(path)["id"].to_list() == [str(i) for i in range(1000)]
+
+
+def test_a_month_that_fails_halfway_leaves_no_file(tmp_path: Path) -> None:
+    report = ingest_markets(
+        StreamingSource(pages=10, rows=100, fail_after=6),
+        tmp_path,
+        [date(2026, 6, 1)],
+        min_volume=0,
+        clock=FixedClock(),
+    )
+    path = bronze_path(tmp_path, "markets", date(2026, 6, 1))
+    assert report.failed == ["markets/2026-06"]
+    assert not path.exists()
+    assert not list(path.parent.glob("*.tmp"))  # tampoco queda el archivo a medias
 
 
 def test_prices_bronze_has_every_outcome_and_is_skipped_when_present(tmp_path: Path) -> None:

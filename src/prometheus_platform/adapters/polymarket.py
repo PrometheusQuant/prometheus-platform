@@ -20,7 +20,7 @@ ingesta secuencial. Ante un 429 o un 5xx se reintenta con espera creciente.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -89,7 +89,14 @@ class PolymarketSource:
                 self._sleep(2.0 * (attempt + 1))
         raise PredictionMarketError(f"{url}: sin respuesta válida tras reintentar ({last})")
 
-    def closed_markets(self, start: datetime, end: datetime, min_volume: float) -> list[RawPage]:
+    def closed_markets(
+        self, start: datetime, end: datetime, min_volume: float
+    ) -> Iterator[RawPage]:
+        """Entrega las páginas según llegan, sin juntar el mes entero en memoria (KE-022).
+
+        Un mes de 2026 tiene más de 100.000 mercados, unos 2 GB de JSON. Solo se retienen las
+        páginas de una ventana, como mucho 2.100 filas, hasta saber si cabe en el tope de offset.
+        """
         if end < start:
             raise ValueError(f"El fin ({end}) es anterior al inicio ({start})")
         pages: list[RawPage] = []
@@ -113,27 +120,27 @@ class PolymarketSource:
                 raise PredictionMarketError(f"Gamma no devolvió una lista: {request}")
             pages.append(RawPage(request, rows))
             if len(rows) < GAMMA_PAGE:
-                return pages
+                yield from pages
+                return
             offset += GAMMA_PAGE
-        # La ventana tiene más mercados de los que Gamma deja paginar: se parte en dos. Si ya es
-        # de una hora o menos (miles de mercados que vencen a la misma hora, p. ej. a medianoche
-        # del 31-dic), se pagina con cursor, que no tiene tope de offset.
+        # La ventana tiene más mercados de los que Gamma deja paginar: se descartan sus páginas y
+        # se parte en dos. Si ya es de una hora o menos (miles de mercados que vencen a la misma
+        # hora, p. ej. a medianoche del 31-dic), se pagina con cursor, que no tiene tope de offset.
         if end - start <= MIN_SPLIT:
-            return self._closed_markets_keyset(start, end, min_volume)
+            yield from self._closed_markets_keyset(start, end, min_volume)
+            return
         middle = (start + (end - start) / 2).replace(microsecond=0)
-        return self.closed_markets(start, middle, min_volume) + self.closed_markets(
-            middle + timedelta(seconds=1), end, min_volume
-        )
+        yield from self.closed_markets(start, middle, min_volume)
+        yield from self.closed_markets(middle + timedelta(seconds=1), end, min_volume)
 
     def _closed_markets_keyset(
         self, start: datetime, end: datetime, min_volume: float
-    ) -> list[RawPage]:
+    ) -> Iterator[RawPage]:
         """``/markets/keyset`` con ``after_cursor`` (spike PQ-78): sin tope, 100 filas por página.
 
         Sus filas no traen ``umaResolutionStatus`` ni ``enableOrderBook``; el silver toma la
         resolución de ``outcomePrices`` y ``closedTime``, así que no hace falta.
         """
-        pages: list[RawPage] = []
         cursor: str | None = None
         for _ in range(KEYSET_MAX_PAGES):
             params: dict[str, str | int | float] = {
@@ -149,10 +156,10 @@ class PolymarketSource:
             request, body = self._get(f"{self._gamma}/markets/keyset", params)
             if not isinstance(body, dict) or not isinstance(body.get("markets"), list):
                 raise PredictionMarketError(f"Gamma keyset no devolvió 'markets': {request}")
-            pages.append(RawPage(request, body["markets"]))
+            yield RawPage(request, body["markets"])
             cursor = body.get("next_cursor")
             if not cursor or not body["markets"]:
-                return pages
+                return
         raise PredictionMarketError(
             f"La paginación con cursor no termina entre {iso(start)} e {iso(end)}"
         )

@@ -27,6 +27,7 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-017 | Los logs no enmascaraban secretos dentro de textos libres | Resuelto |
 | KE-018 | El stream de futuros de Binance abre la conexión pero no envía nada | Resuelto |
 | KE-021 | El silver de mercados de Polymarket cargaba el JSON crudo de todo el catálogo y tumbó WSL | Resuelto (PQ-93) |
+| KE-022 | La descarga del catálogo de Polymarket juntaba el mes entero en memoria: 3,4 GB con 2026-06 | Resuelto (PQ-93) |
 
 ---
 
@@ -262,3 +263,22 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 - **Prevención:** no lanzar varios procesos pesados a la vez en la laptop. Para medir el pico de un
   proceso, usar `resource.getrusage(...).ru_maxrss`; `ulimit -v` corta antes de tiempo, porque
   polars reserva mucha memoria virtual que no usa.
+
+## KE-022: la descarga del catálogo de Polymarket juntaba el mes entero en memoria
+
+- **Síntoma:** `pq polymarket mercados` para 2026-06 pasa de 3 GB de memoria y sigue subiendo. Con
+  los ~5,8 GB de WSL, un mes más grande lo vuelve a tumbar, como en KE-021.
+- **Causa:** `closed_markets` devolvía la lista de todas las páginas del mes, y `ingest_markets`
+  copiaba cada fila a JSON antes de escribir. Un mes de 2026 tiene más de 110.000 mercados, unos
+  20 MB de JSON por cada 1.000: más de 2 GB solo de texto, más los diccionarios.
+- **Arreglo:**
+    - `closed_markets` es un generador. Retiene solo las páginas de una ventana, como mucho
+      2.100 filas, hasta saber si cabe en el tope de offset de Gamma.
+    - `ingest_markets` escribe el mes por tandas de `BATCH_ROWS` con un `ParquetWriter`, en un
+      `.tmp` que solo se renombra si el mes llega entero.
+    - `fetched_at` pasa a ser la hora de cada página y no la del final del mes. Es más fiel al
+      point-in-time, porque un mes tarda unos 20 minutos en bajar.
+
+  **Resuelto.**
+- **Prevención:** mientras corre una ingesta larga, `~/pq-ingesta/vigilante-memoria.sh` la corta
+  si pasa de 3,8 GB. Repetir un mes cuesta menos que un cierre de WSL.

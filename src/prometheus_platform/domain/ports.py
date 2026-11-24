@@ -133,8 +133,13 @@ class PredictionMarketSource(Protocol):
     bronze. Lanza ``PredictionMarketError`` si la API no responde algo válido.
     """
 
-    def closed_markets(self, start: datetime, end: datetime, min_volume: float) -> list[RawPage]:
-        """Mercados cerrados cuyo ``endDate`` cae en ``[start, end]`` (ambos incluidos)."""
+    def closed_markets(
+        self, start: datetime, end: datetime, min_volume: float
+    ) -> Iterable[RawPage]:
+        """Mercados cerrados cuyo ``endDate`` cae en ``[start, end]`` (ambos incluidos).
+
+        Puede ser un generador: quien la llama escribe cada página según llega (KE-022).
+        """
         ...
 
     def price_history(

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -92,6 +92,54 @@ def _write(path: Path, columns: dict[str, list[str | None]]) -> int:
     return table.num_rows
 
 
+MARKET_COLUMNS = ("id", "condition_id", "raw", "request", "fetched_at")
+
+
+def _market_batches(
+    pages: Iterable[RawPage], clock: Clock
+) -> Iterator[dict[str, list[str | None]]]:
+    """Filas del catálogo en lotes de ``BATCH_ROWS``, según llegan las páginas (KE-022).
+
+    ``fetched_at`` es la hora de cada página: con un mes de más de 100.000 mercados la descarga
+    dura muchos minutos, y la hora real de cada dato es la que respeta el point-in-time.
+    """
+    cols: dict[str, list[str | None]] = {k: [] for k in MARKET_COLUMNS}
+    for page in pages:
+        fetched = clock.now().isoformat()
+        for row in page.rows:
+            cols["id"].append(str(row.get("id")))
+            cols["condition_id"].append(row.get("conditionId"))
+            cols["raw"].append(json.dumps(row, ensure_ascii=False, sort_keys=True))
+            cols["request"].append(page.request)
+            cols["fetched_at"].append(fetched)
+        if len(cols["id"]) >= BATCH_ROWS:
+            yield cols
+            cols = {k: [] for k in MARKET_COLUMNS}
+    if cols["id"]:
+        yield cols
+
+
+def _write_stream(
+    path: Path, names: Sequence[str], batches: Iterable[dict[str, list[str | None]]]
+) -> int:
+    """Como ``_write``, pero lote a lote: el archivo final solo aparece si todo el mes llegó."""
+    schema = pa.schema([(n, pa.string()) for n in names])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".parquet.tmp")
+    total = 0
+    try:
+        with pq.ParquetWriter(tmp, schema, compression="zstd") as writer:
+            for cols in batches:
+                table = pa.table({n: pa.array(cols[n], type=pa.string()) for n in names})
+                writer.write_table(table)
+                total += table.num_rows
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, path)
+    return total
+
+
 def _fetch_all[T](
     jobs: list[T],
     fetch: Callable[[T], list[RawPage]],
@@ -142,32 +190,20 @@ def ingest_markets(  # noqa: PLR0913 - parámetros de la ingesta, todos con nomb
             continue
         start, end = month_window(month)
         try:
-            pages = source.closed_markets(start, end, min_volume)
+            rows = _write_stream(
+                path,
+                MARKET_COLUMNS,
+                _market_batches(source.closed_markets(start, end, min_volume), clock),
+            )
         except PredictionMarketError as exc:
             report.failed.append(label)
             log.warning(
                 "polymarket_month_failed", dataset="markets", month=f"{month:%Y-%m}", error=str(exc)
             )
             continue
-        fetched = clock.now().isoformat()
-        cols: dict[str, list[str | None]] = {
-            k: [] for k in ("id", "condition_id", "raw", "request", "fetched_at")
-        }
-        for page in pages:
-            for row in page.rows:
-                cols["id"].append(str(row.get("id")))
-                cols["condition_id"].append(row.get("conditionId"))
-                cols["raw"].append(json.dumps(row, ensure_ascii=False, sort_keys=True))
-                cols["request"].append(page.request)
-                cols["fetched_at"].append(fetched)
-        report.rows_written += _write(path, cols)
+        report.rows_written += rows
         report.written.append(label)
-        log.info(
-            "polymarket_month_written",
-            dataset="markets",
-            month=f"{month:%Y-%m}",
-            rows=len(cols["id"]),
-        )
+        log.info("polymarket_month_written", dataset="markets", month=f"{month:%Y-%m}", rows=rows)
     return report
 
 
