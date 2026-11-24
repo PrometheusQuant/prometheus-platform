@@ -1,8 +1,11 @@
-"""El dashboard, tal como lo ve un usuario: abre, muestra todas las pestañas y ninguna falla.
+"""El dashboard, tal como lo ve un usuario: abre, muestra todas las páginas y ninguna falla.
 
-Funciona con o sin artefactos: cada pestaña debe mostrar datos o el aviso con el comando que
-los genera (la CI lo prueba con un lakehouse vacío; en local, con los datos reales).
+Funciona con o sin artefactos: cada página debe mostrar datos o el aviso de que faltan (la CI lo
+prueba con un lakehouse vacío; en local, con los datos reales). Desde PQ-127 las páginas van en el
+menú lateral (``st.navigation``) y no en pestañas.
 """
+
+import re
 
 import pytest
 
@@ -28,26 +31,48 @@ TIMEOUT_MS = 30_000
 def dashboard(page: Page, base_url: str) -> Page:
     page.set_default_timeout(TIMEOUT_MS)
     page.goto(base_url)
-    expect(page.get_by_role("tab").first).to_be_visible()
+    expect(page.get_by_test_id("stSidebarNavLink").first).to_be_visible()
     return page
 
 
-def test_opens_with_title_and_all_the_tabs(dashboard: Page) -> None:
-    expect(dashboard).to_have_title("PrometheusQuant")
-    expect(dashboard.get_by_role("heading", level=1)).to_contain_text("tablero de investigación")
-    expect(dashboard.get_by_role("tab")).to_have_text(list(TABS))
+def test_opens_with_title_and_all_the_pages(dashboard: Page) -> None:
+    expect(dashboard).to_have_title(re.compile("PrometheusQuant"))
+    expect(dashboard.get_by_role("heading", level=1)).to_have_text("PrometheusQuant")
+    # Los enlaces llevan delante el nombre del icono Material: se busca el título dentro.
+    expect(dashboard.get_by_test_id("stSidebarNavLink")).to_contain_text(list(TABS))
 
 
 @pytest.mark.parametrize(("tab", "heading"), TABS.items(), ids=range(len(TABS)))
-def test_each_tab_shows_data_or_how_to_generate_it(dashboard: Page, tab: str, heading: str) -> None:
-    dashboard.get_by_role("tab", name=tab).click()
-    panel = dashboard.get_by_role("tabpanel")
-    expect(panel.get_by_role("heading", name=heading)).to_be_visible()
-    content = panel.locator(
-        '[data-testid="stDataFrame"], [data-testid="stAlert"], [data-testid="stMetric"]'
+def test_each_page_shows_data_or_says_what_is_missing(
+    dashboard: Page, tab: str, heading: str
+) -> None:
+    dashboard.get_by_test_id("stSidebarNavLink").filter(has_text=tab).click()
+    main = dashboard.get_by_test_id("stMain")
+    expect(main.get_by_role("heading", name=heading)).to_be_visible()
+    content = main.locator(  # la portada (PQ-127) muestra cifras en texto y el glosario
+        '[data-testid="stDataFrame"], [data-testid="stAlert"], [data-testid="stMetric"],'
+        ' [data-testid="stExpander"]'
     )
     expect(content.first).to_be_visible()
     expect(dashboard.locator('[data-testid="stException"]')).to_have_count(0)
+
+
+def test_fits_a_375_px_phone(page: Page, base_url: str) -> None:
+    """PQ-127, hallazgo 11: el título no se parte y nada obliga a desplazarse en horizontal."""
+    page.set_default_timeout(TIMEOUT_MS)
+    page.set_viewport_size({"width": 375, "height": 812})
+    page.goto(base_url)
+    title = page.get_by_role("heading", level=1)
+    expect(title).to_have_text("PrometheusQuant")
+    expect(title).to_have_css("font-size", "32px")  # la regla de pantallas estrechas ya se aplicó
+    line = title.evaluate("e => parseFloat(getComputedStyle(e).lineHeight)")
+    text = title.locator("[data-heading-text]")  # el h1 suma padding: se mide el texto
+    box = text.bounding_box()
+    assert box is not None
+    assert box["height"] < 1.6 * line  # una sola línea
+    overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
+    assert overflow <= 1
+    expect(page.locator('[data-testid="stException"]')).to_have_count(0)
 
 
 def test_fair_mode_shows_the_guided_tour_with_big_type(page: Page, base_url: str) -> None:

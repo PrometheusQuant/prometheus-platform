@@ -3,12 +3,14 @@
 Solo lee artefactos del lakehouse (``PQ_DATA_DIR``); en Docker el volumen se monta en solo
 lectura. Nunca muestra el holdout: las evaluaciones terminan antes de 2024-07-01.
 
-Con ``?modo=feria`` (PQ-102): tipografía grande, la pestaña en vivo se actualiza sola y la barra
+Con ``?modo=feria`` (PQ-102): tipografía grande, la página en vivo se actualiza sola y la barra
 lateral guía el recorrido de 7 pasos del pitch (``tour.py``).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -16,10 +18,12 @@ from typing import Any, Literal
 import altair as alt
 import polars as pl
 import streamlit as st
+from streamlit.navigation.page import StreamlitPage
 
 from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
 from prometheus_platform.api.dashboard import portfolio, style, tour
+from prometheus_platform.api.dashboard import summary as resumen
 from prometheus_platform.api.dashboard.artifacts import (
     Artifacts,
     equity_curves,
@@ -46,18 +50,7 @@ from prometheus_platform.portfolio_risk.kill_switch import KillSwitch
 from prometheus_platform.research import explain, nowcast, what_if
 from prometheus_platform.research.simulation import WeeklyRegimeModel
 
-# Patrón F de storytelling: cada pestaña responde una pregunta del jurado, en orden.
-LABELS = [
-    "Inicio: ¿cómo va?",
-    "¿Funciona? Carry y gates",
-    "¿Qué predice? Modelo",
-    "¿Qué riesgo hay? Simulación",
-    "¿Y si invierto? Simula tu inversión",
-    "¿Qué predice hoy? Funding en vivo",
-    "¿Cómo va en vivo? Paper trading",
-    "¿Cómo se reparte? Cartera",
-    "Datos y calidad (técnico)",
-]
+FAIR_KEY = "modo_feria"
 
 
 def _missing(art: Artifacts, name: str) -> None:
@@ -82,12 +75,20 @@ def _tab_data(art: Artifacts) -> None:
 
 
 # Insignias de estado: icono propio de Streamlit (funciona sin internet) + texto + color.
-BadgeColor = Literal["green", "orange", "red"]
+# Descartar una estrategia es el protocolo funcionando, no una alerta: va en gris (hallazgo 4).
+BadgeColor = Literal["green", "orange", "gray"]
 BADGES: dict[str, tuple[str, BadgeColor]] = {
     "ok": (":material/check_circle:", "green"),
     "warn": (":material/schedule:", "orange"),
-    "bad": (":material/cancel:", "red"),
+    "bad": (":material/block:", "gray"),
 }
+
+
+def _figure(column: Any, label: str, value: str, context: str) -> None:
+    """Una cifra en tamaño normal, con su comparación debajo."""
+    column.caption(label)
+    column.markdown(f"**{value}**")
+    column.caption(context)
 
 
 def _bar_chart(  # noqa: PLR0913 - keyword-only salvo los datos y los ejes
@@ -158,35 +159,49 @@ def _tab_home(data_dir: Path, art: Artifacts, max_age_minutes: int) -> None:
     paths = PaperPaths(data_dir / "paper")
     view = build_view(JsonlEventJournal(paths.journal).replay())
     beat = read_heartbeat(paths.heartbeat)
+    now = SystemClock().now()
+    theta = resumen.entry_threshold(art.carry.get("H2", {}).get("selected"))
+    headline = resumen.paper_headline(view, theta, now)
     live = st.container(border=True)
     live.markdown("##### Paper trading (dinero simulado, precios reales)")
-    if art.carry_holdout is not None and not art.carry_holdout.get("pasa"):
-        live.caption("Demostración del sistema: el carry no superó la prueba final.")
-    if not view.valuations:
-        live.info("Aún no hay paper trading. Se arranca con `uv run pq paper run`.")
+    if headline is None:
+        live.info("Aún no hay paper trading.")
+        live.caption("Para el equipo: se arranca con `uv run pq paper run`.")
     else:
-        age = None if beat is None else (SystemClock().now() - beat["at"]).total_seconds() / 60
+        live.markdown(headline.sentence, width=760)
+        if art.carry_holdout is not None and not art.carry_holdout.get("pasa"):
+            live.caption("Es una demostración del sistema: el carry no superó la prueba final.")
+        age = None if beat is None else (now - beat["at"]).total_seconds() / 60
         running = age is not None and age <= max_age_minutes and bool(beat and beat.get("ok"))
-        equity, initial = float(view.equity or 0), float(view.initial_equity or 0)
         cols = live.columns(4)
-        cols[0].markdown("Estado del runner")
+        cols[0].caption("Estado del runner")
         if running:
             cols[0].badge("En marcha", icon=":material/check_circle:", color="green")
         else:
             cols[0].badge("Detenido", icon=":material/cancel:", color="red")
-        cols[1].metric("Capital", style.usd(equity))
-        cols[2].metric("Ganancia acumulada", style.usd(equity - initial, signed=True))
-        cols[3].metric("Peor caída", style.pct(float(view.drawdown), 2))
+        # Cifras en tamaño normal y con su comparación (hallazgo 4, Few).
+        _figure(cols[1], "Capital", headline.capital, headline.change)
+        _figure(cols[2], "En marcha", f"{headline.days} días", "desde el primer ciclo")
+        _figure(cols[3], "Peor caída", headline.drawdown, "desde el máximo")
     st.markdown("##### Estrategias")
     overview = strategy_overview(art)
-    if not overview:
-        st.info("Aún no hay evaluaciones. Se generan con `uv run pq research carry` y `trend`.")
-    for column, item in zip(st.columns(max(len(overview), 1)), overview, strict=False):
+    research = data_dir / "research"
+    pending = [p for p in resumen.IN_PROGRESS if not (research / p.artifact).exists()]
+    if not overview and not pending:
+        st.info("Aún no hay evaluaciones.")
+        st.caption("Para el equipo: se generan con `uv run pq research carry` y `trend`.")
+    cards = st.columns(max(len(overview) + len(pending), 1))
+    for column, item in zip(cards, overview, strict=False):
         card = column.container(border=True)
         card.markdown(f"**{item.name}**")
         icon, color = BADGES[item.level]
         card.badge(item.stage, icon=icon, color=color)
         card.caption(item.summary)
+    for column, todo in zip(cards[len(overview) :], pending, strict=False):
+        card = column.container(border=True)
+        card.markdown(f"**{todo.name}**")
+        card.badge(todo.stage, icon=":material/pending:", color="blue")
+        card.caption(todo.summary)
     with st.expander("¿Qué significa cada término?"):
         for term, meaning in style.GLOSSARY.items():
             st.markdown(f"**{term}.** {meaning}")
@@ -318,16 +333,36 @@ def _tab_what_if(data_dir: Path) -> None:
     try:
         model = _what_if_model(str(data_dir))
     except (FileNotFoundError, OSError, ValueError, pl.exceptions.PolarsError):
-        st.info(
-            "Faltan los datos silver de H2 (SOL, BNB y XRP). Se generan con"
-            " `uv run pq silver build --symbol SOLUSDT` (y BNBUSDT, XRPUSDT)."
+        st.info("Todavía no están los datos de H2 (SOL, BNB y XRP).")
+        st.caption(
+            "Para el equipo: `uv run pq silver build --symbol SOLUSDT` (y BNBUSDT, XRPUSDT)."
         )
         return
+    _what_if_controls(model)
+
+
+@st.fragment  # sus controles solo recalculan el simulador, no la página entera (hallazgo 3)
+def _what_if_controls(model: WeeklyRegimeModel) -> None:
     left, mid, right, last = st.columns(4)
     capital = left.number_input("Capital (USD)", 100, 1_000_000, 1_000, step=100)
-    years = int(mid.radio("Horizonte (años)", what_if.HORIZONS_YEARS, horizontal=True))
+    years = int(
+        mid.segmented_control(
+            "Horizonte",
+            what_if.HORIZONS_YEARS,
+            default=what_if.HORIZONS_YEARS[0],
+            required=True,
+            format_func=lambda y: f"{y} año" if y == 1 else f"{y} años",
+        )
+        or what_if.HORIZONS_YEARS[0]
+    )
     failure = (
-        right.slider("Quiebra del exchange (% anual)", 0.0, 10.0, 2.0, 0.5, format="%.1f %%") / 100
+        right.select_slider(  # el slider usa printf: mostraría «2.0 %» con punto
+            "Quiebra del exchange (% anual)",
+            options=[x / 2 for x in range(21)],
+            value=2.0,
+            format_func=lambda v: f"{style.number(v, 1)} %",
+        )
+        / 100
     )
     theta = last.selectbox(
         "Umbral θ (pre-registrado)",
@@ -341,24 +376,76 @@ def _tab_what_if(data_dir: Path) -> None:
     b.metric("Stablecoin al 4 %", style.usd(result.stablecoin_capital, 0))
     c.metric("Probabilidad de perder dinero", style.pct(result.prob_loss))
     d.metric("Probabilidad de ganarle a la stablecoin", style.pct(result.prob_beats_stablecoin))
-    counts, centers = what_if.histogram(result.final_capital)
-    _bar_chart(
-        pl.DataFrame(
-            {"capital final (USD)": [style.number(c, 0) for c in centers], "trayectorias": counts}
-        ),
-        "capital final (USD)",
-        "trayectorias",
-        alt_text=(
-            f"Capital final simulado: entre {style.usd(result.p5, 0)} y "
-            f"{style.usd(result.p95, 0)} en el 90 % de los casos"
-        ),
+    st.markdown(
+        "**Capital final si el exchange no quiebra.** Con la quiebra se pierde todo lo que está"
+        f" en el exchange. Pasa en el {style.pct(result.horizon_failure_probability)} de los"
+        " casos y va aparte para no aplastar el gráfico."
     )
+    _what_if_histogram(result, float(capital))
     st.caption(
-        f"Entre el 5 % y el 95 % de los casos: {style.usd(result.p5, 0)} a"
+        f"Entre el 5 % y el 95 % de los casos, quiebra incluida: {style.usd(result.p5, 0)} a"
         f" {style.usd(result.p95, 0)}. En el peor 5 % se pierden, en promedio,"
-        f" {style.usd(result.cvar95_loss, 0)}. Probabilidad de quiebra en el horizonte:"
-        f" {style.pct(result.horizon_failure_probability)}"
-        " (se pierde todo lo que está en el exchange)."
+        f" {style.usd(result.cvar95_loss, 0)}."
+    )
+
+
+def _what_if_histogram(result: what_if.WhatIfResult, capital: float) -> None:
+    frame = resumen.histogram_frame(result.final_capital)
+    if frame.is_empty():
+        st.info("En todas las trayectorias quiebra el exchange.")
+        return
+    x_title = "capital final (USD)"
+    bars = (
+        alt.Chart(frame)
+        .mark_bar(color=style.BRAND, opacity=0.85)
+        .encode(
+            x=alt.X(
+                "desde:Q",
+                title=x_title,
+                scale=alt.Scale(zero=False),  # el rango que importa, no desde 0
+                axis=alt.Axis(format=",.0f", tickCount=6),
+            ),
+            x2="hasta:Q",
+            y=alt.Y("trayectorias:Q", title="trayectorias", axis=alt.Axis(tickCount=5)),
+            y2=alt.datum(0),  # barras desde el eje, no tiras sueltas
+            tooltip=[
+                alt.Tooltip("desde:Q", title="desde (USD)", format=",.0f"),
+                alt.Tooltip("hasta:Q", title="hasta (USD)", format=",.0f"),
+                alt.Tooltip("trayectorias:Q", format=",.0f"),
+            ],
+        )
+    )
+    refs = pl.DataFrame(
+        {
+            "valor": [capital, result.stablecoin_capital],
+            "referencia": ["capital inicial", "stablecoin al 4 %"],
+        }
+    )
+    rules = (
+        alt.Chart(refs)
+        .mark_rule(color=style.NEUTRAL, strokeDash=[4, 3], strokeWidth=2)
+        .encode(x="valor:Q", tooltip=["referencia:N", alt.Tooltip("valor:Q", format=",.0f")])
+    )
+    # Las dos referencias suelen estar juntas: una etiqueta a cada lado de su línea.
+    left = (
+        alt.Chart(refs.head(1))
+        .mark_text(align="right", dx=-4, dy=-8, color=style.TEXT_SECONDARY, font=style.FONT)
+        .encode(x="valor:Q", y=alt.value(0), text="referencia:N")
+    )
+    right = (
+        alt.Chart(refs.tail(1))
+        .mark_text(align="left", dx=4, dy=-8, color=style.TEXT_SECONDARY, font=style.FONT)
+        .encode(x="valor:Q", y=alt.value(0), text="referencia:N")
+    )
+    st.altair_chart(
+        alt.layer(bars, rules, left, right).properties(height=260),
+        width="stretch",
+        theme=None,
+        alt=(
+            f"Capital final simulado: mediana de {style.usd(result.median, 0)}, frente a"
+            f" {style.usd(capital, 0)} iniciales y {style.usd(result.stablecoin_capital, 0)} con"
+            " la stablecoin"
+        ),
     )
 
 
@@ -378,16 +465,17 @@ def _tab_nowcast(data_dir: Path) -> None:
     try:
         result = nowcast.forecast(_nowcast_model(str(data_dir)), nowcast.latest_rows(data_dir))
     except nowcast.StaleDataError as exc:
-        st.info(
-            f"Sin datos de hoy: {exc}. Tráelos con la API pública de Binance:"
-            " `uv run pq ingest --source api funding --symbol SOLUSDT` (y klines spot/um, para"
-            " cada símbolo) y luego `uv run pq silver build --symbol SOLUSDT`."
+        st.info(f"Sin datos de hoy: {exc}.")
+        st.caption(
+            "Para el equipo: `uv run pq ingest --source api funding --symbol SOLUSDT` (y klines"
+            " spot/um, para cada símbolo) y luego `uv run pq silver build --symbol SOLUSDT`."
         )
         return
     except (FileNotFoundError, OSError, ValueError, KeyError, pl.exceptions.PolarsError):
-        st.info(
-            "Falta el modelo o los datos: `uv run pq research funding-model --figures <dir>` y"
-            " silver de los cinco símbolos."
+        st.info("Todavía no está el modelo de predicción o faltan sus datos.")
+        st.caption(
+            "Para el equipo: `uv run pq research funding-model --figures <dir>` y silver de los"
+            " cinco símbolos."
         )
         return
     table = pl.DataFrame(
@@ -399,18 +487,29 @@ def _tab_nowcast(data_dir: Path) -> None:
             "régimen previsto": [r.regime for r in result.rows],
         }
     )
+    fresh = resumen.freshness(max(r.funding_time for r in result.rows), SystemClock().now())
+    if fresh.stale:  # más de dos liquidaciones sin dato nuevo (hallazgo 2)
+        st.warning(
+            f"El último dato es de {fresh.text}: esta es la última predicción disponible, no la "
+            "de hoy.",
+            icon=":material/history:",
+        )
+        st.caption("Para el equipo: se actualiza con `uv run pq ingest --source api funding`.")
+    else:
+        st.badge(f"Dato de {fresh.text}", icon=":material/schedule:", color="green")
+    st.markdown(resumen.nowcast_summary(result.rows))
     st.dataframe(
         table, hide_index=True, width="stretch", alt="Probabilidad de funding alto por moneda"
     )
-    st.markdown("**Por qué predice esto hoy**")
+    why = st.expander("Por qué predice esto para cada moneda", icon=":material/help:")
     for row in result.rows:
-        st.markdown(
+        why.markdown(
             "- "
             + explain.explain_in_words(
                 row.symbol, row.probability_high, result.explanations[row.symbol]
             )
         )
-    st.caption(
+    why.caption(
         "Para cada símbolo se prueba qué pasaría si una variable tuviera su valor habitual (la"
         " mediana del periodo de desarrollo) y todo lo demás quedara igual."
     )
@@ -543,7 +642,7 @@ def _live_curve(view: PaperView, cagr: float | None) -> None:
         )
 
 
-def _live_tables(view: PaperView) -> None:
+def _live_tables(view: PaperView, theta: float) -> None:
     left, right = st.columns(2)
     with left:
         st.markdown("**Posiciones abiertas**")
@@ -587,9 +686,10 @@ def _live_tables(view: PaperView) -> None:
             )
         else:
             st.caption("Aún no hay órdenes.")
-    st.markdown("**Últimas liquidaciones y decisiones**")
+    st.markdown("**Liquidaciones y decisiones**")
+    st.markdown(resumen.settlements_summary(view.settlements, theta))
     decisions = view.settlements[-12:][::-1]
-    st.dataframe(
+    st.expander("Ver las últimas 12 liquidaciones", icon=":material/table:").dataframe(
         pl.DataFrame(
             {
                 "liquidación (UTC)": [d.funding_time.strftime("%Y-%m-%d %H:%M") for d in decisions],
@@ -648,7 +748,7 @@ def _tab_live(
     cols[4].metric("Peor caída", style.pct(float(view.drawdown), 2))
     _live_status(paths, max_age_minutes)
     _live_curve(view, _expected_cagr(art))
-    _live_tables(view)
+    _live_tables(view, resumen.entry_threshold(art.carry.get("H2", {}).get("selected")))
     if auto_refresh:
         st.caption(f"Se actualiza sola cada {tour.LIVE_REFRESH.seconds} s.")
     else:
@@ -784,8 +884,8 @@ def _move(delta: int) -> None:
     st.session_state["paso"] = tour.clamp(int(st.session_state.get("paso", 0)) + delta)
 
 
-def _sidebar_tour() -> None:
-    """Recorrido de la feria: qué pestaña abrir, qué decir y qué señalar en cada paso."""
+def _sidebar_tour(pages: dict[str, StreamlitPage]) -> None:
+    """Recorrido de la feria: qué página abrir, qué decir y qué señalar en cada paso."""
     step = tour.clamp(int(st.session_state.get("paso", 0)))
     current, total = tour.STEPS[step], len(tour.STEPS)
     with st.sidebar:
@@ -794,6 +894,8 @@ def _sidebar_tour() -> None:
         st.subheader(current.title)
         if current.tab is not None:
             st.markdown(f"**Abre:** {current.tab}")
+            if current.tab in pages:
+                st.page_link(pages[current.tab], label="Ir a esa página", icon=":material/east:")
         st.markdown(f"**Di:** {current.say}")
         st.markdown(f"**Señala:** {current.show}")
         back, forward = st.columns(2)
@@ -815,42 +917,165 @@ def _sidebar_tour() -> None:
         )
 
 
+# --- Páginas (PQ-127) --------------------------------------------------------------------------
+# Con st.navigation solo se ejecuta la página visible. Con st.tabs se calculaban las 9 en cada
+# rerun (hallazgo 3 de PQ-125).
+
+
+@dataclass(frozen=True)
+class _Context:
+    data_dir: Path
+    art: Artifacts
+    max_age: int
+    fair: bool
+
+
+def _context() -> _Context:
+    settings = load_settings()
+    return _Context(
+        settings.data_dir,
+        load_artifacts(settings.data_dir),
+        settings.paper_heartbeat_max_age_minutes,
+        bool(st.session_state.get(FAIR_KEY)),
+    )
+
+
+def _page_home() -> None:
+    ctx = _context()
+    _tab_home(ctx.data_dir, ctx.art, ctx.max_age)
+
+
+def _page_carry() -> None:
+    _tab_carry(_context().art)
+
+
+def _page_model() -> None:
+    _tab_model(_context().art)
+
+
+def _page_simulation() -> None:
+    _tab_simulation(_context().art)
+
+
+def _page_what_if() -> None:
+    _tab_what_if(_context().data_dir)
+
+
+def _page_nowcast() -> None:
+    _tab_nowcast(_context().data_dir)
+
+
+def _page_live() -> None:
+    ctx = _context()
+    if ctx.fair:  # se redibuja sola, sin recargar el resto del tablero
+        st.fragment(run_every=tour.LIVE_REFRESH)(_tab_live)(
+            ctx.data_dir, ctx.art, ctx.max_age, auto_refresh=True
+        )
+    else:
+        _tab_live(ctx.data_dir, ctx.art, ctx.max_age)
+
+
+def _page_portfolio() -> None:
+    ctx = _context()
+    _tab_portfolio(ctx.data_dir, ctx.art)
+
+
+def _page_data() -> None:
+    ctx = _context()
+    _tab_data(ctx.art)
+    st.caption(f"Para el equipo: artefactos leídos de `{ctx.data_dir}` (solo lectura).")
+
+
+@dataclass(frozen=True)
+class PageSpec:
+    label: str
+    render: Callable[[], None]
+    icon: str
+    url_path: str
+    section: str
+
+
+# Patrón F de storytelling: cada página responde una pregunta del jurado, en orden.
+PAGES: tuple[PageSpec, ...] = (
+    PageSpec("Inicio: ¿cómo va?", _page_home, ":material/home:", "inicio", "Resultados"),
+    PageSpec(
+        "¿Funciona? Carry y gates", _page_carry, ":material/fact_check:", "carry", "Resultados"
+    ),
+    PageSpec(
+        "¿Qué predice? Modelo", _page_model, ":material/model_training:", "modelo", "Resultados"
+    ),
+    PageSpec(
+        "¿Qué riesgo hay? Simulación",
+        _page_simulation,
+        ":material/casino:",
+        "simulacion",
+        "Resultados",
+    ),
+    PageSpec(
+        "¿Y si invierto? Simula tu inversión",
+        _page_what_if,
+        ":material/calculate:",
+        "simula-tu-inversion",
+        "Para ti",
+    ),
+    PageSpec(
+        "¿Qué predice hoy? Funding en vivo",
+        _page_nowcast,
+        ":material/online_prediction:",
+        "funding-hoy",
+        "Para ti",
+    ),
+    PageSpec(
+        "¿Cómo va en vivo? Paper trading",
+        _page_live,
+        ":material/monitor_heart:",
+        "paper-trading",
+        "En vivo",
+    ),
+    PageSpec(
+        "¿Cómo se reparte? Cartera", _page_portfolio, ":material/pie_chart:", "cartera", "En vivo"
+    ),
+    PageSpec("Datos y calidad (técnico)", _page_data, ":material/database:", "datos", "Técnico"),
+)
+LABELS = [p.label for p in PAGES]
+
+
+def render_page(url_path: str) -> None:
+    """Dibuja una sola página, sin navegación. Lo usan los tests (AppTest no navega a funciones)."""
+    style.enable_altair_theme()
+    next(p for p in PAGES if p.url_path == url_path).render()
+
+
 def main() -> None:
     st.set_page_config(
         page_title="PrometheusQuant", page_icon=":material/monitoring:", layout="wide"
     )
     style.enable_altair_theme()
-    fair = tour.is_fair_mode(st.query_params.to_dict())
+    if tour.is_fair_mode(st.query_params.to_dict()):
+        st.session_state[FAIR_KEY] = True  # la navegación limpia la URL: se recuerda en la sesión
+    fair = bool(st.session_state.get(FAIR_KEY))
+    sections: dict[str, list[StreamlitPage]] = {}
+    by_label: dict[str, StreamlitPage] = {}
+    for spec in PAGES:
+        page = st.Page(
+            spec.render,
+            title=spec.label,
+            icon=spec.icon,
+            url_path=spec.url_path,
+            default=spec.url_path == "inicio",
+        )
+        sections.setdefault(spec.section, []).append(page)
+        by_label[spec.label] = page
+    current = st.navigation(sections, expanded=True)
+    st.markdown(style.RESPONSIVE_CSS, unsafe_allow_html=True)  # solo CSS local, sin red
     if fair:
+        st.query_params["modo"] = tour.FAIR_MODE
         st.markdown(tour.FAIR_CSS, unsafe_allow_html=True)
-        _sidebar_tour()
-    st.title("PrometheusQuant: tablero de investigación")  # el e2e busca este título
-    settings = load_settings()
-    data_dir = settings.data_dir
-    art = load_artifacts(data_dir)
-    st.caption(f"Artefactos leídos de `{data_dir}` (solo lectura).")
-    tabs = st.tabs(LABELS)
-    max_age = settings.paper_heartbeat_max_age_minutes
-    with tabs[0]:
-        _tab_home(data_dir, art, max_age)
-    for tab, render in zip(tabs[1:4], (_tab_carry, _tab_model, _tab_simulation), strict=True):
-        with tab:
-            render(art)
-    with tabs[4]:
-        _tab_what_if(data_dir)
-    with tabs[5]:
-        _tab_nowcast(data_dir)
-    with tabs[6]:
-        if fair:  # se redibuja sola, sin recargar el resto del tablero
-            st.fragment(run_every=tour.LIVE_REFRESH)(_tab_live)(
-                data_dir, art, max_age, auto_refresh=True
-            )
-        else:
-            _tab_live(data_dir, art, max_age)
-    with tabs[7]:
-        _tab_portfolio(data_dir, art)
-    with tabs[8]:
-        _tab_data(art)
+        _sidebar_tour(by_label)
+    st.title("PrometheusQuant")  # corto: a 375 px el título largo se partía (hallazgo 11)
+    st.caption("Estrategias de cripto probadas con reglas fijadas antes de ver los resultados.")
+    current.run()
 
 
-main()
+if __name__ == "__main__":
+    main()

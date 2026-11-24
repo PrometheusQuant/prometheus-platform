@@ -44,7 +44,7 @@ poster: ## Póster A3 de la feria con QR, desde los resultados (Typst)
 	cp reports/poster/poster.pdf docs/academico/poster-feria.pdf
 	@echo "Póster en docs/academico/poster-feria.pdf"
 
-screenshots: ## Captura cada pestaña del dashboard en reports/storytelling/_img/dashboard/
+screenshots: ## Captura cada página del dashboard en reports/storytelling/_img/dashboard/ (--movil: a 375 px)
 	docker compose up -d --build --wait
 	uv run --group e2e python scripts/capture_dashboard.py
 

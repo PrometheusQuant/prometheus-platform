@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from prometheus_platform.api.dashboard import style
+from prometheus_platform.api.dashboard import app, style
 from prometheus_platform.api.dashboard.artifacts import (
     equity_curves,
     gates_table,
@@ -158,33 +158,59 @@ def app_labels() -> list[str]:
     ]
 
 
-def run_app(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
+def _environment(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(data_dir.parent)
     for name in [n for n in os.environ if n.startswith("PQ_")]:
         monkeypatch.delenv(name)
     monkeypatch.setenv("PQ_DATA_DIR", str(data_dir))
+
+
+def run_app(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
+    """El tablero completo: con st.navigation solo se dibuja la portada."""
+    _environment(data_dir, monkeypatch)
     return AppTest.from_file(str(APP), default_timeout=60).run()
 
 
-def test_app_renders_every_tab_with_artifacts(lake: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def run_page(data_dir: Path, monkeypatch: pytest.MonkeyPatch, url_path: str) -> AppTest:
+    """Una página suelta. AppTest solo sabe navegar a páginas que son archivos (PQ-127)."""
+    _environment(data_dir, monkeypatch)
+    script = f"from prometheus_platform.api.dashboard import app\napp.render_page({url_path!r})"
+    return AppTest.from_string(script, default_timeout=60).run()
+
+
+def test_app_opens_on_the_home_page_with_a_short_title(
+    lake: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     at = run_app(lake, monkeypatch)
     assert not at.exception
-    assert [t.label for t in at.tabs] == app_labels()
-    metrics = {m.label: m.value for m in at.metric}
-    assert metrics["Configuración elegida"] == "k9-theta20"
-    assert metrics["Probabilidad de quiebra anual de equilibrio"] == "0,40 %"
-    assert any("carry H1" in i.value for i in at.info)
+    assert app_labels() == app.LABELS
+    assert at.title[0].value == "PrometheusQuant"  # a 375 px el largo se partía (PQ-127)
+    assert any("¿Cómo va?" in h.value for h in at.subheader)
+    assert not any(str(lake) in c.value for c in at.caption)  # la ruta local, solo en datos
+
+
+def test_every_page_renders_with_artifacts(lake: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pages = {p.url_path: run_page(lake, monkeypatch, p.url_path) for p in app.PAGES}
+    assert not [path for path, at in pages.items() if at.exception]
+    carry = {m.label: m.value for m in pages["carry"].metric}
+    assert carry["Configuración elegida"] == "k9-theta20"
+    assert any("carry H1" in i.value for i in pages["carry"].info)
+    simulation = {m.label: m.value for m in pages["simulacion"].metric}
+    assert simulation["Probabilidad de quiebra anual de equilibrio"] == "0,40 %"
+    assert any(str(lake) in c.value for c in pages["datos"].caption)
 
 
 def test_app_degrades_gracefully_without_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    at = run_app(tmp_path / "vacio", monkeypatch)
-    assert not at.exception
+    empty = tmp_path / "vacio"
+    pages = [run_page(empty, monkeypatch, p.url_path) for p in app.PAGES]
+    assert not [at for at in pages if at.exception]
     # 6 artefactos faltantes + simulador y predicción sin silver + paper trading sin diario, en la
-    # cartera: sin operaciones y sin bandas, y en la portada: sin paper ni evaluaciones (PQ-124)
-    assert len(at.info) == 13
-    assert not at.dataframe
+    # cartera: sin operaciones y sin bandas, y en la portada: sin paper (PQ-124). Las evaluaciones
+    # no faltan: la portada muestra las estrategias en curso (PQ-127).
+    assert sum(len(at.info) for at in pages) == 12
+    assert not any(at.dataframe for at in pages)
 
 
 def test_model_falls_back_to_the_level_formulation(tmp_path: Path) -> None:
@@ -273,7 +299,7 @@ def test_live_tab_shows_the_paper_trading_journal(
         },
     )
 
-    at = run_app(lake, monkeypatch)
+    at = run_page(lake, monkeypatch, "paper-trading")
 
     assert not at.exception
     metrics = {m.label: m.value for m in at.metric}
