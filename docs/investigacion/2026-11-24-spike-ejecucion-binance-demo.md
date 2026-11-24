@@ -28,7 +28,7 @@ Se hizo con REST firmado a mano (httpx) y con CCXT 4.5.94.
 | Redondeo de precio y cantidad | A mano (`tickSize` 0,01, `stepSize` 0,001, nocional mínimo 5) | `price_to_precision` y `amount_to_precision` |
 | Reloj | Desfase medido a mano y corregido con margen | `adjustForTimeDifference` |
 | Saldo, posición y funding en USDⓈ-M | ✅ responden (posición y funding vacíos) | ✅ |
-| Orden en USDⓈ-M | ❌ «Margin is insufficient» (billetera de futuros demo en 0) | ❌ igual |
+| Orden en USDⓈ-M | ❌ al principio: «Margin is insufficient» (billetera de futuros demo sin activar) | ✅ tras activarla: `open` (462 ms), luego `canceled` |
 | Carga inicial | — | `load_markets` tarda ~6,5 s |
 
 **NautilusTrader:** la última versión estable en PyPI es la 1.231.0, la misma del ADR-0006. Su
@@ -57,11 +57,14 @@ que falta, que es un adaptador detrás de `OrderGateway`.
    - El spot informa el peso usado (`x-mbx-used-weight-1m`: 44–89 tras unas pocas peticiones, de
      6.000 por minuto). El demo de futuros devuelve `-1`.
    - **Mitigación:** `enableRateLimit` de CCXT. El runner cicla cada 60 s, muy lejos del límite.
-5. **Billetera de futuros demo vacía.** La API demo no expone `/sapi` (transferencias: 404). El
-   titular la financia desde la web; ver «Pendiente».
+5. **La billetera de futuros demo se activa al abrirla en la web.**
+   - Hasta que el titular entró una vez en la pantalla *Futures* del demo, la API la veía en 0 y
+     rechazaba las órdenes por margen.
+   - Después mostró 5.000 USDT y 5.000 USDC de prueba, sin transferir nada.
+   - La API demo no expone `/sapi`, así que las transferencias por API dan 404.
 
-## Pendiente para cerrar el criterio de futuros
+## Futuros: criterio cerrado (2026-11-24)
 
-El titular pasa USDT de prueba a la billetera de futuros desde la web del demo: paso 2b de
-[pasos del titular](../compliance/pasos-del-titular.md). Después se repite la orden y la
-cancelación en USDⓈ-M, y el resultado se añade aquí.
+Después de que el titular abriera la pantalla *Futures* del demo, CCXT leyó 5.000 USDT libres en
+USDⓈ-M, colocó una orden límite de venta de 0,16 SOL a 76,69 (estado `open`, 462 ms) y la canceló.
+Con eso se cumple el criterio del ticket en los dos mercados.
