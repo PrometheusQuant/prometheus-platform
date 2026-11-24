@@ -69,10 +69,21 @@ def mercado(desde: str, hasta: str, vmin: float, offset: int) -> dict[str, Any] 
     return datos[0] if estado == HTTP_OK and datos else None
 
 
+def mes_siguiente(mes: dt.date) -> dt.date:
+    return (mes.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+
+
+def ventana(mes: dt.date) -> tuple[str, str]:
+    """Límites de `end_date_min`/`end_date_max` del mes. Gamma incluye los dos extremos, así que
+    el final es el último segundo del mes: con 00:00 del mes siguiente, un mercado que termina
+    justo a medianoche del día 1 se contaría en dos meses."""
+    fin = dt.datetime.combine(mes_siguiente(mes), dt.time(), dt.UTC) - dt.timedelta(seconds=1)
+    return f"{mes:%Y-%m-%d}T00:00:00Z", f"{fin:%Y-%m-%dT%H:%M:%S}Z"
+
+
 def contar_mes(mes: dt.date, vmin: float) -> tuple[int, bool]:
     """Mercados cerrados que terminan en `mes`. Devuelve (conteo, llegó_al_tope)."""
-    siguiente = (mes.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
-    desde, hasta = f"{mes:%Y-%m-%d}T00:00:00Z", f"{siguiente:%Y-%m-%d}T00:00:00Z"
+    desde, hasta = ventana(mes)
     if mercado(desde, hasta, vmin, 0) is None:
         return 0, False
     if mercado(desde, hasta, vmin, OFFSET_MAXIMO) is not None:
@@ -90,8 +101,7 @@ def contar_mes(mes: dt.date, vmin: float) -> tuple[int, bool]:
 def muestrear_mes(
     mes: dt.date, n: int, vmin: float, k: int, rng: random.Random
 ) -> list[dict[str, Any]]:
-    siguiente = (mes.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
-    desde, hasta = f"{mes:%Y-%m-%d}T00:00:00Z", f"{siguiente:%Y-%m-%d}T00:00:00Z"
+    desde, hasta = ventana(mes)
     offsets = sorted(rng.sample(range(n), min(k, n)))
     salida = []
     for o in offsets:
@@ -160,7 +170,7 @@ def meses(desde: str, hasta: str) -> list[dt.date]:
     salida = []
     while a <= b:
         salida.append(a)
-        a = (a.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+        a = mes_siguiente(a)
     return salida
 
 

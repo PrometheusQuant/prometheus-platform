@@ -8,14 +8,14 @@
 ## Decisión: **GO**, con tres condiciones
 
 Las API públicas dan lo que la Estrategia de Polymarket necesita: catálogo con resolución,
-historial de precios hasta el minuto y operaciones una a una. Desde 2023 hay **al menos 59.759
+historial de precios hasta el minuto y operaciones una a una. Desde 2023 hay **al menos 59.562
 mercados cerrados** con 1.000 USD o más de volumen, doce veces el mínimo de 5.000 registros del
-ticket. En la muestra, **225 de 227 mercados desde 2023 tienen historial de precios**. El acceso
+ticket. En la muestra, **los 227 mercados desde 2023 tienen historial de precios**. El acceso
 desde Bolivia sigue abierto.
 
 Las condiciones, que PQ-87 y PQ-92 tienen que recoger:
 
-1. **Solo desde 2023.** Los mercados de 2020 a 2022 casi no tienen historial en el CLOB (2 de 136
+1. **Solo desde 2023.** Los mercados de 2020 a 2022 casi no tienen historial en el CLOB (3 de 135
    en la muestra). Todo apunta a que eran de la época del AMM, anterior al libro de órdenes.
 2. **Un corte de point-in-time anterior a `closedTime`.** El precio ya refleja el resultado antes
    de que el mercado se cierre (§4), y en eventos en vivo la serie puede quedar clavada en 0,5
@@ -50,34 +50,30 @@ con «≥» son **cotas inferiores** y el número real es mayor.
 
 | Año | Mercados cerrados | En la muestra | Con historial de precios |
 |---|---:|---:|---:|
-| 2020 | 36 | 16 | 0 |
-| 2021 | 1.876 | 60 | 0 |
-| 2022 | 2.418 | 60 | 2 |
-| 2023 | 1.321 | 60 | 58 |
-| 2024 | ≥ 12.415 | 58 | 58 |
-| 2025 | ≥ 24.012 | 54 | 54 |
+| 2020 | 29 | 15 | 0 |
+| 2021 | 1.723 | 60 | 0 |
+| 2022 | 2.220 | 60 | 3 |
+| 2023 | 1.171 | 60 | 60 |
+| 2024 | ≥ 12.368 | 53 | 53 |
+| 2025 | ≥ 24.012 | 59 | 59 |
 | 2026 (hasta noviembre) | ≥ 22.011 | 55 | 55 |
-| **Desde 2023** | **≥ 59.759** | **227** | **225** |
+| **Desde 2023** | **≥ 59.562** | **227** | **227** |
 
 La muestra no llega a 5 × 12 en algunos años porque algunas consultas a Gamma fallaron tras los
-reintentos. No se repitieron para no cambiar la semilla. Un mercado de 2020 salió dos veces en la muestra
-(en noviembre y en diciembre); no cambia ninguna conclusión. Los 2 mercados de 2023 sin historial
-terminan en enero de 2023 y sus preguntas son de 2022 (la recesión «antes del Q4 2022» y el Merge
-de Ethereum).
+reintentos. No se repitieron para no cambiar la semilla.
 
 ## 2. Historial de precios
 
-En los 225 mercados de la muestra desde 2023 que tienen historial:
+En los 227 mercados de la muestra desde 2023:
 
 | Serie | Mercados con datos |
 |---|---:|
-| Diaria completa (`interval=max`, `fidelity=1440`) | 220 |
-| Por hora, 15 días antes del cierre | 225 |
-| Por minuto, 15 días antes del cierre | 225 |
+| Diaria completa (`interval=max`, `fidelity=1440`) | 223 |
+| Por hora, 15 días antes del cierre | 227 |
+| Por minuto, 15 días antes del cierre | 227 |
 
-Los 5 sin serie diaria son eventos de pocas horas (dos votaciones sobre McCarthy, una entrevista,
-un discurso y una partida de ajedrez) que no cruzan ninguna medianoche UTC. Sí tienen datos por
-minuto.
+Los 4 sin serie diaria son eventos de pocas horas (un combate, dos entrevistas y una partida de
+ajedrez) que no cruzan ninguna medianoche UTC. Sí tienen datos por minuto.
 
 Cómo se comporta `GET /prices-history` (medido, no solo documentado):
 
@@ -116,32 +112,39 @@ punto medio del libro. Esto importa para modelar el coste de entrar.
 
 - Gamma publica `umaResolutionStatus` (`resolved`) y `outcomePrices`, que tras la resolución queda
   en `["1", "0"]` o `["0", "1"]`.
-- De los 225 mercados de la muestra con historial, 217 tienen la resolución en `["1", "0"]` o
-  `["0", "1"]`. En 212 el último precio por minuto está del lado del resultado publicado: en 208
-  ese punto cae a 0 o 1 minutos de `closedTime` y en los otros 4, a entre 2 y 8 minutos. En 201 de
-  los 212 el precio ya está por debajo de 0,05 o por encima de 0,95.
-- **Los otros 5 terminan con el precio exactamente en 0,5**; en los 4 medidos, durante 2,5 a
-  7,6 horas antes del cierre. Antes de ese tramo la serie se mueve con normalidad. Son eventos en
-  vivo: NBA, MLB, UFC, fútbol y un reality. La explicación probable, **por verificar**, es que al
-  empezar el evento se vacía el libro (Gamma tiene el campo `clearBookOnStart`) y la serie muestra
-  0,5 porque `p` es el punto medio del libro o un valor por defecto con el libro vacío. En
-  cualquier caso, ese 0,5 no es un precio: el silver debe marcarlo como faltante.
-- **Los 8 no binarios son de enero a abril de 2023**, probablemente restos del AMM: 5 se resolvieron
-  con decimales casi 0/1 (por ejemplo, `0.99999739…`), 2 con `["0", "0"]` y 1 con
-  `["0.58…", "0.41…"]`, que parece una resolución a 50/50. La regla de calidad tiene que
-  redondear los casi 0/1 y excluir o tratar aparte los otros dos casos.
-- `umaResolutionStatus` puede venir vacío aunque el mercado esté resuelto (1 caso en la muestra):
-  conviene usar `outcomePrices` como fuente de la resolución.
+- De los 227 mercados de la muestra, 216 tienen la resolución en `["1", "0"]` o `["0", "1"]`.
+  En 211 el último precio por minuto está del lado del resultado publicado: en 207 ese punto cae a
+  0 o 1 minutos de `closedTime` y en los otros 4, a entre 3 y 10 minutos. En 197 de los 211 el
+  precio ya está por debajo de 0,05 o por encima de 0,95.
+- **4 de los 5 restantes terminan con el precio clavado en 0,5 o 0,505**, entre 2,3 horas y casi
+  6 días antes del cierre. Son partidos de NBA y MLB de 2023. En uno, el precio pasó de 0,96 a 0,5
+  de golpe, así que ese 0,5 no es un precio. Lo más probable es que `p` sea el punto medio del
+  libro, o un valor por defecto, cuando el libro se vacía al empezar el partido (Gamma tiene un
+  campo `clearBookOnStart`, vacío en estos mercados). **Por verificar.** En cualquier caso, el
+  silver debe marcar ese tramo como faltante.
+- **El quinto no tiene `closedTime`.** Con `endDate` como corte, el precio estaba en 0,62, pero el
+  mercado siguió negociándose después de `endDate`: un día más tarde valía 0,0015, del lado del
+  resultado.
+- **Los 11 no binarios son de enero a abril de 2023**, probablemente restos del AMM:
+    - 6 se resolvieron con decimales casi 0/1 (por ejemplo, `0.99999813…`);
+    - 2 con `["0", "0"]`;
+    - 1 con `["0.58…", "0.41…"]`, que parece una resolución a 50/50;
+    - 2 con `["0.979…", "0.021…"]`, que no son ni 0/1 ni 50/50.
+
+    La regla de calidad tiene que fijar antes un umbral para redondear (por ejemplo, ≥ 0,999) y
+    excluir el resto.
+- `umaResolutionStatus` puede venir vacío aunque `outcomePrices` ya esté en 0/1 (1 caso en la
+  muestra): conviene tomar la resolución de `outcomePrices`.
 
 !!! danger "Trampa de point-in-time para PQ-92 y PQ-93"
-    `closedTime` llega **después** de que el resultado ya se sabe: en 201 de los 212 mercados
+    `closedTime` llega **después** de que el resultado ya se sabe: en 197 de los 211 mercados
     coherentes de la muestra, el último precio antes del cierre ya está por debajo de 0,05 o por
     encima de 0,95. Si el backtest opera hasta `closedTime`, compra con el
     resultado conocido. El silver de PQ-92 tiene que fijar un corte anterior (por ejemplo,
     `endDate` del mercado o el inicio del evento) y PQ-93 debe aplicar a esa regla la guía
     `doubt-driven-development`. Además, `endDate` no siempre es la fecha real: hay mercados que
     se cierran meses antes porque el evento ocurrió antes (en la prueba piloto, uno con `endDate`
-    en noviembre de 2024 cerró en marzo).
+    en noviembre de 2024 cerró en marzo), y otros siguen negociándose después de `endDate` (§4).
 
 ## 5. Lo que falta: libro de órdenes histórico
 
