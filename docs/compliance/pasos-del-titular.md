@@ -191,19 +191,14 @@ cuenta real.
    `PQ_BINANCE_TESTNET=true` hace que la configuración rechace cualquier intento de usarlas
    fuera de Demo (PQ-15).
 
-### Paso 2b. Pasar saldo de prueba a la billetera de futuros del demo (PQ-51, PQ-52)
+### Paso 2b. Activar la billetera de futuros del demo (PQ-51; hecho el 2026-11-24)
 
-La billetera de futuros USDⓈ-M del demo empieza en 0, y la API demo no permite transferencias.
-Desde la web:
+La billetera de futuros USDⓈ-M del demo **no se activa hasta abrirla una vez** en la web. Hasta
+entonces, la API la ve en 0.
 
-1. Entra en <https://demo.binance.com> y abre la billetera: icono de **Wallet** (*Billetera*) →
-   **Overview** (*Resumen*).
-2. Pulsa **Transfer** (*Transferir*):
-   - **From:** Spot;
-   - **To:** USDⓈ-M Futures;
-   - **Coin:** USDT;
-   - **Amount:** 2.000.
-3. Confirma y escribe «listo, paso 2b».
+1. Entra en <https://demo.binance.com>.
+2. Abre **Assets** → **Futures**. Debe mostrar USDT y USDC de prueba en USDⓈ-M.
+3. No hace falta transferir nada.
 
 ## Paso 3 (opcional). Clave de Anthropic para `/pregunta` (PQ-90)
 

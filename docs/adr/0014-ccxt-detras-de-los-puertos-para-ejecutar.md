@@ -46,9 +46,9 @@ La prueba del spike (2026-11-24, con las claves Demo de PQ-17) se resume en
   - el filtro `PERCENT_PRICE_BY_SIDE`, que rechaza precios a más de cierta distancia del mercado;
   - un reloj de WSL que va entre 0,6 y 1,4 s **atrasado**, con lo que el timestamp corregido
     quedaba adelantado y Binance lo rechazaba (no acepta más de 1 s de adelanto).
-- **En USDⓈ-M demo,** las dos vías responden «Margin is insufficient». La billetera de futuros demo
-  está en 0 y la API demo no permite transferir entre billeteras (`/sapi` responde 404). El titular
-  la financia desde la web (paso 2b de la guía); después se repite la prueba de futuros.
+- **En USDⓈ-M demo,** al principio las dos vías respondían «Margin is insufficient», porque la
+  billetera de futuros demo **no se activa hasta abrirla una vez en la web**. Después, CCXT colocó
+  y canceló una orden de venta (`open`, 462 ms) con 5.000 USDT de prueba.
 
 **El runner, el diario, el riesgo y las estrategias no cambian.** CCXT vive solo en `adapters/`,
 detrás de `OrderGateway`, y ninguna otra capa lo importa (lo verifica import-linter).
