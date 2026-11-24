@@ -16,6 +16,7 @@ mensuales una vez cerrado el mes.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import subprocess
 import sys
@@ -218,6 +219,10 @@ def _add_research(commands: Commands) -> None:
     )
     simulate.add_argument("--figures", type=Path, required=True)
     simulate.add_argument("--paths", type=int, default=10_000)
+    studies.add_parser(
+        "paper-banda",
+        help="¿Caen los últimos 30 días del paper en la banda p5-p95 del Monte Carlo? (PQ-120)",
+    )
     studies.add_parser(
         "stats", help="Validación estadística de la optimización: t, ANOVA, Friedman (cap. 7.4)"
     )
@@ -690,6 +695,33 @@ def _research_simulate(data_dir: Path, figures: Path, paths: int) -> int:
     return 0
 
 
+def _research_paper_band(data_dir: Path) -> int:
+    """Criterio 4 del go/no-go: el retorno de 30 días del paper frente a la banda (PQ-120)."""
+    from prometheus_platform.api.paper.report import build_view  # noqa: PLC0415
+    from prometheus_platform.research.simulation import ReturnBand, check_band  # noqa: PLC0415
+
+    summary = data_dir / "research" / "simulation" / "summary.json"
+    band_data = json.loads(summary.read_text()).get("banda_30_dias") if summary.exists() else None
+    if not band_data:
+        print("ERROR falta la banda de 30 días: corre antes `pq research simulate` (PQ-120).")
+        return 2
+    band = ReturnBand(**band_data)
+    view = build_view(JsonlEventJournal(PaperPaths(data_dir / PAPER_DIR).journal).replay())
+    start = view.valuations[0].occurred_at if view.valuations else None
+    equity = [
+        ((v.occurred_at - start).total_seconds() / 86_400, float(v.equity))
+        for v in view.valuations
+        if start is not None
+    ]
+    result = check_band(band, equity)
+    print(
+        f"banda de {band.days} días (Monte Carlo, H2 sin quiebra): p5 {band.p5:+.4%}, "
+        f"p50 {band.p50:+.4%}, p95 {band.p95:+.4%}"
+    )
+    print(f"veredicto: {result.verdict.upper()} ({result.detail})")
+    return 0
+
+
 def _research_budget(data_dir: Path) -> int:
     from prometheus_platform.api import research_budget as rb  # noqa: PLC0415
 
@@ -843,6 +875,7 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
         "budget": lambda: _research_budget(data_dir),
         "eda": lambda: _research_eda(data_dir, args.figures),
         "simulate": lambda: _research_simulate(data_dir, args.figures, args.paths),
+        "paper-banda": lambda: _research_paper_band(data_dir),
         "momentum-universo": _research_momentum_universe,
     }
     _ledger(settings, "descriptivo", command).log_execution(args.study)

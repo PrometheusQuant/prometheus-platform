@@ -167,6 +167,7 @@ def write_simulation(study: SimulationStudy, out_dir: Path) -> Path:
         "escenarios": study.scenarios,
         "probabilidad_quiebra_equilibrio": study.break_even_failure,
         "frontera": study.frontier,
+        "banda_30_dias": asdict(study.band_30d) if study.band_30d else None,
     }
     path = out_dir / "summary.json"
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str))

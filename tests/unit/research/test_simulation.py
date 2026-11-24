@@ -3,13 +3,17 @@ import pytest
 
 from prometheus_platform.research.simulation import (
     BASE_RATE,
+    BLOCK,
     CarryRules,
     Regime,
+    ReturnBand,
     apply_exchange_failure,
+    check_band,
     classify,
     fit_markov,
     fit_regimes,
     fit_weekly_model,
+    horizon_band,
     optimal_allocation,
     regime_spells,
     run_carry,
@@ -123,3 +127,49 @@ def test_full_study_validates_against_history() -> None:
     assert set(study.scenarios) == {"sin quiebra del exchange", "quiebra con p = 2% anual"}
     assert 0.0 <= study.break_even_failure < 1.0
     assert len(study.frontier) == 21
+
+
+# --- Banda de 30 días (PQ-120) ----------------------------------------------------------------
+
+
+def _band(p5: float = -0.01, p95: float = 0.02) -> ReturnBand:
+    return ReturnBand(days=30, p5=p5, p50=0.005, p95=p95, paths=100)
+
+
+def test_study_includes_the_30_day_band_in_order() -> None:
+    seqs = [markov_sequence(3_000, TRUE_P, seed=s) for s in (5, 6)]
+    study = run_simulation_study(seqs, n_paths=200, exchange_failure=(0.02,))
+    band = study.band_30d
+    assert band is not None
+    assert band.days == 30
+    assert band.paths == 200
+    assert band.p5 <= band.p50 <= band.p95
+
+
+def test_horizon_band_is_reproducible_and_rejects_empty_horizons() -> None:
+    seqs = [markov_sequence(3_000, TRUE_P, seed=s) for s in (5, 6)]
+    model = fit_weekly_model(seqs, BLOCK)
+    a = horizon_band(model, CarryRules(), n_paths=300, rng=np.random.default_rng(1))
+    b = horizon_band(model, CarryRules(), n_paths=300, rng=np.random.default_rng(1))
+    assert a == b
+    with pytest.raises(ValueError, match="al menos un día"):
+        horizon_band(model, CarryRules(), n_paths=10, rng=np.random.default_rng(1), days=0)
+
+
+def test_check_band_needs_the_full_horizon() -> None:
+    assert check_band(_band(), []).verdict == "insuficiente"
+    short = [(0.0, 1000.0), (11.5, 1000.0)]
+    result = check_band(_band(), short)
+    assert result.verdict == "insuficiente"
+    assert result.paper_return is None
+    assert "11.5 días" in result.detail
+
+
+def test_check_band_measures_the_last_30_days_inside_and_outside() -> None:
+    # Día 0: 1000, día 10: 1010, día 40: 1015 → el inicio de la ventana es el día 10.
+    equity = [(0.0, 1000.0), (10.0, 1010.0), (40.0, 1015.0)]
+    inside = check_band(_band(), equity)
+    assert inside.verdict == "dentro"
+    assert inside.paper_return == pytest.approx(1015 / 1010 - 1)
+    outside = check_band(_band(p5=0.01, p95=0.02), equity)
+    assert outside.verdict == "fuera"
