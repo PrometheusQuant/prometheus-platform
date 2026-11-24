@@ -1,3 +1,9 @@
+## v0.3.1 (2026-11-24)
+
+### Fix
+
+- **test**: la prueba del monitor de drift no depende de la fecha del día PQ-86 (#129)
+
 ## v0.3.0 (2026-11-23)
 
 ### Feat
