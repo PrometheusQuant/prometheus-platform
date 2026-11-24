@@ -21,9 +21,9 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-011 | La tabla oficial de comisiones de futuros no se lee sin sesión | Abierto |
 | KE-012 | Dependencias de desarrollo con CVE (`filelock`, `virtualenv`) | Resuelto |
 | KE-013 | Los tests leían el `.env` real de quien los ejecuta | Resuelto |
-| KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Corregido en código; reejecución pendiente |
+| KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Resuelto (reejecución 2026-11-24, PQ-66) |
 | KE-015 | `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS | Workaround |
-| KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Corregido en código; reejecución pendiente |
+| KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Resuelto (reejecución 2026-11-24, PQ-66) |
 | KE-017 | Los logs no enmascaraban secretos dentro de textos libres | Resuelto |
 | KE-018 | El stream de futuros de Binance abre la conexión pero no envía nada | Resuelto |
 

@@ -9,7 +9,77 @@
   `pq research carry --hypothesis H1` y `--hypothesis H2`. Los ensayos quedan en MLflow
   (`data/mlflow/mlflow.db`; se ven con `uvx mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db`).
 
-## Resumen
+## Reejecución del 2026-11-24 (enmienda 3): resultados vigentes
+
+Tras corregir KE-014 y KE-016 y verificar las comisiones (PQ-17, iguales al modelo), se repitió
+**una sola vez** la evaluación. Orden: H1 y luego H2. La enmienda 3 se publicó antes de ejecutar.
+**El veredicto no cambia.** El resto de este documento conserva la evaluación del 2026-10-30 como
+historial.
+
+| | H1 (k3-theta20) antes → ahora | H2 (k9-theta20) antes → ahora |
+|---|---|---|
+| N del Deflated Sharpe | 20 → **29** | 20 → **38** |
+| G1 Deflated Sharpe > 0,95 | 1,000 → **1,000** ✅ | 1,000 → **1,000** ✅ |
+| G2 PBO < 0,5 | 0,149 → **0,220** ✅ | 0,045 → **0,020** ✅ |
+| G3 t > 3 | 16,32 → **16,39** ✅ | 11,82 → **11,84** ✅ |
+| G4 Sharpe > B1 y CAGR > 4 % | 7,69 frente a 9,18 → **7,73 frente a 8,75** ❌ | 5,57 frente a 0,66 → **5,58 frente a 0,61** ✅ |
+| CAGR neto | 6,52 % → **6,53 %** | 5,03 % → **5,10 %** |
+| Drawdown máximo | −0,51 % → **−0,43 %** | −0,39 % → **−0,54 %** |
+| **Decisión** | **Se descarta** (G4) | **Pasa al holdout** |
+
+- **Configuraciones:** las elegidas por CPCV son las mismas que en octubre.
+- **Registro:** los 18 ensayos nuevos están en `docs/estrategias/ensayos/david.jsonl`.
+- **Holdout:** PQ-17 ya verificó las comisiones, así que H2 puede abrirlo (PQ-50). Se abre **una
+  sola vez y con el titular presente**.
+
+### Revisión adversarial de la reejecución (doubt-driven-development)
+
+Un revisor con contexto fresco, que no recibió la conclusión, auditó el código y reprodujo bit a bit
+dos configuraciones registradas de H2 sin crear ensayos nuevos. **No encontró nada que invalide el
+resultado:**
+
+- KE-016: todas las ejecuciones caen en la primera vela que abre en *t* + 1 h o después;
+- KE-014: ninguna orden, vela ni liquidación del 2024-07-01 en adelante;
+- funding solo con la posición abierta;
+- costes en ambas patas en cada operación;
+- N cuadra con el registro.
+
+Sí dejó **dos matices importantes**, que quedan escritos antes del holdout:
+
+1. **El Sharpe de 5,6 de H2 está inflado por la autocorrelación.** Los retornos diarios están
+   correlacionados: 0,59, 0,54 y 0,41 en los retardos 1 a 3. El Sharpe da otra cosa al medirlo de
+   otras formas:
+   - 2,99 con retornos semanales;
+   - 1,74 con mensuales;
+   - 2,51 con el ajuste de Lo.
+
+   **La cifra honesta es de 1,7 a 3.** La t con Newey-West baja a 3,7–5,2 y G3 sigue pasando. El
+   Deflated Sharpe con retornos semanales sigue en 1,0. El gate pasa según el pre-registro; es una
+   cuestión de cómo presentar la cifra.
+2. **El resultado de H2 depende de 2021.**
+   - De enero a mayo de 2021 sale más de la mitad de la ganancia total.
+   - En 2022 la estrategia no estuvo invertida ningún día.
+   - Del 2022-01-01 al 2024-07-01 ganó en total un +2,9 % (≈ 1,2 % anual), **por debajo del 4 % de
+     una stablecoin**.
+
+   El holdout (2024-07 → 2026-09) es un periodo de funding comprimido: hay un riesgo real de que no
+   alcance el criterio de éxito.
+
+Menores, sin efecto en el veredicto:
+
+- un hueco de velas del perp de SOL y XRP en 2022 congela la marca del perp: afecta a B1, no a la
+  elegida, que no estaba invertida;
+- con la salida decidida y la pata perp pendiente, el funding de esa pata no se contabiliza (no
+  ocurrió en las ejecuciones auditadas);
+- una posición abierta el último día no paga el cierre: favorece a B1, no a las elegidas;
+- los 2 ensayos de la prueba de humo están en el código y no tienen filas en el registro, que por
+  eso muestra 36;
+- la sensibilidad del efectivo al 4 % exagera el Sharpe.
+
+Las mejoras de método van en [PQ-122](https://prometheusquant.atlassian.net/browse/PQ-122), para
+pre-registros futuros.
+
+## Resumen (evaluación del 2026-10-30, historial)
 
 | Hipótesis | Configuración elegida (CPCV) | Sharpe neto | CAGR neto | Gates | Decisión |
 |---|---|---|---|---|---|
