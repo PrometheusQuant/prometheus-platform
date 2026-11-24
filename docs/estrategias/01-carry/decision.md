@@ -1,11 +1,23 @@
 # Estrategia 1 · Carry de funding: decisión (ciclo PDCA 1)
 
+!!! danger "Decisión final (2026-11-24): H2 descartada en el holdout"
+    El holdout de H2 se abrió una sola vez ([holdout.md](holdout.md)). CAGR 0,22 % frente al 4 %
+    exigido: **no pasa**. Estuvo con posición solo 38 de 822 días. Desde 2025, el funding nunca
+    superó el umbral de entrada.
+
+    - **H1 y H2 quedan descartadas.** La Estrategia 1 no tiene ninguna hipótesis aprobada.
+    - **El paper trading sigue operando el carry H2 como demostración del pipeline** (PQ-50): datos
+      → señal → riesgo → ejecución → monitoreo. No es una estrategia aprobada.
+    - **El holdout del carry (2024-07-01 → 2026-09-30) ya está usado.** H3 y H4, que lo iban a
+      usar, necesitan otro periodo de validación. Hay que enmendar sus pre-registros antes de
+      evaluarlas.
+
 - **Fecha:** 2026-10-30 · **Base:** [evaluación en desarrollo](evaluacion.md)
 
 | | Decisión | Por qué |
 |---|---|---|
 | **H1** (BTC, ETH) | **Descartada** | Falla G4: la entrada por umbral (CAGR 6,5 %) rinde menos que estar siempre dentro (8,3 %). En 2022 se queda fuera y pierde el funding base. El pre-registro (§8) manda descartar si falla un gate. |
-| **H2** (SOL, BNB, XRP) | **Pasa a holdout (pendiente)** | Pasa G1 a G4. En altcoins el funding negativo y la basis castigan al carry siempre activo, y el umbral evita esos tramos. El margen económico es fino: CAGR 5,0 % frente al 4 % de una stablecoin. |
+| **H2** (SOL, BNB, XRP) | **Pasa a holdout → descartada en el holdout (2026-11-24)** | Pasa G1 a G4. En altcoins el funding negativo y la basis castigan al carry siempre activo, y el umbral evita esos tramos. El margen económico es fino: CAGR 5,0 % frente al 4 % de una stablecoin. |
 
 ## Condiciones antes de abrir el holdout de H2
 
