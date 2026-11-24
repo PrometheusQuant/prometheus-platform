@@ -28,11 +28,14 @@ STABLE_BASES = frozenset(
 )
 # Tokens apalancados de Binance: sufijos UP/DOWN/BULL/BEAR sobre la base (p. ej. BTCUPUSDT).
 _LEVERAGED = re.compile(r"^[A-Z0-9]+(UP|DOWN|BULL|BEAR)USDT$")
+# Solo ASCII en mayúsculas y dígitos: el bucket también tiene símbolos con otros alfabetos
+# (p. ej. «哈基米USDT»), todos listados mucho después de 2020.
+_ASCII_SYMBOL = re.compile(r"^[A-Z0-9]{2,30}$")
 
 
 def is_candidate(symbol: str) -> bool:
     """Perpetuo lineal en USDT, sin stablecoins ni tokens apalancados."""
-    if not symbol.endswith(QUOTE) or "_" in symbol:  # los trimestrales llevan _YYMMDD
+    if not symbol.endswith(QUOTE) or not _ASCII_SYMBOL.match(symbol):  # trimestrales: _YYMMDD
         return False
     base = symbol.removesuffix(QUOTE)
     if not base or base in STABLE_BASES:

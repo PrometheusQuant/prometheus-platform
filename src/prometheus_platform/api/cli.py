@@ -868,7 +868,7 @@ def _research_momentum_universe() -> int:
         listed = list_usdm_symbols(client)
         source = BinanceDataVisionSource(client)
         pool = mu.candidates(listed)
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:  # sin saturar a Data Vision
             found = executor.map(lambda s: monthly_quote_volume(source, s, december), pool)
             volumes = {s: v for s, v in zip(pool, found, strict=True) if v is not None}
     universe = mu.select_universe(volumes)

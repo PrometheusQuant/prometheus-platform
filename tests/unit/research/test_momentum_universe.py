@@ -25,6 +25,8 @@ from prometheus_platform.research.momentum_universe import (
         ("BTCUSDT_210326", False),  # trimestral, no perpetuo
         ("BTCBUSD", False),  # no cotiza en USDT
         ("USDT", False),
+        ("哈基米USDT", False),  # el bucket tiene símbolos con otros alfabetos
+        ("btcusdt", False),
     ],
 )
 def test_candidatos_sin_stablecoins_ni_apalancados(symbol: str, ok: bool) -> None:

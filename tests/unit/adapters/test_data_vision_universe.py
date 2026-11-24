@@ -87,3 +87,26 @@ def test_suma_el_volumen_en_usdt_y_none_si_no_cotizaba() -> None:
     )
     assert monthly_quote_volume(source, "BTCUSDT", date(2020, 12, 1)) == pytest.approx(4000.0)
     assert monthly_quote_volume(source, "NUEVOUSDT", date(2020, 12, 1)) is None
+
+
+def test_reintenta_un_corte_de_red_del_listado() -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("connection reset by peer")
+        return httpx.Response(200, text=_page(["BTCUSDT"], None))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert list_usdm_symbols(client, url="https://bucket", sleep=lambda _: None) == ["BTCUSDT"]
+    assert calls["n"] == 2
+
+
+def test_tras_agotar_los_reintentos_el_error_se_propaga() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("caído")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(httpx.ConnectError):
+        list_usdm_symbols(client, url="https://bucket", sleep=lambda _: None)

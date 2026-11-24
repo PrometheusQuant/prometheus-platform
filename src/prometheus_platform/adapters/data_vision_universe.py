@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
 from datetime import date
 
 import httpx
@@ -29,17 +31,38 @@ _PREFIX = re.compile(r"<Prefix>([^<]+)</Prefix>")
 _NEXT = re.compile(r"<NextMarker>([^<]+)</NextMarker>")
 _TRUNCATED = re.compile(r"<IsTruncated>true</IsTruncated>")
 MAX_PAGES = 50  # ~1000 símbolos por página: tope de seguridad, no un límite esperado
+MAX_ATTEMPTS = 4
 
 
-def list_usdm_symbols(client: httpx.Client, *, url: str = LISTING_URL) -> list[str]:
+def _get_page(
+    client: httpx.Client, url: str, params: dict[str, str], sleep: Callable[[float], None]
+) -> str:
+    """Una página del listado, con reintentos ante cortes de red (backoff exponencial)."""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            response = client.get(url, params=params)
+            response.raise_for_status()
+        except (httpx.TransportError, httpx.HTTPStatusError):
+            if attempt == MAX_ATTEMPTS:
+                raise
+            sleep(2.0 ** (attempt - 1))
+        else:
+            return response.text
+    raise AssertionError("inalcanzable")  # pragma: no cover
+
+
+def list_usdm_symbols(
+    client: httpx.Client,
+    *,
+    url: str = LISTING_URL,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[str]:
     """Todos los símbolos con velas mensuales USDⓈ-M en Data Vision, incluidos los deslistados."""
     symbols: set[str] = set()
     marker = ""
     for _ in range(MAX_PAGES):
         params = {"prefix": USDM_KLINES_PREFIX, "delimiter": "/", "marker": marker}
-        response = client.get(url, params=params)
-        response.raise_for_status()
-        text = response.text
+        text = _get_page(client, url, params, sleep)
         for prefix in _PREFIX.findall(text):
             name = prefix.removeprefix(USDM_KLINES_PREFIX).strip("/")
             if name:
