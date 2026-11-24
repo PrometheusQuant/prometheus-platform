@@ -26,6 +26,7 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Resuelto (reejecución 2026-11-24, PQ-66) |
 | KE-017 | Los logs no enmascaraban secretos dentro de textos libres | Resuelto |
 | KE-018 | El stream de futuros de Binance abre la conexión pero no envía nada | Resuelto |
+| KE-021 | El silver de mercados de Polymarket cargaba el JSON crudo de todo el catálogo y tumbó WSL | Resuelto (PQ-93) |
 
 ---
 
@@ -241,3 +242,23 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
   contenedor de la pila (ver «Verificación de la pila» en el
   [runbook de observabilidad](observabilidad.md#verificacion-de-la-pila)). En el servidor no
   hace falta nada. **Workaround documentado.**
+
+### KE-021: el silver de mercados de Polymarket tumbó WSL por falta de memoria
+
+- **Síntoma:** el 2026-11-24, al construir el silver tras ingerir el catálogo completo, WSL2 se
+  cerró de golpe. Se cayeron el runner, el vigilante, el dashboard, el reintento de Oracle y la
+  ingesta.
+- **Causa:** `build_markets` recibía todo el bronze ya cargado (`read_bronze` concatena los 51 meses
+  con el JSON crudo) y además creaba un diccionario de Python por mercado. Midió 20,3 MB por cada
+  1.000 mercados. Con 407.848 mercados eran unos 8 GB, y WSL tiene 5 GB. Ese día además corrían a la
+  vez dos agentes con `make check`.
+- **Solución:**
+    - `build_markets_from_files` lee archivo por archivo, en tandas de 5.000 filas y solo con
+      `raw` y `fetched_at`. Cada tanda se tipa y el crudo se descarta.
+    - Con 281.148 mercados (2026), el pico real es de 1.032 MB y el catálogo tipado ocupa 140 MB.
+    - Un test comprueba que da lo mismo que la versión en memoria.
+
+  **Resuelto.**
+- **Prevención:** no lanzar varios procesos pesados a la vez en la laptop. Para medir el pico de un
+  proceso, usar `resource.getrusage(...).ru_maxrss`; `ulimit -v` corta antes de tiempo, porque
+  polars reserva mucha memoria virtual que no usa.
