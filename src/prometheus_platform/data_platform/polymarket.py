@@ -312,7 +312,7 @@ def bronze_files(bronze_root: Path, dataset: str, fidelity: int | None = None) -
 
 
 def read_bronze(bronze_root: Path, dataset: str, fidelity: int | None = None) -> pl.DataFrame:
-    """Todo el dataset en memoria. Para los mercados usar ``build_markets_from_files`` (KE-017)."""
+    """Todo el dataset en memoria. Para los mercados usar ``build_markets_from_files`` (KE-021)."""
     files = bronze_files(bronze_root, dataset, fidelity)
     if not files:
         return pl.DataFrame()
@@ -427,7 +427,7 @@ _MARKET_SCHEMA: dict[str, pl.DataType] = {
 
 MARKETS_TABLE = "polymarket/markets"
 BATCH_ROWS = (
-    5000  # filas de bronze por tanda al tipar: el JSON crudo nunca se carga entero (KE-017)
+    5000  # filas de bronze por tanda al tipar: el JSON crudo nunca se carga entero (KE-021)
 )
 
 
@@ -445,7 +445,7 @@ def build_markets(bronze: pl.DataFrame) -> tuple[pl.DataFrame, QualityReport]:
 
 
 def build_markets_from_files(files: Iterable[Path]) -> tuple[pl.DataFrame, QualityReport]:
-    """Catálogo tipado leyendo bronze archivo por archivo y por tandas (KE-017).
+    """Catálogo tipado leyendo bronze archivo por archivo y por tandas (KE-021).
 
     Con el catálogo completo (unos 400.000 mercados) cargar el JSON crudo de una vez pedía unos
     8 GB y tumbó WSL. Así solo vive en memoria una tanda de crudo y el catálogo ya tipado.

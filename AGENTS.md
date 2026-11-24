@@ -179,6 +179,8 @@ Claude Code las carga solo. **Codex no**: abre el archivo correspondiente antes 
 | `debugging-and-error-recovery` | Falla un test, la CI, el build o algo que funcionaba |
 | `doubt-driven-development` | Antes de afirmar algo no trivial: sin look-ahead, holdout intacto, un gate pasa, es seguro |
 | `code-review-and-quality` | Antes de fusionar un PR, propio o ajeno |
+| `dashboard-design` | Al diseñar o criticar una vista del dashboard (principios de Stephen Few) |
+| `developing-with-streamlit` | Al tocar el dashboard de Streamlit. La oficial de Streamlit; se enlaza con `make skills` |
 
 Adaptadas de [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) (MIT); ver
 [`.claude/skills/README.md`](.claude/skills/README.md).

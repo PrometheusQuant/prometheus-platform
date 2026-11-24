@@ -104,6 +104,7 @@ nav:
       - "Carry · pre-registro de H3 (ML)": estrategias/01-carry/pre-registro-h3.md
       - "Carry · pre-registro de H4 (varios exchanges)": estrategias/01-carry/pre-registro-h4.md
       - "Carry · evaluación": estrategias/01-carry/evaluacion.md
+      - "Carry · holdout": estrategias/01-carry/holdout.md
       - "Carry · decisión": estrategias/01-carry/decision.md
       - "Tendencia · pre-registro": estrategias/02-tendencia/pre-registro.md
       - "Tendencia · evaluación": estrategias/02-tendencia/evaluacion.md
@@ -163,6 +164,7 @@ nav:
       - Dashboard en Power BI (cap. 7.2): academico/dashboard-power-bi.md
       - Prueba de usabilidad (cap. 7.2): academico/prueba-de-usabilidad.md
       - Auditoría de UX del dashboard: academico/auditoria-ux-dashboard.md
+      - Segunda opinión de UX del dashboard: academico/segunda-opinion-ux-dashboard.md
       - Modelo de negocio (cap. 8): academico/modelo-de-negocio.md
       - Code review y trazabilidad (cap. 9.3): academico/revision-de-codigo.md
       - "Feria: póster y video": academico/feria.md

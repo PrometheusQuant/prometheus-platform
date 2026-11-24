@@ -184,6 +184,16 @@ def _add_research(commands: Commands) -> None:
         "trend", help="Tendencia (T1 y T2): periodo de desarrollo, las 12 configuraciones (PQ-68)"
     )
     trend.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    carry_holdout = studies.add_parser(
+        "carry-holdout",
+        help="Carry H2: abre el holdout UNA SOLA VEZ con la configuración elegida (PQ-50)",
+    )
+    carry_holdout.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    carry_holdout.add_argument(
+        "--confirmo-un-solo-uso",
+        action="store_true",
+        help="obligatorio: el holdout se abre una vez y no tiene vuelta atrás",
+    )
     trend_holdout = studies.add_parser(
         "trend-holdout",
         help="Tendencia: abre el holdout UNA SOLA VEZ con la configuración elegida (PQ-68)",
@@ -202,6 +212,10 @@ def _add_research(commands: Commands) -> None:
         "--repetir",
         action="store_true",
         help="permite ejecutar aunque ya haya ensayos de Polymarket (cada ejecución suma a N)",
+    )
+    studies.add_parser(
+        "momentum-universo",
+        help="Universo del momentum transversal: top 15 por volumen de dic-2020 (PQ-114)",
     )
     eda = studies.add_parser("eda", help="Estadística descriptiva y correlaciones de las features")
     eda.add_argument("--figures", type=Path, required=True)
@@ -481,6 +495,65 @@ def _research_carry(
     return 0
 
 
+def _holdout_blocked(confirmed: bool, ledger: TrialLedger, execution: str) -> bool:
+    """Protecciones comunes de un holdout de un solo uso; True si NO se debe abrir."""
+    if not confirmed:
+        print("El holdout se abre una sola vez: repite con --confirmo-un-solo-uso", file=sys.stderr)
+        return True
+    opened = [
+        r
+        for r in read_rows(ledger.directory)
+        if r.familia == ledger.familia and r.nombre == execution
+    ]
+    if opened:
+        print(
+            f"El holdout de {ledger.familia} ya se abrió el {opened[0].fecha} ({opened[0].carril}):"
+            " no se repite.",
+            file=sys.stderr,
+        )
+        return True
+    return False
+
+
+def _research_carry_holdout(
+    data_dir: Path, figures: Path | None, confirmed: bool, ledger: TrialLedger
+) -> int:
+    """Abre el holdout de H2 una sola vez (pre-registro del carry §7, PQ-50), sin re-ajustes."""
+    import json  # noqa: PLC0415
+
+    from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_holdout,
+        write_holdout_outputs,
+    )
+
+    if _holdout_blocked(confirmed, ledger, ce.HOLDOUT_EXECUTION):
+        return 2
+    development = data_dir / "research" / "carry" / "H2" / "summary.json"
+    if not development.exists():
+        print(f"Falta la evaluación de desarrollo: {development}", file=sys.stderr)
+        return 2
+    summary = json.loads(development.read_text(encoding="utf-8"))
+    if not summary.get("passed"):
+        print("H2 no pasó los gates de desarrollo: el holdout no se abre (§8).", file=sys.stderr)
+        return 2
+    selected = ce.selected_config(str(summary["selected"])).name
+    # Primero la fila: desde aquí el holdout cuenta como abierto aunque algo falle después.
+    params = {"hipotesis": "H2", "configuracion": selected}
+    ledger.log_execution(ce.HOLDOUT_EXECUTION, params=params)
+    data = [ce.load_symbol(data_dir / "silver", s) for s in ce.HYPOTHESES["H2"]]
+    evaluation = ce.evaluate_holdout("H2", data, selected)
+    path = write_holdout_outputs(evaluation, data_dir / "research" / "carry" / "holdout")
+    if figures is not None:
+        plot_holdout(evaluation, figures / "holdout-curva.png", title="Carry H2")
+    verdict = "PASA" if evaluation.passed else "NO PASA"
+    print(f"Holdout H2 {selected}: {verdict} resumen={path}")
+    for criterion in evaluation.criteria:
+        mark = "OK " if criterion.passed else "NO "
+        print(f"  {criterion.name} {mark}{criterion.criterion}: {criterion.value:.4f}")
+    return 0
+
+
 def _research_trend_holdout(
     data_dir: Path, figures: Path | None, confirmed: bool, ledger: TrialLedger
 ) -> int:
@@ -493,20 +566,7 @@ def _research_trend_holdout(
         write_holdout_outputs,
     )
 
-    if not confirmed:
-        print("El holdout se abre una sola vez: repite con --confirmo-un-solo-uso", file=sys.stderr)
-        return 2
-    opened = [
-        r
-        for r in read_rows(ledger.directory)
-        if r.familia == ledger.familia and r.nombre == te.HOLDOUT_EXECUTION
-    ]
-    if opened:
-        print(
-            f"El holdout de tendencia ya se abrió el {opened[0].fecha} ({opened[0].carril}):"
-            " no se repite.",
-            file=sys.stderr,
-        )
+    if _holdout_blocked(confirmed, ledger, te.HOLDOUT_EXECUTION):
         return 2
     development = data_dir / "research" / "trend" / "T1" / "summary.json"
     if not development.exists():
@@ -806,9 +866,12 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
         return _research_carry(data_dir, args.hypothesis, args.figures, ledger)
     if args.study == "trend":
         return _research_trend(data_dir, args.figures, _ledger(settings, "tendencia", command))
-    if args.study == "trend-holdout":
-        ledger = _ledger(settings, "tendencia", command)
-        return _research_trend_holdout(data_dir, args.figures, args.confirmo_un_solo_uso, ledger)
+    holdouts = {"carry-holdout": ("carry", _research_carry_holdout)}
+    holdouts["trend-holdout"] = ("tendencia", _research_trend_holdout)
+    if args.study in holdouts:
+        family, run_holdout = holdouts[args.study]
+        ledger = _ledger(settings, family, command)
+        return run_holdout(data_dir, args.figures, args.confirmo_un_solo_uso, ledger)
     if args.study == "polymarket":
         ledger = _ledger(settings, "polymarket", command)
         return _research_polymarket(data_dir, ledger, repeat=args.repetir)
@@ -823,9 +886,54 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
         "budget": lambda: _research_budget(data_dir),
         "eda": lambda: _research_eda(data_dir, args.figures),
         "simulate": lambda: _research_simulate(data_dir, args.figures, args.paths),
+        "momentum-universo": _research_momentum_universe,
     }
     _ledger(settings, "descriptivo", command).log_execution(args.study)
     return descriptive[args.study]()
+
+
+MOMENTUM_UNIVERSE_FILE = Path("docs/estrategias/03-momentum-transversal/universo.json")
+
+
+def _research_momentum_universe() -> int:
+    """Elige el universo del pre-registro §3 y lo publica con su comprobación; no es un ensayo."""
+    import json  # noqa: PLC0415
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    from prometheus_platform.adapters.data_vision_universe import (  # noqa: PLC0415
+        list_usdm_symbols,
+        monthly_quote_volume,
+    )
+    from prometheus_platform.research import momentum_universe as mu  # noqa: PLC0415
+
+    december = date(2020, 12, 1)
+    with httpx.Client(timeout=60) as client:
+        listed = list_usdm_symbols(client)
+        source = BinanceDataVisionSource(client)
+        pool = mu.candidates(listed)
+        with ThreadPoolExecutor(max_workers=4) as executor:  # sin saturar a Data Vision
+            found = executor.map(lambda s: monthly_quote_volume(source, s, december), pool)
+            volumes = {s: v for s, v in zip(pool, found, strict=True) if v is not None}
+    universe = mu.select_universe(volumes)
+    payload = {
+        "regla": "pre-registro §3: perpetuos USDⓈ-M listados antes de 2021 (archivo diario de"
+        " 2020-12 en Data Vision), sin stablecoins ni apalancados; top 15 por volumen en USDT"
+        " de 2020-12",
+        "fecha_seleccion": datetime.now(UTC).date().isoformat(),
+        "simbolos_en_data_vision": len(listed),
+        "candidatos_por_nombre": len(pool),
+        "candidatos_con_datos_de_2020_12": universe.candidates,
+        "universo": list(universe.symbols),
+        "menor_volumen_10pb": list(universe.smallest),
+        "volumen_usdt_2020_12": dict(sorted(volumes.items(), key=lambda kv: -kv[1])),
+    }
+    MOMENTUM_UNIVERSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MOMENTUM_UNIVERSE_FILE.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    print(f"{len(listed)} símbolos en Data Vision; {universe.candidates} candidatos con 2020-12")
+    print("universo:", ", ".join(universe.symbols))
+    print("10 pb de slippage:", ", ".join(universe.smallest))
+    print(f"escrito en {MOMENTUM_UNIVERSE_FILE}")
+    return 0
 
 
 def _research_ledger(action: str, settings: Settings) -> int:

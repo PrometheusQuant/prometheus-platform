@@ -433,7 +433,7 @@ def test_report_counts_points_far_from_midnight() -> None:
 def test_markets_from_files_streams_in_batches_and_matches_in_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """KE-017: tipar por archivos y tandas da lo mismo que cargarlo todo, sin el crudo entero."""
+    """KE-021: tipar por archivos y tandas da lo mismo que cargarlo todo, sin el crudo entero."""
     from prometheus_platform.data_platform import polymarket as pm  # noqa: PLC0415
 
     monkeypatch.setattr(pm, "BATCH_ROWS", 1)  # una fila por tanda: fuerza varias tandas

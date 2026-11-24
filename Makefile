@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit mutation docs docs-build dashboard report informe-semanal poster e2e screenshots orquestador
+.PHONY: help setup lint format typecheck arch test check audit mutation docs docs-build dashboard report informe-semanal poster e2e screenshots orquestador skills
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -32,6 +32,10 @@ e2e: ## Pruebas en navegador real contra el dashboard en Docker (Playwright)
 	docker compose up -d --build --wait
 	uv run --group e2e playwright install chromium
 	uv run --group e2e pytest tests/e2e --no-cov --base-url http://127.0.0.1:8501
+
+skills: ## Enlaza la skill oficial de Streamlit (viene con el paquete) en .claude/skills y .agents/skills (PQ-125)
+	uv sync --group dashboard
+	uv run --group dashboard streamlit skills --yes
 
 poster: ## Póster A3 de la feria con QR, desde los resultados (Typst)
 	@command -v quarto >/dev/null || { echo "Falta Quarto: https://quarto.org/docs/get-started/"; exit 1; }

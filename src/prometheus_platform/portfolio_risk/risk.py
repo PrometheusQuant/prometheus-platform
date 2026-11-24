@@ -86,12 +86,29 @@ class Position:
 
 
 @dataclass(frozen=True, slots=True)
+class PendingOrder:
+    """Orden enviada y no ejecutada. ``quantity`` es con signo: negativa en una venta."""
+
+    instrument: InstrumentId
+    symbol: str
+    leg: Leg
+    quantity: Decimal
+    price: Decimal  # precio estimado al enviarla
+
+    def __post_init__(self) -> None:
+        if not self.quantity.is_finite():
+            raise ValueError(f"Cantidad no finita en {self.instrument}: {self.quantity}")
+        _require_positive_finite(f"precio de la orden pendiente de {self.instrument}", self.price)
+
+
+@dataclass(frozen=True, slots=True)
 class PortfolioSnapshot:
     equity: Decimal
     start_of_day_equity: Decimal
     positions: Sequence[Position] = ()
-    # Cantidad con signo de las órdenes enviadas y todavía no ejecutadas, por instrumento.
-    pending: Mapping[InstrumentId, Decimal] = field(default_factory=dict)
+    # Órdenes enviadas y todavía no ejecutadas (con signo). Con un bróker asíncrono (PQ-52) cuentan
+    # en la exposición: la cantidad comprometida es posición + pendientes (PQ-119).
+    pending: Sequence[PendingOrder] = ()
     # Segundos que lleva cada símbolo con las patas desbalanceadas (lo mide quien ejecuta).
     imbalance_age_seconds: Mapping[str, float] = field(default_factory=dict)
     # Símbolos que deben ir cubiertos (spot largo contra perpetuo corto): los del carry. ``None``
@@ -111,10 +128,33 @@ class PortfolioSnapshot:
     def position(self, instrument: InstrumentId) -> Position | None:
         return next((p for p in self.positions if p.instrument == instrument), None)
 
+    def pending_quantity(self, instrument: InstrumentId) -> Decimal:
+        return sum((o.quantity for o in self.pending if o.instrument == instrument), ZERO)
+
     def committed_quantity(self, instrument: InstrumentId) -> Decimal:
         """Posición más órdenes pendientes: lo que quedará si todo se ejecuta."""
         current = self.position(instrument)
-        return (current.quantity if current else ZERO) + self.pending.get(instrument, ZERO)
+        return (current.quantity if current else ZERO) + self.pending_quantity(instrument)
+
+    def committed_legs(self) -> dict[InstrumentId, tuple[str, Leg, Decimal]]:
+        """Símbolo, pata y precio conservador (el mayor conocido) de cada instrumento."""
+        legs = {p.instrument: (p.symbol, p.leg, p.mark_price) for p in self.positions}
+        for o in self.pending:
+            symbol, leg, price = legs.get(o.instrument, (o.symbol, o.leg, o.price))
+            legs[o.instrument] = (symbol, leg, max(price, o.price))
+        return legs
+
+    def committed_notional_by_symbol(self) -> dict[str, Decimal]:
+        """Nocional si todo lo pendiente se ejecuta, valorado al precio conservador."""
+        totals: dict[str, Decimal] = {}
+        for instrument, (symbol, _, price) in self.committed_legs().items():
+            notional = abs(self.committed_quantity(instrument)) * price
+            totals[symbol] = totals.get(symbol, ZERO) + notional
+        return totals
+
+    @property
+    def committed_gross_notional(self) -> Decimal:
+        return sum(self.committed_notional_by_symbol().values(), ZERO)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,15 +222,17 @@ class RiskManager:
             )
         if book.equity <= 0:
             return RiskDecision(False, "equity", f"equity no positiva: {book.equity}")
-        price = max(order.price, held.mark_price) if held else order.price
+        known = book.committed_legs().get(order.instrument)
+        price = max(order.price, known[2]) if known else order.price
         return self._exposure_check(order, book, (abs(after) - abs(before)) * price)
 
     def _exposure_check(
         self, order: ProposedOrder, book: PortfolioSnapshot, added: Decimal
     ) -> RiskDecision:
         """Nocional por símbolo, nocional total y apalancamiento, después de la orden."""
-        symbol_after = book.notional_by_symbol().get(order.symbol, ZERO) + added
-        gross_after = book.gross_notional + added
+        # Sobre lo comprometido (posición + pendientes), no solo lo ejecutado (PQ-119).
+        symbol_after = book.committed_notional_by_symbol().get(order.symbol, ZERO) + added
+        gross_after = book.committed_gross_notional + added
         leverage_after = gross_after / book.equity
         checks = (
             (
@@ -299,21 +341,22 @@ def hedge_imbalances(positions: Sequence[Position]) -> dict[str, Decimal]:
 def flatten_orders(
     book: PortfolioSnapshot, strategy_id: str = "kill-switch"
 ) -> list[ProposedOrder]:
-    """Órdenes de cierre de todas las posiciones (incluidas las pendientes) para el runner."""
+    """Órdenes de cierre de todo lo comprometido: posiciones y pendientes (PQ-119)."""
     orders = []
-    for p in book.positions:
-        target = book.committed_quantity(p.instrument)
+    for instrument, (symbol, leg, price) in book.committed_legs().items():
+        target = book.committed_quantity(instrument)
         if target == 0:
             continue
+        held = book.position(instrument)
         orders.append(
             ProposedOrder(
                 strategy_id=strategy_id,
-                instrument=p.instrument,
-                symbol=p.symbol,
-                leg=p.leg,
+                instrument=instrument,
+                symbol=symbol,
+                leg=leg,
                 side=Side.SELL if target > 0 else Side.BUY,
                 quantity=abs(target),
-                price=p.mark_price,
+                price=held.mark_price if held else price,
             )
         )
     return orders

@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -25,7 +26,7 @@ import numpy as np
 import optuna
 import polars as pl
 
-from prometheus_platform.domain.protocol import HOLDOUT_START
+from prometheus_platform.domain.protocol import HOLDOUT_END, HOLDOUT_START
 from prometheus_platform.research.backtest import (
     ALT_COSTS,
     MAIN_COSTS,
@@ -275,3 +276,99 @@ def evaluate_hypothesis(
 
 def _splits(n_obs: int) -> list[Split]:
     return cpcv_splits(n_obs, n_groups=6, n_test_groups=2, purge=8, embargo=0.01)
+
+
+# --- Holdout (pre-registro §7 y §8, PQ-50): un solo uso, configuración elegida, sin re-ajustes ----
+
+# Fin exclusivo: la vela de las 23:00 del 30-09 da la última valoración (mismo criterio que KE-014).
+HOLDOUT_STOP = HOLDOUT_END + timedelta(seconds=1)
+HOLDOUT_SHARPE = 0.5  # §8: criterio de éxito en el holdout
+HOLDOUT_CAGR = STABLECOIN_HURDLE
+HOLDOUT_MAX_DRAWDOWN = -0.15
+HOLDOUT_EXECUTION = "holdout"  # fila del registro que marca el holdout como abierto
+
+
+@dataclass
+class CarryHoldout:
+    hypothesis: str
+    selected: str
+    period: tuple[datetime, datetime]
+    dates: list[str]
+    returns: np.ndarray
+    performance: Performance
+    benchmark_returns: np.ndarray
+    benchmark: Performance
+    criteria: list[Gate]
+    sharpe_maker: float
+
+    @property
+    def passed(self) -> bool:
+        return all(c.passed for c in self.criteria)
+
+
+def selected_config(name: str) -> CarryConfig:
+    """Una de las 9 configuraciones pre-registradas, por nombre; nunca una nueva."""
+    for k in K_GRID:
+        for theta in THETA_GRID:
+            config = CarryConfig(k, theta)
+            if config.name == name:
+                return config
+    raise ValueError(f"{name!r} no es una de las 9 configuraciones pre-registradas")
+
+
+def holdout_returns(
+    data: Sequence[SymbolData], config: CarryConfig, costs: CostModel | None = None
+) -> pl.DataFrame:
+    """La estrategia corre de forma continua hasta el fin del holdout; se evalúan sus días.
+
+    Así se mide lo que habría pasado de verdad: misma señal, mismo estado y sin re-ajustes. El
+    primer retorno es el del día que termina el 2024-07-02 00:00 (el 07-01 00:00 es la última
+    valoración del desarrollo).
+    """
+    share = 1.0 / len(data)
+    results = [
+        simulate_symbol(
+            d.symbol,
+            d.hourly,
+            d.settlements,
+            config=config,
+            costs=costs or costs_for(d.symbol),
+            capital=share,
+            end=HOLDOUT_STOP,
+        )
+        for d in data
+    ]
+    frame = portfolio_returns(results, share)
+    return frame.filter(pl.col("date") > HOLDOUT_START)
+
+
+def evaluate_holdout(hypothesis: str, data: Sequence[SymbolData], selected: str) -> CarryHoldout:
+    """Evalúa la configuración elegida en el holdout con el criterio de éxito del §8."""
+    config = selected_config(selected)
+    frame = holdout_returns(data, config)
+    returns = frame["ret"].to_numpy()
+    perf = performance(returns)
+    bench = holdout_returns(data, CarryConfig(9, 0.0, always_on=True))["ret"].to_numpy()
+    maker = holdout_returns(data, config, MAKER_COSTS)["ret"].to_numpy()
+    criteria = [
+        Gate("H1", f"Sharpe neto > {HOLDOUT_SHARPE}", perf.sharpe, perf.sharpe > HOLDOUT_SHARPE),
+        Gate("H2", f"CAGR neto > {HOLDOUT_CAGR:.0%}", perf.cagr, perf.cagr > HOLDOUT_CAGR),
+        Gate(
+            "H3",
+            f"Drawdown máximo < {-HOLDOUT_MAX_DRAWDOWN:.0%}",
+            perf.max_drawdown,
+            perf.max_drawdown > HOLDOUT_MAX_DRAWDOWN,
+        ),
+    ]
+    return CarryHoldout(
+        hypothesis=hypothesis,
+        selected=selected,
+        period=(HOLDOUT_START, HOLDOUT_STOP),
+        dates=[str(d) for d in frame["date"].to_list()],
+        returns=returns,
+        performance=perf,
+        benchmark_returns=bench,
+        benchmark=performance(bench),
+        criteria=criteria,
+        sharpe_maker=performance(maker).sharpe,
+    )
