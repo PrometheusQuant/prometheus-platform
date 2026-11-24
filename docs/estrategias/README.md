@@ -1,7 +1,8 @@
 # Estrategias
 
 Una carpeta por estrategia, numerada en el orden de [ADR-0005](../adr/0005-orden-de-estrategias.md):
-`01-carry/`, `02-tendencia/`, `03-polymarket/`.
+`01-carry/`, `02-tendencia/`, `03-momentum-transversal/` y `04-polymarket/`
+(el spike de datos de Polymarket, PQ-78, eligió `04-` porque momentum ya ocupaba `03-`).
 
 Cada carpeta sigue el ciclo PDCA y los gates de CRISP-ML(Q):
 
