@@ -160,3 +160,30 @@ Antes de este registro, el equipo **ya vio**, en el periodo de desarrollo:
 **No se calculó ningún retorno de una estrategia que use el clasificador** en ningún periodo. Como
 la idea de H3 nace de haber visto el AUC en el desarrollo, **la prueba limpia de H3 es el holdout**;
 el desarrollo solo sirve para descartarla.
+
+## Archivada (2026-11-24, decisión del titular)
+
+**Esta hipótesis no se evaluó y queda archivada, con la puerta abierta.** No se calculó ningún
+retorno ni ningún gate suyo, así que N no cambia.
+
+**Por qué:**
+
+- **Su holdout ya está usado.** El holdout del carry (2024-07-01 → 2026-09-30) lo abrió H2 una sola
+  vez en PQ-50, y no se puede reutilizar.
+- **El régimen no paga el carry.** En ese periodo H2 ganó un 0,22 % anual y estuvo con posición
+  solo 38 de 822 días. Aun estando siempre dentro (B1), el carry en SOL, BNB y XRP ganó un 0,59 %
+  anual, muy por debajo del 4 % de una stablecoin. Con funding comprimido desde 2025, refinar la
+  entrada o repartir entre exchanges no puede crear una prima que no existe
+  ([holdout de H2](holdout.md)).
+
+**Cuándo retomarla.** Hacen falta las dos condiciones:
+
+1. **Vuelve un régimen de funding alto.** La media de 90 días del funding anualizado de SOL, BNB y
+   XRP supera el 20 % (el umbral θ de H2) durante al menos 30 días seguidos. Se comprueba con el
+   silver de funding, que se actualiza a diario.
+2. **Hay un periodo de validación nuevo:** al menos 6 meses de datos posteriores al 2026-09-30, sin
+   mirar, que harán de holdout.
+
+Al retomarla, este pre-registro se enmienda con fecha (nuevo periodo de validación y N
+acumulado) **antes** de cualquier ejecución. Además se aplican las correcciones de método de
+PQ-122.

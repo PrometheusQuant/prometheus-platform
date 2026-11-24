@@ -8,9 +8,10 @@
     - **H1 y H2 quedan descartadas.** La Estrategia 1 no tiene ninguna hipótesis aprobada.
     - **El paper trading sigue operando el carry H2 como demostración del pipeline** (PQ-50): datos
       → señal → riesgo → ejecución → monitoreo. No es una estrategia aprobada.
-    - **El holdout del carry (2024-07-01 → 2026-09-30) ya está usado.** H3 y H4, que lo iban a
-      usar, necesitan otro periodo de validación. Hay que enmendar sus pre-registros antes de
-      evaluarlas.
+    - **H3 (PQ-69) y H4 (PQ-94) quedan archivadas** por decisión del titular (2026-11-24), sin
+      evaluar. Su holdout ya está usado y el régimen de funding no paga el carry. Se retoman si
+      vuelve un funding alto y hay un periodo de validación nuevo: las condiciones están al final
+      de cada pre-registro ([H3](pre-registro-h3.md), [H4](pre-registro-h4.md)).
 
 - **Fecha:** 2026-10-30 · **Base:** [evaluación en desarrollo](evaluacion.md)
 
