@@ -260,6 +260,8 @@ ninguna métrica de la estrategia. Según §10, no suma a N.
    con `scripts/verificar_punto_diario.py` (5 mercados por mes, de 2023-01 a 2025-06, semilla 93).
    - **Resultado del 2026-11-24:** 148 de 148 puntos diarios coinciden con el precio por minuto
      del mismo segundo. Ninguno es posterior.
+   - **Potencia de la prueba:** en 110 de los 148 el precio cambió en las 24 h siguientes, así que
+     un punto «de más tarde» se habría notado. Los 110 coinciden con el precio de las 00:00.
    - Si la ingesta completa mostrara puntos fuera de medianoche, la evaluación los informa y no
      los usa.
 
