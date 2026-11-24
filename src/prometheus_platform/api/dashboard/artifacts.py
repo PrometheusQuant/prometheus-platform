@@ -37,6 +37,7 @@ class Artifacts:
     budget: dict[str, Any] | None = None  # PQ-83: presupuesto recomendado
     budget_scenarios: pl.DataFrame | None = None
     trend: dict[str, dict[str, Any]] = field(default_factory=dict)  # T1, T2 y holdout (PQ-68)
+    carry_holdout: dict[str, Any] | None = None  # holdout de H2 (PQ-50)
     missing: list[Missing] = field(default_factory=list)
 
 
@@ -83,6 +84,7 @@ def load_artifacts(data_dir: Path) -> Artifacts:
     art.simulation = _read_json(data_dir / "research" / "simulation" / "summary.json")
     if art.simulation is None:
         art.missing.append(Missing("simulación", "uv run pq research simulate --figures …"))
+    art.carry_holdout = _read_json(data_dir / "research" / "carry" / "holdout" / "summary.json")
     for name in ("T1", "T2", "holdout"):
         trend = _read_json(data_dir / "research" / "trend" / name / "summary.json")
         if trend is not None:
@@ -110,7 +112,23 @@ def strategy_overview(art: Artifacts) -> list[StrategyStatus]:
     """Estado de cada estrategia según sus artefactos, en lenguaje simple (PQ-124)."""
     out: list[StrategyStatus] = []
     h2 = art.carry.get("H2")
-    if h2 is not None:
+    if art.carry_holdout is not None:
+        perf = art.carry_holdout.get("rendimiento", {})
+        passed = bool(art.carry_holdout.get("pasa"))
+        failed_text = (
+            f"Con datos nunca vistos ganó {style.pct(perf.get('cagr'), 2)} anual (se exigía más "
+            "de 4 %): desde 2025 el funding nunca llegó al umbral de entrada. El paper trading "
+            "sigue como demostración del sistema, no como estrategia aprobada."
+        )
+        out.append(
+            StrategyStatus(
+                "Carry de funding",
+                "ok" if passed else "bad",
+                "Aprobada en la prueba final" if passed else "Descartada en la prueba final",
+                "Superó la prueba final con datos nunca vistos." if passed else failed_text,
+            )
+        )
+    elif h2 is not None:
         perf = h2.get("selected_performance", {})
         if h2.get("passed"):
             out.append(

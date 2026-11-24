@@ -144,6 +144,8 @@ def _tab_home(data_dir: Path, art: Artifacts, max_age_minutes: int) -> None:
     beat = read_heartbeat(paths.heartbeat)
     live = st.container(border=True)
     live.markdown("##### Paper trading (dinero simulado, precios reales)")
+    if art.carry_holdout is not None and not art.carry_holdout.get("pasa"):
+        live.caption("Demostración del sistema: el carry no superó la prueba final.")
     if not view.valuations:
         live.info("Aún no hay paper trading. Se arranca con `uv run pq paper run`.")
     else:
@@ -538,6 +540,13 @@ def _tab_live(
         )
         _live_status(paths, max_age_minutes)
         return
+    if art.carry_holdout is not None and not art.carry_holdout.get("pasa"):
+        st.warning(
+            "**Demostración del sistema, no una estrategia aprobada.** El carry H2 no superó la "
+            "prueba final con datos nunca vistos (PQ-50). El paper trading sigue para mostrar el "
+            "circuito completo: datos, señal, riesgo, ejecución y monitoreo.",
+            icon=":material/info:",
+        )
     if view.broker == "simulado":
         st.caption(
             "Bróker **simulado** sobre precios y funding reales de Binance: no es Binance Demo "
