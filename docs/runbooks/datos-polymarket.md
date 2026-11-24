@@ -51,7 +51,7 @@ crudo de cada registro, la URL exacta pedida (`request`) y el instante de la des
 | Regla | De dónde sale |
 |---|---|
 | Cada precio lleva `knowledge_time` = su instante | Point-in-time (AGENTS.md) |
-| La resolución se conoce en `closedTime` (`resolution_known_at`). `resolution_asof(markets, t)` oculta los pagos antes de ese instante | Criterio de PQ-92 |
+| La resolución se conoce en `closedTime` (`resolution_known_at`). `resolution_asof(markets, t)` oculta los pagos antes de ese instante. `closedTime` es el fin de la resolución de UMA: en 45 mercados de marzo de 2024 que traen `umaEndDate`, los dos coinciden al segundo | Criterio de PQ-92 |
 | El pago es el `outcomePrices` publicado, sin redondear (0,5 y los decimales del AMM incluidos) | Pre-registro §4 |
 | `["0", "0"]`, sin `outcomePrices` o sin `closedTime` → `excluded_reason` | Pre-registro §3.4 y spike §4 |
 | Un 0,5 que lleva ≥ 24 h sin moverse es relleno: `is_placeholder` y `price` nulo (queda `raw_price`) | Pre-registro §4 |

@@ -11,6 +11,8 @@ mercado::
 - Cada precio lleva ``knowledge_time`` = el instante del punto: se conoce cuando ocurre.
 - La resolución solo se conoce **en** ``closedTime`` (``resolution_known_at``). Si falta, queda
   nula y el mercado no tiene resolución utilizable. ``resolution_asof`` aplica esa regla.
+  ``closedTime`` es el fin de la resolución de UMA: en 45 mercados de marzo de 2024 con
+  ``umaEndDate``, los dos coinciden al segundo (comprobado el 2026-11-24).
 - El pago de cada resultado es el ``outcomePrices`` publicado, sin redondear: 1/0 en el caso normal,
   0,5 o decimales en las resoluciones parciales y en las de la época del AMM.
 - ``["0", "0"]`` no es un pago definido: se marca con ``excluded_reason``.
