@@ -83,6 +83,7 @@ nav:
       - "0011 Contrato de estrategia": adr/0011-contrato-de-estrategia.md
       - "0012 Presupuesto de capital con CVaR": adr/0012-presupuesto-de-capital-con-cvar.md
       - "0013 Asistente de solo lectura": adr/0013-asistente-de-solo-lectura.md
+      - "0014 CCXT detrás de los puertos": adr/0014-ccxt-detras-de-los-puertos-para-ejecutar.md
       - Plantilla: adr/0000-plantilla.md
   - Metodología:
       - metodologia/README.md
