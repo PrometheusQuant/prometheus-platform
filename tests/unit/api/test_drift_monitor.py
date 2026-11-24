@@ -257,7 +257,10 @@ def test_cli_writes_the_report_and_exits_1_on_an_alert(
     out = capsys.readouterr().out
     assert "ALERTA drift de datos: url-1" in out
     assert tickets == ["drift de datos"]
-    saved = json.loads((lake / "monitoring" / "drift" / "drift-2026-11-23.json").read_text())
+    # Sin fecha fija: el informe lleva el día UTC en que se genera (fallaba al cambiar de día).
+    [report] = (lake / "monitoring" / "drift").glob("drift-*.json")
+    saved = json.loads(report.read_text())
+    assert report.name == f"drift-{saved['generated_at'][:10]}.json"
     assert saved["thresholds"]["psi"] == 0.25
     assert {d["symbol"]: d["alert"] for d in saved["data"]} == {"BTCUSDT": False, "SOLUSDT": True}
     assert saved["model"]["alert"] is False
