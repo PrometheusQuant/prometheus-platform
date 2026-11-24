@@ -361,7 +361,7 @@ class CcxtExecution:
                 break
             self._sleep(POLL_SECONDS)
         else:
-            raise ExecutionError(f"{symbol}: sin operaciones para la orden {order['id']}")
+            return self._fill_from_order(client_order_id, symbol, order)
         quantity = sum((_dec(t["amount"]) for t in trades), Decimal(0))
         cost = sum((_dec(t["amount"]) * _dec(t["price"]) for t in trades), Decimal(0))
         price = cost / quantity
@@ -379,6 +379,24 @@ class CcxtExecution:
                 elif amount:
                     log.warning("execution_fee_unvalued", symbol=symbol, currency=currency)
         return ExchangeFill(client_order_id, str(order["id"]), net, price, fee)
+
+    def _fill_from_order(
+        self, client_order_id: str, symbol: str, order: dict[str, Any]
+    ) -> ExchangeFill:
+        """La orden se ejecutó pero sus operaciones no aparecen: se registra con lo que dice.
+
+        No registrarla dejaría el libro sin una posición que sí existe en el exchange, y el
+        runner la volvería a pedir. Precio medio y cantidad de la orden; la comisión, si la
+        trae; si no, 0 y aviso en el log (la reconciliación lo deja a la vista).
+        """
+        filled, average = _dec(order.get("filled")), _dec(order.get("average"))
+        if filled <= 0 or average <= 0:
+            raise ExecutionError(f"{symbol}: la orden {order['id']} no informa su ejecución")
+        fee = order.get("fee") or {}
+        quote = self._ex.markets[symbol].get("quote")
+        cost = _dec(fee.get("cost")) if fee.get("currency") == quote else Decimal(0)
+        log.warning("execution_fill_from_order", symbol=symbol, order_id=str(order["id"]))
+        return ExchangeFill(client_order_id, str(order["id"]), filled, average, cost)
 
     def _call(self, fn: Callable[[], T]) -> T:
         try:

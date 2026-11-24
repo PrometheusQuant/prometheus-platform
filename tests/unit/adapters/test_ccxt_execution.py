@@ -59,6 +59,7 @@ class FakeExchange:
         self.lose_response: Exception | None = None  # la orden llega, la respuesta no
         self.fail_before: Exception | None = None  # la orden no llega
         self.open: dict[str, list[dict[str, Any]]] = {}
+        self.hide_trades = False
         self.cancelled: list[str] = []
 
     def load_markets(self) -> Any:
@@ -102,7 +103,7 @@ class FakeExchange:
             fee = {"cost": qty * self.last * rate, "currency": "USDT"}
         self.trades[oid] = [{"amount": qty, "price": self.last, "fee": fee}]
         status = "open" if self.ack_perp and not market.get("spot") else "closed"
-        self.orders[oid] = {"id": oid, "status": status, "filled": qty}
+        self.orders[oid] = {"id": oid, "status": status, "filled": qty, "average": self.last}
         self.by_client[client_id] = oid
         if self.lose_response is not None:
             exc, self.lose_response = self.lose_response, None
@@ -129,7 +130,7 @@ class FakeExchange:
         limit: int | None = None,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        return self.trades.get((params or {})["orderId"], [])
+        return [] if self.hide_trades else self.trades.get((params or {})["orderId"], [])
 
     def fetch_balance(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if (params or {}).get("type") == "future":
@@ -296,3 +297,29 @@ def test_cancel_all_touches_only_traded_symbols_with_open_orders() -> None:
     fake.open["SOL/USDT:USDT"] = [{"id": "9"}]
     gateway.cancel_all()
     assert fake.cancelled == ["SOL/USDT:USDT"]
+
+
+def test_a_filled_order_without_visible_trades_is_still_booked() -> None:
+    """Si el exchange ejecutó, el libro lo registra aunque sus operaciones no aparezcan."""
+    fake = FakeExchange()
+    fake.hide_trades = True
+    fill = make(fake).market_order("c14", PERP, Side.SELL, Decimal("0.2"))
+    assert fill.quantity == Decimal("0.2")
+    assert fill.price == Decimal(100)
+    assert fill.fee == 0  # sin comisión informada: 0 y aviso en el log
+
+
+def test_an_order_without_execution_data_fails_loudly() -> None:
+    fake = FakeExchange()
+    fake.hide_trades = True
+    gateway = make(fake)
+    original = fake.create_order
+
+    def no_average(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        order = original(*args, **kwargs)
+        fake.orders[order["id"]]["average"] = None
+        return {**order, "average": None}
+
+    fake.create_order = no_average  # type: ignore[method-assign]
+    with pytest.raises(ExecutionError, match="no informa"):
+        gateway.market_order("c15", PERP, Side.SELL, Decimal("0.2"))
