@@ -23,4 +23,5 @@ generar un informe ad hoc o automatizar algo del repositorio.
 | `capture_dashboard.py` | Captura cada pestaña del dashboard en PNG con Playwright para el informe y la presentación (PQ-41) |
 | `export_sessions.py` | Exporta las sesiones de Claude Code a Markdown para NotebookLM, con secretos enmascarados; la salida (`notebooklm/`) queda fuera de git (PQ-40) |
 | `spike_polymarket.py` | Mide qué datos históricos dan las API públicas de Polymarket: mercados cerrados por mes, historial de precios en una muestra y coherencia con la resolución; no guarda series ni usa credenciales (spike PQ-78) |
+| `verificar_punto_diario.py` | Comprueba en una muestra estratificada que el punto diario del CLOB de Polymarket es el precio de ese instante y no uno posterior (enmienda 1 de PQ-87, PQ-93) |
 | `powerbi.py` | Genera las consultas de Power Query del modelo gold y calcula los valores de control del dashboard de Power BI (PQ-47) |
