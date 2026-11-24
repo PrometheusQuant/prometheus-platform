@@ -10,6 +10,7 @@ authors = [{ name = "David Quintela", email = "david.a.quintela@gmail.com" }]
 dependencies = [
     "alembic>=1.20.1",
     "anthropic>=0.80",
+    "ccxt>=4.5",
     "duckdb>=1.4",
     "httpx>=0.28",
     "matplotlib>=3.9",
@@ -107,12 +108,15 @@ files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["sklearn.*", "mlflow.*", "optuna.*", "playwright.*", "pyrage.*"]
+module = ["sklearn.*", "mlflow.*", "optuna.*", "playwright.*", "pyrage.*", "ccxt.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --import-mode=importlib --cov=prometheus_platform --cov-report=term-missing"
 testpaths = ["tests"]
+markers = [
+    "demo: opera en Binance Demo con dinero ficticio; solo con claves y PQ_DEMO_INTEGRATION=1",
+]
 
 [tool.coverage.report]
 fail_under = 80

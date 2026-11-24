@@ -91,19 +91,19 @@ def _key(instrument: InstrumentId) -> str:
     return f"{instrument.symbol}|{instrument.venue}"
 
 
-class SimulatedBroker:
-    name = "simulado"
+class LedgerBroker:
+    """Contabilidad común de los brókers del paper: efectivo, posiciones, marcas y funding.
+
+    El simulado y el de exchange (PQ-52) solo difieren en de dónde sale cada fill: precio con
+    slippage del ``CostModel`` o ejecución real. El estado y su formato en disco son los mismos.
+    """
+
+    name = "libro"
 
     def __init__(
-        self,
-        market: LiveMarket,
-        costs_for: Callable[[str], CostModel],
-        clock: Clock,
-        state_path: Path,
-        initial_cash: Decimal,
+        self, market: LiveMarket, clock: Clock, state_path: Path, initial_cash: Decimal
     ) -> None:
         self._market = market
-        self._costs_for = costs_for
         self._clock = clock
         self._path = state_path
         self._fills: list[OrderFilled] = []
@@ -113,31 +113,39 @@ class SimulatedBroker:
             self._state = _State(cash=initial_cash)
             self._save()
 
-    # --- puerto Broker ---------------------------------------------------------------------
-
-    def submit(
-        self, client_order_id: str, instrument: InstrumentId, side: Side, quantity: Decimal
-    ) -> None:
-        if quantity <= 0:
-            raise ValueError(f"Cantidad no positiva: {quantity}")
+    def _reference(self, instrument: InstrumentId) -> Decimal:
+        """Precio de la valoración del ciclo; sin valoración previa, se pide al mercado."""
         reference = self._state.marks.get(instrument)
-        if reference is None:  # sin valoración previa: se pide el precio al mercado
+        if reference is None:
             spot_price, mark = self._market.prices(symbol_of(instrument))
             reference = mark if is_perp(instrument) else spot_price
-        costs = self._costs_for(symbol_of(instrument))
-        slip = Decimal(str(costs.slippage))
-        fee_rate = Decimal(str(costs.perp_fee if is_perp(instrument) else costs.spot_fee))
-        price = reference * (1 + slip) if side is Side.BUY else reference * (1 - slip)
+        return reference
+
+    def _apply_fill(  # noqa: PLR0913 - un fill completo: id, instrumento, lado, cantidad, precios
+        self,
+        client_order_id: str,
+        instrument: InstrumentId,
+        side: Side,
+        *,
+        quantity: Decimal,
+        price: Decimal,
+        reference: Decimal,
+        fee: Decimal,
+    ) -> None:
+        """Aplica un fill al libro y lo deja listo para ``drain_fills``.
+
+        Las posiciones se marcan al precio de referencia, no al de ejecución: la diferencia es el
+        slippage, un coste (como en el backtest) que no debe contaminar la valoración ni la orden
+        siguiente.
+        """
         signed = quantity if side is Side.BUY else -quantity
-        # Las posiciones se marcan al precio de referencia, no al de ejecución: el slippage es un
-        # coste (como en el backtest) y no debe contaminar la valoración ni la orden siguiente.
+        slippage = signed * (price - reference)
         if is_perp(instrument):
             self._mark(instrument, reference)
-            self._state.cash -= quantity * reference * slip
+            self._state.cash -= slippage
         else:
             self._state.cash -= signed * price
             self._state.marks[instrument] = reference
-        fee = quantity * price * fee_rate
         self._state.cash -= fee
         new_qty = self._state.positions.get(instrument, ZERO) + signed
         if new_qty == 0:
@@ -153,7 +161,7 @@ class SimulatedBroker:
                 fill_price=price,
                 fill_quantity=quantity,
                 fee=fee,
-                slippage=quantity * reference * slip,
+                slippage=slippage,
             )
         )
         self._save()
@@ -243,3 +251,41 @@ class SimulatedBroker:
             fh.flush()
             os.fsync(fh.fileno())  # un corte de luz no deja el estado vacío ni a medias
         os.replace(tmp, self._path)
+
+
+class SimulatedBroker(LedgerBroker):
+    """Ejecuta al instante al precio de referencia con el slippage y la comisión del símbolo."""
+
+    name = "simulado"
+
+    def __init__(
+        self,
+        market: LiveMarket,
+        costs_for: Callable[[str], CostModel],
+        clock: Clock,
+        state_path: Path,
+        initial_cash: Decimal,
+    ) -> None:
+        super().__init__(market, clock, state_path, initial_cash)
+        self._costs_for = costs_for
+
+    def submit(
+        self, client_order_id: str, instrument: InstrumentId, side: Side, quantity: Decimal
+    ) -> None:
+        if quantity <= 0:
+            raise ValueError(f"Cantidad no positiva: {quantity}")
+        reference = self._reference(instrument)
+        costs = self._costs_for(symbol_of(instrument))
+        slip = Decimal(str(costs.slippage))
+        fee_rate = Decimal(str(costs.perp_fee if is_perp(instrument) else costs.spot_fee))
+        price = reference * (1 + slip) if side is Side.BUY else reference * (1 - slip)
+        fee = quantity * price * fee_rate
+        self._apply_fill(
+            client_order_id,
+            instrument,
+            side,
+            quantity=quantity,
+            price=price,
+            reference=reference,
+            fee=fee,
+        )
