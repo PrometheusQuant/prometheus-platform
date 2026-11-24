@@ -120,3 +120,27 @@ class Signal:
             raise DomainError("strategy_id es obligatorio")
         if not Decimal(-1) <= self.target_weight <= Decimal(1):
             raise DomainError(f"target_weight fuera de [-1, 1]: {self.target_weight}")
+
+
+@dataclass(frozen=True, slots=True)
+class ExchangeFill:
+    """Ejecución real de una orden de mercado en un exchange (PQ-52).
+
+    - ``quantity``: cantidad **neta** que cambia la posición. En una compra spot, Binance cobra la
+      comisión en el activo comprado, así que llega algo menos de lo pedido.
+    - ``price``: precio medio ponderado de las operaciones de la orden.
+    - ``fee``: comisión total valorada en la moneda de cotización (USDT).
+    """
+
+    client_order_id: str
+    exchange_order_id: str
+    quantity: Decimal
+    price: Decimal
+    fee: Decimal
+
+    def __post_init__(self) -> None:
+        if self.quantity <= 0 or self.price <= 0 or self.fee < 0:
+            raise DomainError(
+                f"Ejecución inválida: cantidad {self.quantity}, precio {self.price}, "
+                f"comisión {self.fee}"
+            )

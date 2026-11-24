@@ -48,10 +48,13 @@ from prometheus_platform.adapters.trial_ledger import (
 )
 from prometheus_platform.api import polymarket_cli
 from prometheus_platform.api.paper.compose import (
+    BROKERS,
+    PAPER_DIR,
     PaperPaths,
     RunnerAlreadyRunningError,
     build,
     build_watchdog,
+    paper_dir,
     single_instance,
 )
 from prometheus_platform.api.paper.runner import RunnerConfig
@@ -89,7 +92,6 @@ SOURCE_NAME = "binance_data_vision"
 
 
 GOLD_DOCS = Path("docs/arquitectura/modelo-gold.md")
-PAPER_DIR = "paper"
 
 
 def _month(value: str) -> date:
@@ -266,7 +268,11 @@ def _add_operations(commands: Commands) -> None:
     kill.add_argument(
         "--strategy", default="", help="solo esa estrategia (p. ej. carry-h2); sin ella, todo"
     )
-    paper_actions.add_parser("status", help="Estado del kill-switch global y por estrategia")
+    status = paper_actions.add_parser(
+        "status", help="Estado del kill-switch global y por estrategia"
+    )
+    for sub in (kill, status):  # cada bróker tiene su carpeta y su kill-switch (PQ-52)
+        sub.add_argument("--broker", choices=list(BROKERS), default="simulado")
     run = paper_actions.add_parser(
         "run", help="Runner del carry H2 con el bróker simulado y datos en vivo (PQ-54)"
     )
@@ -287,6 +293,13 @@ def _add_operations(commands: Commands) -> None:
         type=_decimal_arg,
         default=None,
         help="parte del capital del carry en (0, 1]; el resto queda en efectivo (PQ-83)",
+    )
+    run.add_argument(
+        "--broker",
+        choices=list(BROKERS),
+        default="simulado",
+        help="binance-demo: órdenes reales con dinero ficticio en Binance Demo (PQ-52), "
+        "con su propia carpeta data/paper-binance-demo",
     )
     run.add_argument(
         "--metrics-port",
@@ -1112,7 +1125,7 @@ def _paper_run(
     args: argparse.Namespace, settings: Settings, notifier: Notifier | None = None
 ) -> int:
     symbols = tuple(dict.fromkeys(s.strip().upper() for s in args.symbols.split(",") if s.strip()))
-    paths = PaperPaths(settings.data_dir / PAPER_DIR)
+    paths = PaperPaths(paper_dir(settings.data_dir, args.broker))
     with http_client() as client:
         try:
             if not math.isfinite(args.theta) or args.interval <= 0:
@@ -1135,8 +1148,12 @@ def _paper_run(
                     notifier=notifier,
                     exchange_caps=caps,
                     market_data=args.market_data,
+                    broker=args.broker,
                 )
-                print(f"runner de paper: bróker simulado, {','.join(symbols)}, {config.describe()}")
+                print(
+                    f"runner de paper: bróker {args.broker}, {','.join(symbols)}, "
+                    f"{config.describe()}"
+                )
                 metrics = _start_metrics(paths, args.metrics_port)
                 try:
                     healthy = runner.run(
@@ -1202,7 +1219,7 @@ def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | No
     }
     if args.action in processes:
         return processes[args.action](args, settings, notifier)
-    paths = PaperPaths(settings.data_dir / PAPER_DIR)
+    paths = PaperPaths(paper_dir(settings.data_dir, args.broker))
     journal = JsonlEventJournal(paths.journal)
     if args.action == "status":
         return _paper_status(paths, journal)

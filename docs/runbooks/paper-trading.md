@@ -250,9 +250,43 @@ En el servidor (PQ-57), un cron lo envía cada lunes, cuando ya están las liqui
 Mientras no haya servidor, el resumen por Telegram ya llega solo desde la laptop. El PDF se genera a
 mano con `make informe-semanal`.
 
+## Binance Demo: órdenes reales con dinero ficticio (PQ-52)
+
+El mismo runner, pero cada pata se ejecuta de verdad en Binance Demo (spot y USDⓈ-M) con las
+claves del `.env` (PQ-17). La decisión técnica es el
+[ADR-0014](../adr/0014-ccxt-detras-de-los-puertos-para-ejecutar.md).
+
+```bash
+cd ~/code/pq-runtime
+PQ_ENVIRONMENT=paper setsid nohup uv run --no-sync pq paper run --broker binance-demo \
+  --metrics-port 9109 > ~/pq-logs/paper-demo.log 2>&1 &
+uv run pq paper status --broker binance-demo
+uv run pq paper kill --broker binance-demo --reason "..."   # su propio kill-switch
+```
+
+- **Carpeta propia:** `data/paper-binance-demo/`, con su diario, su estado, su bloqueo y su
+  kill-switch. El paper simulado de `data/paper/` sigue igual, y los dos pueden correr a la vez si
+  usan puertos de métricas distintos.
+- **El libro es una subcuenta:** `--capital` (1000 por defecto) dentro de la cuenta demo, que
+  tiene más saldo de prueba.
+- **Reconciliación al arrancar:** compara el libro con el exchange en los instrumentos del carry.
+  Si no cuadran, deja `paper_reconcile_gaps` en el log y no corrige nada solo.
+- **Qué se registra:** cada fill lleva el precio medio, la cantidad neta y la comisión reales. En
+  una compra spot, Binance cobra el 0,1 % en SOL, así que llega algo menos de lo pedido. El
+  slippage es la diferencia con la valoración del ciclo.
+- **Comisiones del demo:** no son las de la cuenta real. El 2026-11-24, el USDⓈ-M del demo cobró
+  un 0,04 % taker, frente al 0,05 % VIP0 de la cuenta del titular. Para calibrar costes (PQ-95)
+  se usan las tarifas reales de PQ-17; los fills del demo sirven para medir el slippage y la
+  latencia (≈1,1 s por orden, contando la consulta de comisiones).
+- **Prueba de integración** (ida y vuelta de 0,1 SOL en cada mercado, dinero ficticio):
+  `PQ_DEMO_INTEGRATION=1 uv run pytest -m demo --no-cov`.
+- **Si una orden queda por debajo del mínimo** al redondear (`stepSize`; nocional mínimo de 5
+  USDT), se rechaza antes de enviarla con `OrderTooSmallError`.
+
 ## Limitaciones conocidas
 
-- Ejecutar al precio actual no es el precio real de Binance Demo: esa diferencia la mide PQ-95.
+- Con el bróker simulado, ejecutar al precio actual no es el precio real. Con `--broker
+  binance-demo` los fills son reales (PQ-52), y la diferencia la mide PQ-95.
 - Tras un reinicio, la antigüedad de un desbalance de patas empieza de cero, así que la gracia
   se cuenta de nuevo.
 - Si el diario falla justo después de una orden, el fill queda en el bróker y no en el diario.
@@ -264,9 +298,9 @@ mano con `make informe-semanal`.
   se escribe al final del ciclo; en un proceso continuo es la del inicio del primer ciclo.
 - El intervalo de cada liquidación se deduce de la distancia a la anterior. No está contrastado
   con la columna `funding_interval_hours` de Data Vision que usa el silver.
-- `RiskManager.pre_trade` usa las órdenes pendientes para decidir si una orden reduce, pero no
-  las suma a la exposición. Con el bróker simulado no hay pendientes, porque se ejecuta al
-  instante. Hay que cubrirlo antes de Binance Demo (PQ-52).
+- `RiskManager.pre_trade` suma las órdenes pendientes a la exposición desde PQ-119. Las órdenes de
+  mercado de Binance Demo se ejecutan dentro de `submit`, así que el runner tampoco deja
+  pendientes entre ciclos.
 - Con el kill-switch activado, el diario sigue registrando las decisiones de la estrategia
   (`FundingSettled`) sin órdenes. Para saber si se ejecutaron, crúzalas con `KillSwitchTripped`
   y `KillSwitchReset`.
