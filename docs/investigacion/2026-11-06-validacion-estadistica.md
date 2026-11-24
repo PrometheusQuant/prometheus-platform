@@ -1,6 +1,19 @@
 # Validación estadística del impacto de la optimización (cap. 7.4)
 
 - **Ticket:** PQ-48 · **Fecha:** 2026-11-06 · **Épica:** PQ-9
+
+!!! info "Actualización 2026-11-24 (PQ-66): regenerado con la reejecución del carry"
+    Tras corregir KE-014 y KE-016 y repetir una vez la evaluación de desarrollo (enmienda 3 del
+    pre-registro), `pq research stats` se volvió a ejecutar. **Ninguna conclusión cambia.**
+
+    | Prueba | Antes (2026-11-06) | Ahora (2026-11-24) |
+    |---|---|---|
+    | HE1: `k9-theta20` > B1 | p HAC 0,0441; IC 95 % [+0,19 %, +5,65 %] → rechaza | p HAC 0,0383; IC 95 % [+0,31 %, +6,15 %] → **rechaza** |
+    | HE2: > hurdle del 4 % | p HAC 0,1458; IC 95 % [−1,17 %, +3,42 %] → no rechaza | p HAC 0,1296; IC 95 % [−1,09 %, +3,47 %] → **no rechaza** |
+    | HE3: las políticas difieren | Friedman p < 10⁻³⁴ → rechaza | Friedman p = 3,7 × 10⁻²⁶ → **rechaza** |
+
+    El N del Deflated Sharpe de H2 pasó de 20 a 38 (enmienda 3). El resto del documento conserva
+    las cifras del 2026-11-06 como historial.
 - **Pregunta:** ¿la política de entrada optimizada del carry (H2, `k9-theta20`) mejora de forma
   estadísticamente significativa frente a la línea base, o la diferencia puede ser ruido?
 - **Estado:** hipótesis y plan fijados **antes** de calcular (este commit). Los resultados se

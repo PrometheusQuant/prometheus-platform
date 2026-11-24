@@ -9,7 +9,30 @@
   `pq research carry --hypothesis H1` y `--hypothesis H2`. Los ensayos quedan en MLflow
   (`data/mlflow/mlflow.db`; se ven con `uvx mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db`).
 
-## Resumen
+## Reejecución del 2026-11-24 (enmienda 3): resultados vigentes
+
+Tras corregir KE-014 y KE-016 y verificar las comisiones (PQ-17, iguales al modelo), se repitió
+**una sola vez** la evaluación. Orden: H1 y luego H2. La enmienda 3 se publicó antes de ejecutar.
+**El veredicto no cambia.** El resto de este documento conserva la evaluación del 2026-10-30 como
+historial.
+
+| | H1 (k3-theta20) antes → ahora | H2 (k9-theta20) antes → ahora |
+|---|---|---|
+| N del Deflated Sharpe | 20 → **29** | 20 → **38** |
+| G1 Deflated Sharpe > 0,95 | 1,000 → **1,000** ✅ | 1,000 → **1,000** ✅ |
+| G2 PBO < 0,5 | 0,149 → **0,220** ✅ | 0,045 → **0,020** ✅ |
+| G3 t > 3 | 16,32 → **16,39** ✅ | 11,82 → **11,84** ✅ |
+| G4 Sharpe > B1 y CAGR > 4 % | 7,69 frente a 9,18 → **7,73 frente a 8,75** ❌ | 5,57 frente a 0,66 → **5,58 frente a 0,61** ✅ |
+| CAGR neto | 6,52 % → **6,53 %** | 5,03 % → **5,10 %** |
+| Drawdown máximo | −0,51 % → **−0,43 %** | −0,39 % → **−0,54 %** |
+| **Decisión** | **Se descarta** (G4) | **Pasa al holdout** |
+
+- **Configuraciones:** las elegidas por CPCV son las mismas que en octubre.
+- **Registro:** los 18 ensayos nuevos están en `docs/estrategias/ensayos/david.jsonl`.
+- **Holdout:** PQ-17 ya verificó las comisiones, así que H2 puede abrirlo (PQ-50). Se abre **una
+  sola vez y con el titular presente**.
+
+## Resumen (evaluación del 2026-10-30, historial)
 
 | Hipótesis | Configuración elegida (CPCV) | Sharpe neto | CAGR neto | Gates | Decisión |
 |---|---|---|---|---|---|
