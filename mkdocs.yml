@@ -110,6 +110,7 @@ nav:
       - "Tendencia · holdout": estrategias/02-tendencia/holdout.md
       - "Tendencia · decisión": estrategias/02-tendencia/decision.md
       - "Momentum transversal · pre-registro": estrategias/03-momentum-transversal/pre-registro.md
+      - "Polymarket · pre-registro": estrategias/04-polymarket/pre-registro.md
   - Compliance:
       - compliance/README.md
       - Pasos manuales del titular: compliance/pasos-del-titular.md
