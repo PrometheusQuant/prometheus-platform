@@ -89,6 +89,29 @@ BADGES: dict[str, tuple[str, BadgeColor]] = {
 }
 
 
+def _bar_chart(
+    frame: pl.DataFrame, x: str, y: str, *, horizontal: bool = False, fmt: str = ",.0f"
+) -> None:
+    """Barras finas en el color de marca, con tooltip; horizontales para etiquetas largas."""
+    value = alt.X(f"{y}:Q", title=y) if horizontal else alt.Y(f"{y}:Q", title=y)
+    category = (
+        alt.Y(f"{x}:N", title=None, sort=None)
+        if horizontal
+        else alt.X(f"{x}:O", title=x, sort=None)
+    )
+    chart = (
+        alt.Chart(frame)
+        .mark_bar(color=style.BRAND, cornerRadiusEnd=4)
+        .encode(
+            x=value if horizontal else category,
+            y=category if horizontal else value,
+            tooltip=[alt.Tooltip(f"{x}:N"), alt.Tooltip(f"{y}:Q", format=fmt)],
+        )
+        .properties(height=260)
+    )
+    st.altair_chart(chart, width="stretch", theme=None)
+
+
 def _growth_chart(curve: pl.DataFrame, name: str) -> None:
     """Crecimiento de 1 USD: línea de la marca, ejes discretos, fechas en español."""
     chart = (
@@ -253,20 +276,23 @@ def _tab_what_if(data_dir: Path) -> None:
     )
     result = what_if.simulate(model, what_if.WhatIf(float(capital), years, failure, theta))
     a, b, c, d = st.columns(4)
-    a.metric("Capital final mediano", f"{result.median:,.0f} USD")
-    b.metric("Stablecoin al 4 %", f"{result.stablecoin_capital:,.0f} USD")
-    c.metric("P(perder dinero)", f"{result.prob_loss:.1%}")
-    d.metric("P(ganarle a la stablecoin)", f"{result.prob_beats_stablecoin:.1%}")
+    a.metric("Capital final mediano", style.usd(result.median, 0))
+    b.metric("Stablecoin al 4 %", style.usd(result.stablecoin_capital, 0))
+    c.metric("Probabilidad de perder dinero", style.pct(result.prob_loss))
+    d.metric("Probabilidad de ganarle a la stablecoin", style.pct(result.prob_beats_stablecoin))
     counts, centers = what_if.histogram(result.final_capital)
-    st.bar_chart(
-        pl.DataFrame({"capital final (USD)": centers.round(0), "trayectorias": counts}),
-        x="capital final (USD)",
-        y="trayectorias",
+    _bar_chart(
+        pl.DataFrame(
+            {"capital final (USD)": [style.number(c, 0) for c in centers], "trayectorias": counts}
+        ),
+        "capital final (USD)",
+        "trayectorias",
     )
     st.caption(
-        f"Entre el 5 % y el 95 % de los casos: {result.p5:,.0f} a {result.p95:,.0f} USD."
-        f" En el peor 5 % se pierden, en promedio, {result.cvar95_loss:,.0f} USD."
-        f" Probabilidad de quiebra en el horizonte: {result.horizon_failure_probability:.1%}"
+        f"Entre el 5 % y el 95 % de los casos: {style.usd(result.p5, 0)} a"
+        f" {style.usd(result.p95, 0)}. En el peor 5 % se pierden, en promedio,"
+        f" {style.usd(result.cvar95_loss, 0)}. Probabilidad de quiebra en el horizonte:"
+        f" {style.pct(result.horizon_failure_probability)}"
         " (se pierde todo lo que está en el exchange)."
     )
 
@@ -339,17 +365,19 @@ def _nowcast_importance(data_dir: Path) -> None:
         st.info("No se pudo calcular la importancia en validación con los datos disponibles.")
         return
     top = ranked[:5]
-    st.bar_chart(
-        # El número delante conserva el orden por importancia (el gráfico ordena por nombre).
+    _bar_chart(
         pl.DataFrame(
             {
                 "variable": [f"{i}. {imp.label}" for i, imp in enumerate(top, start=1)],
                 "caída del AUC": [imp.mean for imp in top],
             }
         ),
-        x="variable",
-        y="caída del AUC",
+        "variable",
+        "caída del AUC",
+        horizontal=True,
+        fmt=".3f",
     )
+
     st.caption(
         "Importancia por permutación en los pliegues de validación del walk-forward, nunca en el"
         " entrenamiento: cuánto empeora el acierto fuera de muestra (AUC) si se baraja la variable."
@@ -576,7 +604,8 @@ def _tab_portfolio(data_dir: Path, art: Artifacts) -> None:
             .agg(pl.col("capital").sum())
         )
         if by_exchange["capital"].sum() > 0:  # sin posiciones el gráfico sería un bloque vacío
-            st.bar_chart(by_exchange, x="exchange", y="capital")
+            frame = by_exchange.rename({"capital": "capital (USD)"})
+            _bar_chart(frame, "exchange", "capital (USD)")
     st.markdown("**Contribución al riesgo de cola (CVaR95, un año)**")
     if art.budget is not None and art.budget_scenarios is not None:
         st.dataframe(
@@ -606,9 +635,9 @@ def _portfolio_bands(view: PaperView, art: Artifacts) -> None:
     if daily.size < BLOCK_DAYS:
         st.info("La evaluación de H2 tiene muy pocos días para remuestrear las bandas.")
         return
-    st.altair_chart(_bands_chart(portfolio.bands_frame(paper, daily)), width="stretch")
+    st.altair_chart(_bands_chart(portfolio.bands_frame(paper, daily)), width="stretch", theme=None)
     st.caption(
-        "Naranja: el paper. Gris: la banda del 5 % al 95 % y la mediana (discontinua) al"
+        "Azul: el paper. Gris: la banda del 5 % al 95 % y la mediana (discontinua) al"
         " remuestrear por bloques de 21 días los retornos diarios del desarrollo de H2 (la"
         " configuración elegida). Si el paper sale de la banda, algo es distinto del backtest."
     )
@@ -619,16 +648,16 @@ def _bands_chart(frame: pl.DataFrame) -> alt.LayerChart | alt.FacetChart:
     axis = alt.Axis(format="d", tickMinStep=1)  # días enteros
     base = alt.Chart(frame.to_pandas()).encode(x=alt.X("día:Q", title="días de paper", axis=axis))
     scale = alt.Scale(zero=False)
-    band = base.mark_area(opacity=0.25, color="#64748b").encode(
+    band = base.mark_area(opacity=0.25, color=style.NEUTRAL).encode(
         y=alt.Y("backtest p5:Q", scale=scale, title="capital (inicio = 1)"),
         y2="backtest p95:Q",
     )
-    median = base.mark_line(color="#64748b", strokeDash=[4, 4]).encode(
+    median = base.mark_line(color=style.NEUTRAL, strokeDash=[4, 4]).encode(
         y=alt.Y("backtest mediana:Q", scale=scale)
     )
     # Con puntos: los días sin runner (laptop apagada) quedan como huecos reales, no se inventan.
     paper = base.mark_line(
-        color="#c2410c", strokeWidth=3, point=alt.OverlayMarkDef(color="#c2410c")
+        color=style.BRAND, strokeWidth=2, point=alt.OverlayMarkDef(color=style.BRAND, size=40)
     ).encode(y=alt.Y("paper:Q", scale=scale))
     return alt.layer(band, median, paper)
 

@@ -84,7 +84,11 @@ Skills de dominio:
 ## Pendiente (siguiente iteración)
 
 1. **Captura a 375 px** (móvil) para cerrar las puertas 9 y `viewports`.
-2. **Unificar los gráficos que aún usan los de Streamlit por defecto** con el tema propio: modelo,
-   simulación, cartera y predicción en vivo.
+2. ~~Unificar los gráficos que aún usan los de Streamlit por defecto.~~ **Hecho (2026-11-24):**
+   - el simulador, la importancia de variables, el capital por exchange y las bandas de la cartera
+     usan el tema propio;
+   - las barras son finas, en el color de marca, con tooltip;
+   - las etiquetas largas van en horizontal;
+   - el paper va en azul y el backtest en gris.
 3. **Prueba de usabilidad con 3 personas (PQ-76) sobre esta versión.** La pestaña inicial del guion
    ya se actualizó a la portada.
