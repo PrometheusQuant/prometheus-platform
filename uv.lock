@@ -1891,7 +1891,7 @@ wheels = [
 
 [[package]]
 name = "prometheus-platform"
-version = "0.2.0"
+version = "0.3.1"
 source = { editable = "." }
 default-groups = ["dashboard", "dev", "docs", "orquestacion"]
 dependencies = [
