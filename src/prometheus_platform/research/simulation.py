@@ -12,6 +12,8 @@
    el riesgo de cola que el backtest no contiene.
 4. **Optimización:** fracción del capital en el carry (el resto rinde lo que una stablecoin) que
    maximiza el retorno esperado con un tope de CVaR.
+5. **Banda a 30 días (PQ-120):** p5, p50 y p95 del retorno acumulado en 30 días con el mismo
+   modelo, para comparar con el paper trading (criterio 4 del go/no-go).
 
 Todo es reproducible (semilla) y usa solo el periodo de desarrollo.
 """
@@ -455,6 +457,78 @@ def optimal_allocation(
     return frontier
 
 
+# --- Banda del retorno a 30 días (PQ-120, criterio 4 del go/no-go) --------------------------
+
+BAND_DAYS = 30
+BAND_WARMUP = 30  # liquidaciones de calentamiento: solo alimentan la señal, como en el estudio
+SETTLEMENTS_PER_DAY = 3
+
+
+@dataclass(frozen=True)
+class ReturnBand:
+    """Percentiles del retorno acumulado del carry en ``days`` días (base, sin quiebra)."""
+
+    days: int
+    p5: float
+    p50: float
+    p95: float
+    paths: int
+
+
+@dataclass(frozen=True)
+class BandCheck:
+    """Si el retorno del paper en el mismo plazo cae dentro de la banda de p5 a p95."""
+
+    verdict: str  # "dentro", "fuera" o "insuficiente"
+    paper_return: float | None
+    paper_days: float
+    band: ReturnBand
+    detail: str
+
+
+def horizon_band(
+    model: WeeklyRegimeModel,
+    rules: CarryRules,
+    *,
+    n_paths: int,
+    rng: np.random.Generator,
+    days: int = BAND_DAYS,
+) -> ReturnBand:
+    """Monte Carlo del cap. 6 a ``days`` días: el mismo modelo de bloques y la misma regla de H2.
+
+    Es descriptivo: no elige nada, así que no es un ensayo ni suma a N.
+    """
+    if days < 1:
+        raise ValueError(f"El plazo debe ser de al menos un día: {days}")
+    rates = model.simulate(
+        n_paths=n_paths, n_steps=days * SETTLEMENTS_PER_DAY + BAND_WARMUP, rng=rng
+    )
+    returns = run_carry(rates, rules, warmup=BAND_WARMUP).annual_returns  # acumulado del plazo
+    p5, p50, p95 = (float(q) for q in np.quantile(returns, [0.05, 0.50, 0.95]))
+    return ReturnBand(days, p5, p50, p95, n_paths)
+
+
+def check_band(band: ReturnBand, equity: list[tuple[float, float]]) -> BandCheck:
+    """Compara el retorno del paper en los últimos ``band.days`` días con la banda.
+
+    ``equity`` son pares (días desde el inicio, capital) en orden. El retorno se mide desde la
+    última valoración que tiene al menos ``band.days`` días de antigüedad respecto a la última. Si
+    el paper todavía no cubre el plazo, el veredicto es «insuficiente»: no se extrapola.
+    """
+    if not equity:
+        return BandCheck("insuficiente", None, 0.0, band, "no hay valoraciones del paper")
+    last_day, last_equity = equity[-1]
+    covered = last_day - equity[0][0]
+    if covered < band.days:
+        detail = f"el paper cubre {covered:.1f} días y la banda es de {band.days}"
+        return BandCheck("insuficiente", None, covered, band, detail)
+    start_equity = next(e for d, e in reversed(equity) if last_day - d >= band.days)
+    paper = last_equity / start_equity - 1
+    inside = band.p5 <= paper <= band.p95
+    detail = f"retorno {paper:+.4%} frente a la banda [{band.p5:+.4%}, {band.p95:+.4%}]"
+    return BandCheck("dentro" if inside else "fuera", paper, covered, band, detail)
+
+
 def development_sequences(panels: list[pl.DataFrame]) -> list[FloatArray]:
     return [p.sort("funding_time")["annualized"].drop_nulls().to_numpy() for p in panels]
 
@@ -485,6 +559,7 @@ class SimulationStudy:
     break_even_failure: (
         float  # p anual de quiebra con la que el carry rinde igual que la stablecoin
     )
+    band_30d: ReturnBand | None = None  # PQ-120: retorno a 30 días, escenario base
 
 
 def historical_benchmark(sequences: list[FloatArray], rules: CarryRules) -> ValidationRow:
@@ -550,6 +625,7 @@ def run_simulation_study(  # noqa: PLR0913 - keyword-only: parámetros del estud
     # E[r] con quiebra = (1 - p)(1 + m) - 1; se iguala al hurdle y se despeja p.
     mean = float(baseline.annual_returns.mean())
     break_even = max(0.0, 1 - (1 + hurdle) / (1 + mean))
+    band = horizon_band(block_model, rules, n_paths=n_paths, rng=rng)
     return SimulationStudy(
         chain=chain,
         regime_models=models,
@@ -562,4 +638,5 @@ def run_simulation_study(  # noqa: PLR0913 - keyword-only: parámetros del estud
         frontier=optimal_allocation(tail, hurdle, cvar_limit),
         tail_returns=tail,
         break_even_failure=break_even,
+        band_30d=band,
     )
