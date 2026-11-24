@@ -116,7 +116,7 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
 
     assert quality_table(art.quality).row(0, named=True)["desde"] == "2020-09-13"
     h2 = art.carry["H2"]
-    assert gates_table(h2)["resultado"].to_list() == ["✅ pasa"]
+    assert gates_table(h2)["resultado"].to_list() == ["✓ pasa"]
     perf = performance_table(h2)
     assert perf["métrica"][0] == "Sharpe"
     assert perf["referencia: siempre invertido"][0] == "0,60"
@@ -129,7 +129,7 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
     assert art.model_mode == "residual"
     regression, classification = model_tables(art.model)
     assert regression["modelo"].to_list() == ["ridge (ajustado)"]
-    assert classification["F1"].to_list() == [None]  # NaN se muestra vacío
+    assert classification["F1"].to_list() == ["—"]  # NaN se muestra como raya
 
     assert art.simulation is not None
     assert transition_table(art.simulation).columns == [
@@ -139,7 +139,7 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
         "alto",
     ]
     assert validation_table(art.simulation).height == 1
-    assert scenario_table(art.simulation)["P(pérdida)"].to_list() == [0.16]
+    assert scenario_table(art.simulation)["prob. de perder"].to_list() == ["16,0 %"]
 
 
 def app_labels() -> list[str]:

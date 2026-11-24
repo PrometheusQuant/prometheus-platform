@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from prometheus_platform.api.dashboard import style
 from prometheus_platform.api.paper.report import UNASSIGNED, StrategyRow
 from prometheus_platform.domain.events import PortfolioValued
 from prometheus_platform.domain.protocol import HOLDOUT_START
@@ -39,14 +40,19 @@ def strategy_table(rows: Sequence[StrategyRow], equity: Decimal) -> pl.DataFrame
         {
             "estrategia": [r.strategy for r in rows],
             "exchange": [r.exchange.lower() for r in rows],
-            "capital (USD)": [round(float(r.exposure), 2) for r in rows],
-            "% de la equity": [
-                f"{float(r.exposure / equity):.1%}" if equity > 0 else "n/d" for r in rows
+            "capital": [style.usd(float(r.exposure)) for r in rows],
+            "% del capital": [
+                style.pct(float(r.exposure / equity)) if equity > 0 else "n/d" for r in rows
             ],
-            "PnL (USD)": [round(float(r.pnl), 4) for r in rows],
-            "funding (USD)": [round(float(r.funding), 4) for r in rows],
-            "costes (USD)": [round(float(r.costs), 4) for r in rows],
-            "valoración": ["aprox. (último fill)" if r.approximate else "marca" for r in rows],
+            "ganancia": [style.usd(float(r.pnl), signed=True) for r in rows],
+            "funding": [style.usd(float(r.funding), signed=True) for r in rows],
+            "costes": [style.usd(float(r.costs)) for r in rows],
+            "precio usado": [
+                "aproximado (última orden)"
+                if r.approximate
+                else "precio de referencia del exchange"
+                for r in rows
+            ],
         }
     )
 
@@ -79,8 +85,10 @@ def allocation_table(budget: Mapping[str, Any], current: Mapping[str, float]) ->
     return pl.DataFrame(
         {
             "estrategia": [*names, CASH],
-            "recomendado": [f"{recommended.get(n, 0.0):.0%}" for n in names] + [f"{rec_cash:.0%}"],
-            "en paper ahora": [f"{current.get(n, 0.0):.0%}" for n in names] + [f"{cur_cash:.0%}"],
+            "recomendado": [style.pct(recommended.get(n, 0.0), 0) for n in names]
+            + [style.pct(rec_cash, 0)],
+            "en paper ahora": [style.pct(current.get(n, 0.0), 0) for n in names]
+            + [style.pct(cur_cash, 0)],
         }
     )
 
@@ -108,7 +116,7 @@ def cvar_table(
 
 
 def _pct(value: float) -> str:
-    return f"{value + 0.0:.2%}"  # + 0.0 convierte -0.0 en 0.0: «-0,00 %» confunde
+    return style.pct(value + 0.0, 2)  # + 0.0 convierte -0.0 en 0.0: «-0,00 %» confunde
 
 
 def daily_paper_equity(valuations: Sequence[PortfolioValued]) -> pl.DataFrame:
