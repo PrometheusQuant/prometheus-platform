@@ -184,6 +184,16 @@ def _add_research(commands: Commands) -> None:
         "trend", help="Tendencia (T1 y T2): periodo de desarrollo, las 12 configuraciones (PQ-68)"
     )
     trend.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    carry_holdout = studies.add_parser(
+        "carry-holdout",
+        help="Carry H2: abre el holdout UNA SOLA VEZ con la configuración elegida (PQ-50)",
+    )
+    carry_holdout.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    carry_holdout.add_argument(
+        "--confirmo-un-solo-uso",
+        action="store_true",
+        help="obligatorio: el holdout se abre una vez y no tiene vuelta atrás",
+    )
     trend_holdout = studies.add_parser(
         "trend-holdout",
         help="Tendencia: abre el holdout UNA SOLA VEZ con la configuración elegida (PQ-68)",
@@ -472,6 +482,65 @@ def _research_carry(
     return 0
 
 
+def _holdout_blocked(confirmed: bool, ledger: TrialLedger, execution: str) -> bool:
+    """Protecciones comunes de un holdout de un solo uso; True si NO se debe abrir."""
+    if not confirmed:
+        print("El holdout se abre una sola vez: repite con --confirmo-un-solo-uso", file=sys.stderr)
+        return True
+    opened = [
+        r
+        for r in read_rows(ledger.directory)
+        if r.familia == ledger.familia and r.nombre == execution
+    ]
+    if opened:
+        print(
+            f"El holdout de {ledger.familia} ya se abrió el {opened[0].fecha} ({opened[0].carril}):"
+            " no se repite.",
+            file=sys.stderr,
+        )
+        return True
+    return False
+
+
+def _research_carry_holdout(
+    data_dir: Path, figures: Path | None, confirmed: bool, ledger: TrialLedger
+) -> int:
+    """Abre el holdout de H2 una sola vez (pre-registro del carry §7, PQ-50), sin re-ajustes."""
+    import json  # noqa: PLC0415
+
+    from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_holdout,
+        write_holdout_outputs,
+    )
+
+    if _holdout_blocked(confirmed, ledger, ce.HOLDOUT_EXECUTION):
+        return 2
+    development = data_dir / "research" / "carry" / "H2" / "summary.json"
+    if not development.exists():
+        print(f"Falta la evaluación de desarrollo: {development}", file=sys.stderr)
+        return 2
+    summary = json.loads(development.read_text(encoding="utf-8"))
+    if not summary.get("passed"):
+        print("H2 no pasó los gates de desarrollo: el holdout no se abre (§8).", file=sys.stderr)
+        return 2
+    selected = ce.selected_config(str(summary["selected"])).name
+    # Primero la fila: desde aquí el holdout cuenta como abierto aunque algo falle después.
+    params = {"hipotesis": "H2", "configuracion": selected}
+    ledger.log_execution(ce.HOLDOUT_EXECUTION, params=params)
+    data = [ce.load_symbol(data_dir / "silver", s) for s in ce.HYPOTHESES["H2"]]
+    evaluation = ce.evaluate_holdout("H2", data, selected)
+    path = write_holdout_outputs(evaluation, data_dir / "research" / "carry" / "holdout")
+    if figures is not None:
+        plot_holdout(evaluation, figures / "holdout-curva.png", title="Carry H2")
+    verdict = "PASA" if evaluation.passed else "NO PASA"
+    print(f"Holdout H2 {selected}: {verdict} resumen={path}")
+    for criterion in evaluation.criteria:
+        mark = "OK " if criterion.passed else "NO "
+        print(f"  {criterion.name} {mark}{criterion.criterion}: {criterion.value:.4f}")
+    return 0
+
+
 def _research_trend_holdout(
     data_dir: Path, figures: Path | None, confirmed: bool, ledger: TrialLedger
 ) -> int:
@@ -484,20 +553,7 @@ def _research_trend_holdout(
         write_holdout_outputs,
     )
 
-    if not confirmed:
-        print("El holdout se abre una sola vez: repite con --confirmo-un-solo-uso", file=sys.stderr)
-        return 2
-    opened = [
-        r
-        for r in read_rows(ledger.directory)
-        if r.familia == ledger.familia and r.nombre == te.HOLDOUT_EXECUTION
-    ]
-    if opened:
-        print(
-            f"El holdout de tendencia ya se abrió el {opened[0].fecha} ({opened[0].carril}):"
-            " no se repite.",
-            file=sys.stderr,
-        )
+    if _holdout_blocked(confirmed, ledger, te.HOLDOUT_EXECUTION):
         return 2
     development = data_dir / "research" / "trend" / "T1" / "summary.json"
     if not development.exists():
@@ -766,9 +822,12 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
         return _research_carry(data_dir, args.hypothesis, args.figures, ledger)
     if args.study == "trend":
         return _research_trend(data_dir, args.figures, _ledger(settings, "tendencia", command))
-    if args.study == "trend-holdout":
-        ledger = _ledger(settings, "tendencia", command)
-        return _research_trend_holdout(data_dir, args.figures, args.confirmo_un_solo_uso, ledger)
+    holdouts = {"carry-holdout": ("carry", _research_carry_holdout)}
+    holdouts["trend-holdout"] = ("tendencia", _research_trend_holdout)
+    if args.study in holdouts:
+        family, run_holdout = holdouts[args.study]
+        ledger = _ledger(settings, family, command)
+        return run_holdout(data_dir, args.figures, args.confirmo_un_solo_uso, ledger)
     if args.study == "funding-model":
         ledger = _ledger(settings, "modelo-funding", command)
         return _research_model(data_dir, args.figures, args.target_mode, ledger)
