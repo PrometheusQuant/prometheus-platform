@@ -1,0 +1,6 @@
+# Generado por `make poster` (uv run pq report inputs + quarto typst compile)
+_resultados.yml
+_tablas/
+_figuras/
+_img/
+*.pdf

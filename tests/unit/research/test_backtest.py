@@ -99,3 +99,50 @@ def test_portfolio_sums_symbols_and_keeps_late_starters_in_cash(market: HourlyFa
         a.daily_equity["equity"][-1] + b.daily_equity["equity"][-1] + 0.5
     )
     assert portfolio_returns([empty], 0.5).is_empty()
+
+
+def test_orders_fill_at_the_open_of_the_bar_one_hour_after_the_decision(
+    market: HourlyFactory,
+) -> None:
+    """KE-016 (enm. 1.1): decisión en t → ejecución al open de la vela que abre en t + 1 h."""
+    result = run(market, CarryConfig(3, 0.10), hours=24 * 3, price=lambda i: 100.0 + i)
+    decided, label = result.trades[0]
+    assert (decided, label) == (T0 + timedelta(hours=24), "entrada")
+    spot, perp = result.executions[:2]
+    assert spot == (decided + timedelta(hours=1), "spot", 125.0)  # no 124: el open de las 00:00
+    assert perp == (decided + timedelta(hours=1), "perp", 125.0)
+
+
+def test_a_missing_bar_at_t_plus_one_fills_at_the_next_one(market: HourlyFactory) -> None:
+    result = run(market, CarryConfig(3, 0.10), hours=24 * 3, missing_spot=frozenset({25}))
+    decided = result.trades[0][0]
+    spot = next(f for f in result.executions if f[1] == "spot")
+    assert spot[0] == decided + timedelta(hours=2)  # la de t + 1 h falta: la siguiente
+
+
+def test_development_does_not_collect_or_decide_at_the_boundary(market: HourlyFactory) -> None:
+    """KE-014: la liquidación del instante ``end`` es del periodo siguiente (el holdout)."""
+    hourly, settlements = market(hours=24 * 5)
+    end = T0 + timedelta(hours=24)  # justo cuando la regla entraría (3.ª liquidación)
+    result = simulate_symbol(
+        "X", hourly, settlements, config=CarryConfig(3, 0.10), costs=FREE, capital=1.0, end=end
+    )
+    assert result.trades == []  # sin la corrección, entraba en end
+    assert result.daily_equity["date"][-1] == end  # la valoración de end sí está
+
+    # B1 entra en la 3.ª liquidación (T0 + 24 h) y ejecuta a la 01:00. Con end = T0 + 48 h cobra las
+    # de T0 + 32 h y T0 + 40 h; la de end es del periodo siguiente y no entra.
+    def b1(until: datetime) -> float:
+        return simulate_symbol(
+            "X",
+            hourly,
+            settlements,
+            config=CarryConfig(3, 0.0, always_on=True),
+            costs=FREE,
+            capital=1.0,
+            end=until,
+        ).funding_pnl
+
+    two_days = T0 + timedelta(hours=48)
+    assert b1(two_days) == pytest.approx(0.5 * 0.0001 * 2)
+    assert b1(two_days + timedelta(hours=1)) == pytest.approx(0.5 * 0.0001 * 3)

@@ -115,6 +115,25 @@ es `2026-09`. Para operar en vivo (paper o real), el mes en curso tiene que veni
 (`/fapi/v1/fundingRate`, `/api/v3/klines`) o de los archivos diarios de velas. No hay archivos
 diarios de funding.
 
+**Implementado en PQ-65 (2026-11-06):** `pq ingest --source api` trae los días recientes por la
+API pública (sin claves) y los guarda en bronze como `source=binance_api`, con el mismo esquema que
+Data Vision. Cuando Data Vision publica el mes, **reemplaza** a la API en silver, porque es la fuente
+auditada, y las diferencias entre ambas quedan en el informe de calidad (`fuentes`).
+
+Contraste con datos reales: SOLUSDT del 2026-09-28 al 30, API frente a los archivos de Data Vision
+ya ingeridos.
+
+| Dataset | Filas comparadas | Solo API | Solo Data Vision | Valores distintos |
+|---|---|---|---|---|
+| Velas USDⓈ-M 1h | 72 | 0 | 0 | 0 |
+| Velas spot 1h | 72 | 0 | 0 | 0 |
+| Funding (tasa e intervalo) | 9 | 0 | 0 | 0 |
+
+Las velas spot coinciden aunque Data Vision use microsegundos y la API milisegundos: silver normaliza
+las dos. La API de funding no trae el intervalo de liquidación. Se toma de `/fapi/v1/fundingInfo`
+(los símbolos con intervalo ajustado) y, si no aparece, se usa el estándar de 8 h. Si difiere del que
+publique Data Vision, la diferencia queda en el informe.
+
 ## Decisiones
 
 | Fuente | Decisión | Condición |

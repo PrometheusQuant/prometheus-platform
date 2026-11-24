@@ -1,0 +1,8 @@
+# sops + age para los secretos del servidor (PQ-81, docs/runbooks/cadena-de-suministro.md).
+# Destinatarios (claves PÚBLICAS, no son secretas):
+#   1. Máquina del titular: la misma identidad age de los respaldos (docs/runbooks/respaldos.md).
+#   2. VM de Oracle: se añade al crearla (PQ-57) con `age-keygen` en la VM y luego
+#      `deploy/secretos.sh destinatarios`.
+creation_rules:
+  - path_regex: ^deploy/secretos/[^/]+\.sops\.env$
+    age: age1q5y926j777knn6rpmmp03vz2cczyeq3u377e6pzhcqrv5elzmuaqz7gtka

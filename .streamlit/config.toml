@@ -1,0 +1,18 @@
+# Tema del dashboard (PQ-124). Colores de la paleta validada en api/dashboard/style.py.
+[theme]
+base = "light"
+primaryColor = "#2a78d6"
+backgroundColor = "#fcfcfb"
+secondaryBackgroundColor = "#f1f2f4"
+textColor = "#0b0b0b"
+borderColor = "#e6e5e1"
+showWidgetBorder = true
+baseRadius = "0.6rem"
+font = "sans-serif"
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

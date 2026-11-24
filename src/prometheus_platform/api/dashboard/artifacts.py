@@ -14,6 +14,8 @@ from typing import Any
 
 import polars as pl
 
+from prometheus_platform.api.dashboard import style
+
 HYPOTHESES = ("H1", "H2")
 MODEL_MODES = ("residual", "level")
 
@@ -32,6 +34,9 @@ class Artifacts:
     model: dict[str, Any] | None = None
     model_mode: str | None = None
     simulation: dict[str, Any] | None = None
+    budget: dict[str, Any] | None = None  # PQ-83: presupuesto recomendado
+    budget_scenarios: pl.DataFrame | None = None
+    trend: dict[str, dict[str, Any]] = field(default_factory=dict)  # T1, T2 y holdout (PQ-68)
     missing: list[Missing] = field(default_factory=list)
 
 
@@ -78,7 +83,77 @@ def load_artifacts(data_dir: Path) -> Artifacts:
     art.simulation = _read_json(data_dir / "research" / "simulation" / "summary.json")
     if art.simulation is None:
         art.missing.append(Missing("simulación", "uv run pq research simulate --figures …"))
+    for name in ("T1", "T2", "holdout"):
+        trend = _read_json(data_dir / "research" / "trend" / name / "summary.json")
+        if trend is not None:
+            art.trend[name] = trend
+    budget_dir = data_dir / "research" / "budget"
+    art.budget = _read_json(budget_dir / "summary.json")
+    if art.budget is None:
+        art.missing.append(Missing("presupuesto de capital", "uv run pq research budget"))
+    elif (budget_dir / "scenarios.parquet").exists():
+        art.budget_scenarios = pl.read_parquet(budget_dir / "scenarios.parquet")
     return art
+
+
+@dataclass(frozen=True)
+class StrategyStatus:
+    """Una estrategia en una línea, para la portada: dónde está y qué significa."""
+
+    name: str
+    level: str  # "ok", "warn" o "bad"
+    stage: str
+    summary: str
+
+
+def strategy_overview(art: Artifacts) -> list[StrategyStatus]:
+    """Estado de cada estrategia según sus artefactos, en lenguaje simple (PQ-124)."""
+    out: list[StrategyStatus] = []
+    h2 = art.carry.get("H2")
+    if h2 is not None:
+        perf = h2.get("selected_performance", {})
+        if h2.get("passed"):
+            out.append(
+                StrategyStatus(
+                    "Carry de funding",
+                    "warn",
+                    "Aprobada en desarrollo · prueba final pendiente",
+                    f"Pasó las 4 condiciones mínimas con {style.pct(perf.get('cagr'))} anual y "
+                    f"una peor caída de {style.pct(perf.get('max_drawdown'))}. Corre en paper "
+                    "trading mientras espera la prueba final con datos nunca vistos.",
+                )
+            )
+        else:
+            out.append(
+                StrategyStatus(
+                    "Carry de funding",
+                    "bad",
+                    "Descartada en desarrollo",
+                    "No cumplió las condiciones mínimas fijadas de antemano.",
+                )
+            )
+    holdout, t1 = art.trend.get("holdout"), art.trend.get("T1")
+    if holdout is not None:
+        perf = holdout.get("rendimiento", {})
+        if holdout.get("pasa"):
+            stage, level = "Aprobada en la prueba final", "ok"
+            text = "Superó la prueba final con datos nunca vistos."
+        else:
+            stage, level = "Descartada en la prueba final", "bad"
+            text = (
+                f"Parecía buena en desarrollo, pero con datos nunca vistos ganó "
+                f"{style.pct(perf.get('cagr'))} anual (se exigía más de 4 %). Controló el riesgo "
+                f"(peor caída {style.pct(perf.get('max_drawdown'))}) pero no dio retorno."
+            )
+        out.append(StrategyStatus("Tendencia", level, stage, text))
+    elif t1 is not None:
+        level, stage = (
+            ("warn", "Aprobada en desarrollo · prueba final pendiente")
+            if t1.get("passed")
+            else ("bad", "Descartada en desarrollo")
+        )
+        out.append(StrategyStatus("Tendencia", level, stage, "Ver la evaluación de tendencia."))
+    return out
 
 
 def quality_table(quality: list[dict[str, Any]]) -> pl.DataFrame:
@@ -102,10 +177,10 @@ def gates_table(summary: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(
         [
             {
-                "gate": g["name"],
+                "condición": g["name"],
                 "criterio": g["criterion"],
-                "valor": round(float(g["value"]), 4),
-                "pasa": "sí" if g["passed"] else "no",
+                "valor": style.number(float(g["value"]), 3),
+                "resultado": style.status(bool(g["passed"])),
             }
             for g in summary.get("gates", [])
         ]
@@ -118,11 +193,14 @@ def performance_table(summary: dict[str, Any]) -> pl.DataFrame:
     metrics = ("sharpe", "cagr", "max_drawdown", "calmar", "t_stat")
     return pl.DataFrame(
         {
-            "métrica": list(metrics),
-            f"seleccionada ({summary.get('selected', '?')})": [
-                _num(selected.get(m)) for m in metrics
+            "métrica": [style.metric_label(m) for m in metrics],
+            f"estrategia ({summary.get('selected', '?')})": [
+                style.metric_value(m, _num(selected.get(m))) for m in metrics
             ],
-            "B1 siempre activo": [_num(bench.get(m)) for m in metrics],
+            "referencia: siempre invertido": [
+                style.metric_value(m, _num(bench.get(m))) for m in metrics
+            ],
+            "qué significa": [style.METRICS[m][1] for m in metrics],
         }
     )
 

@@ -1,0 +1,2 @@
+# Reglas de alerta de Grafana: no se usan (las alertas van por Prometheus y Alertmanager, PQ-71).
+apiVersion: 1

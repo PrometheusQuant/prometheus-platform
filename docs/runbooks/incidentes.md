@@ -23,14 +23,15 @@ Qué hacer cuando algo falla. La meta es restaurar rápido (incidente) y despué
 | Informe de calidad de silver (`data/silver/_quality/`) | Existe |
 | CI: lint, tipos, tests, gitleaks, CodeQL y `pip-audit` | Existe |
 | Alertas ERROR/CRITICAL a Telegram, con enfriamiento de 5 min por evento ([alertas](alertas.md)) | Existe |
-| Heartbeat del proceso live y alerta si se calla | Planeado (PQ-7/PQ-8) |
+| Heartbeat del runner y vigilante que alerta si se calla (PQ-55) | Existe |
+| Liquidaciones atrasadas: alerta y pausa de decisiones ([datos desactualizados](datos-desactualizados.md), PQ-98) | Existe |
 
 ## Respuesta por severidad
 
 ### SEV-1: clave filtrada o fondos en riesgo
 
-1. Activar el kill-switch: cancelar órdenes y cerrar posiciones (*planeado, PQ-7*). Mientras no
-   exista, hacerlo a mano desde la web del exchange.
+1. Activar el kill-switch: cancelar órdenes y cerrar posiciones (`/kill` en Telegram o
+   `pq paper kill`). Pasos completos en [clave comprometida](clave-comprometida.md).
 2. Revocar la clave en Binance. Las claves no tienen permiso de retiro, lo que limita el daño
    ([SECURITY.md](https://github.com/PrometheusQuant/prometheus-platform/blob/develop/SECURITY.md)).
 3. Si la clave llegó a git: rotarla y limpiar el historial, aunque gitleaks debería haberlo frenado

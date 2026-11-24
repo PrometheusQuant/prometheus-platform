@@ -39,11 +39,16 @@ def _is_sensitive_key(key: str) -> bool:
 def _redact(value: Any) -> Any:
     if isinstance(value, SecretStr):
         return REDACTED
+    if isinstance(value, str):
+        # Texto libre (mensajes de excepción, URLs): puede traer un token dentro (PQ-118).
+        return redact_text(value)
     if isinstance(value, Mapping):
         return {
             k: REDACTED if isinstance(k, str) and _is_sensitive_key(k) else _redact(v)
             for k, v in value.items()
         }
+    if isinstance(value, list | tuple):
+        return type(value)(_redact(v) for v in value)
     return value
 
 
@@ -54,7 +59,8 @@ _TOKEN_PATTERNS = [
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{30,}"),  # GitHub
     re.compile(r"\bxox[abpr]-[A-Za-z0-9-]{10,}"),  # Slack
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),  # AWS
-    re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b"),  # bot de Telegram
+    # Bot de Telegram, también dentro de la URL de la API (``/bot<token>/sendMessage``).
+    re.compile(r"(?:\b|(?<=bot))\d{8,10}:[A-Za-z0-9_-]{35}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),  # JWT
     # 64 alfanuméricos con mayúsculas (formato de las claves de Binance; un SHA-256 en hex no).
     re.compile(r"\b(?=[A-Za-z0-9]{64}\b)(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{64}\b"),

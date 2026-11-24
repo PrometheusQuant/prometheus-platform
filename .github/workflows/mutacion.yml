@@ -1,0 +1,40 @@
+name: Mutation testing
+
+# Semanal y no en cada PR: unos 10 min en 8 núcleos, más en los 4 del runner (PQ-99). Falla si el
+# score ajustado del riesgo y la validación baja del umbral de docs/metodologia/mutation-testing.md.
+on:
+  schedule:
+    - cron: "17 6 * * 1" # lunes 06:17 UTC (02:17 en Bolivia)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutacion
+  cancel-in-progress: true
+
+jobs:
+  mutmut:
+    name: mutmut (riesgo, kill switch, validación)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Instalar dependencias (lockfile congelado)
+        run: uv sync --locked
+      - name: Mutation testing y gate del score
+        run: make mutation
+      - name: Informe en el resumen del run
+        if: always()
+        run: test -f mutmut-informe.md && cat mutmut-informe.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutmut-informe
+          path: mutmut-informe.md
+          if-no-files-found: ignore
+          retention-days: 90

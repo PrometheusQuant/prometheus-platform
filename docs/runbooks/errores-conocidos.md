@@ -20,6 +20,12 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-010 | El modo automático bloquea el force-push | Workaround |
 | KE-011 | La tabla oficial de comisiones de futuros no se lee sin sesión | Abierto |
 | KE-012 | Dependencias de desarrollo con CVE (`filelock`, `virtualenv`) | Resuelto |
+| KE-013 | Los tests leían el `.env` real de quien los ejecuta | Resuelto |
+| KE-014 | La evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout) | Corregido en código; reejecución pendiente |
+| KE-015 | `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS | Workaround |
+| KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Corregido en código; reejecución pendiente |
+| KE-017 | Los logs no enmascaraban secretos dentro de textos libres | Resuelto |
+| KE-018 | El stream de futuros de Binance abre la conexión pero no envía nada | Resuelto |
 
 ---
 
@@ -101,3 +107,137 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
   por `pre-commit`.
 - **Solución:** `uv lock --upgrade-package filelock --upgrade-package virtualenv`. La CI audita cada PR
   desde entonces (PQ-37). **Resuelto.**
+
+### KE-013: los tests leían el `.env` real de quien los ejecuta
+
+- **Síntoma:** al crear un `.env` con el bot de Telegram, `test_notifier_selection_by_settings` falló:
+  en `dev` esperaba «sin canal» y obtuvo un `TelegramNotifier` con el token real.
+- **Causa:** `Settings()` lee `.env` del directorio actual y las variables `PQ_*`. Solo los tests de
+  `settings` se aislaban; los demás dependían de que no existiera `.env`. Ningún test llegó a enviar
+  nada, pero uno mal escrito podría haber usado el token o las claves reales.
+- **Solución:** fixture `autouse` en `tests/conftest.py` que desactiva el `.env` y borra las `PQ_*`
+  en todos los tests; el test que prueba la lectura del `.env` lo reactiva sobre `tmp_path`.
+  **Resuelto** (PQ-38).
+
+### KE-014: la evaluación de desarrollo incluye la liquidación del 2024-07-01 00:00 (holdout)
+
+- **Síntoma:** encontrado por la revisión adversarial de PQ-46 (skill `doubt-driven-development`).
+  - `daily_returns.parquet` termina con la valoración del 2024-07-01 00:00.
+  - Esa valoración incluye el cobro de la liquidación de ese instante y la decisión que se toma con ella.
+  - El pre-registro (§7) pone el holdout **desde 2024-07-01 00:00 UTC**.
+- **Causa:** el corte de `simulate_symbol` (`open_time < HOLDOUT_START`) se aplica solo a las velas.
+  - La última vela cierra exactamente a las 00:00 y aplica `settle_and_decide` con la liquidación de ese instante.
+  - Afecta a las evaluaciones de PQ-23 a PQ-25 desde el Sprint 2.
+- **Impacto medido (insignificante):**
+  - En H2, la configuración elegida estaba fuera de posición ese día (retorno 0) y B1 movió −0,003 %.
+  - Sin ese día, el Sharpe pasa de 5,573 a 5,575, el CAGR de 5,030 % a 5,033 % y el de B1 de 0,659 a 0,660.
+  - En H1 el cambio es igual de pequeño.
+  - Ningún gate ni prueba de PQ-48 cambia de resultado.
+- **Mitigación hoy:** la capa gold excluye esa valoración y todo lo que se devenga en el holdout.
+  Sus hechos terminan el 2024-06-29.
+- **Solución pendiente (PQ-50):**
+  - La corrección del código exige volver a ejecutar la evaluación, que cuenta en N (pre-registro §10).
+  - Se hará en la misma reejecución que pida PQ-17 si las comisiones reales son más altas, o
+    al preparar la evaluación del holdout.
+  - Sea como sea, la evaluación del holdout debe contar esa liquidación como suya, y la del
+    desarrollo no.
+- **Corregido en código (PQ-66, 2026-11-21):** con `end`, `simulate_symbol` ya no cobra ni decide
+  con la liquidación de `end`; la última valoración sigue en `end`. Prueba de regresión:
+  `test_development_does_not_collect_or_decide_at_the_boundary`. **Los artefactos actuales siguen
+  siendo los de antes**: la reejecución única de H1 y H2, que cuenta en N, espera a que PQ-17 confirme
+  las comisiones (enmienda 1.11). Pasa a *Resuelto* con esa reejecución.
+
+### KE-015: `CERTIFICATE_VERIFY_FAILED` contra Binance en una red con inspección TLS
+
+- **Síntoma:** `pq paper run` o `pq ingest --source api` fallan con
+  `[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate`.
+  `curl` también falla. En otra red, el mismo comando funciona.
+- **Causa:** un cortafuegos de la red (visto el 2026-11-06: Fortinet) intercepta el TLS hacia
+  `*.binance.com` y presenta un certificado firmado por su propia CA, que no está en el almacén de
+  `certifi`. Se confirma mirando el emisor:
+  `openssl s_client -connect api.binance.com:443 -servername api.binance.com </dev/null | openssl x509 -noout -issuer`.
+  Si el emisor no es una CA pública, la red está inspeccionando el tráfico. Otros dominios (p. ej.
+  `github.com`) pueden no estar interceptados.
+- **Workaround:** **nunca desactivar la verificación de certificados.**
+  - Lo más simple: usar otra red (casa, datos móviles) o el servidor compartido (PQ-115).
+  - Si la red es de confianza y su CA está disponible: `export SSL_CERT_FILE=/ruta/ca-de-la-red.pem`.
+    `httpx` 0.28 la usa en lugar de `certifi` (`httpx/_config.py`). Sin esa variable, nada cambia.
+  - Los tests no se ven afectados: no salen a la red (`httpx.MockTransport`).
+
+### KE-016: el backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h
+
+- **Síntoma:** lo encontró la revisión adversarial de PQ-54 al comparar el runner con el backtest.
+  La enmienda 1.1 del pre-registro dice que las órdenes se ejecutan al `open` de la vela que
+  **abre en t + 1 h**. Con un precio que sube 1 por hora, una decisión a las 00:00 se ejecuta al
+  `open` de la vela de las 00:00 (124) y no al de la de las 01:00 (125).
+- **Causa:** `simulate_symbol` decide al cierre de la vela que termina en *t* y marca la orden
+  como pendiente. La ejecuta en la iteración siguiente, que es la vela que **abre** en *t*. Le
+  falta esperar una vela más.
+- **Qué no es:** no es look-ahead. La tasa liquidada en *t* se conoce en *t*, y se opera después.
+  Es una latencia de 0 h en lugar de 1 h: el backtest opera una hora antes de lo pre-registrado.
+- **Impacto:** por medir. Hay que volver a ejecutar la evaluación, y esa ejecución cuenta en N
+  (pre-registro §10).
+- **Decisión (titular, 2026-11-07):** el backtest no se toca en PQ-54. Se corrige junto con KE-014,
+  en la misma reejecución (PQ-50 o la que pida PQ-17), que cuenta en N. El runner de paper
+  (PQ-54) ya aplica la latencia de 1 h.
+- **Corregido en código (PQ-66, 2026-11-21):** la orden de una decisión en *t* se ejecuta al `open`
+  de la vela que abre en *t* + 1 h, o de la siguiente con precio. `SymbolResult.executions` registra
+  cada ejecución para auditarlo. Pruebas: `test_orders_fill_at_the_open_of_the_bar_one_hour_after_the_decision`
+  y `test_a_missing_bar_at_t_plus_one_fills_at_the_next_one`. Igual que KE-014, pasa a *Resuelto* con
+  la reejecución.
+
+### KE-017: los logs no enmascaraban secretos dentro de textos libres
+
+- **Síntoma:** lo encontró el code review final (PQ-61). Un token con el formato de Telegram dentro
+  de `detail=` (por ejemplo, la URL de un error HTTP) salía tal cual en el log y en la alerta
+  reenviada a Telegram.
+- **Causa:** dos defectos juntos. El procesador `redact_secrets` solo enmascaraba `SecretStr` y
+  campos con nombre sensible: los **valores** de texto no pasaban por `redact_text`, aunque
+  `AGENTS.md` decía que sí. Y el patrón de Telegram de `redact_text` exigía un límite de palabra
+  antes de los dígitos, así que no reconocía el token en su forma real, dentro de la URL
+  (`/bot<token>/sendMessage`).
+- **Impacto:** no hay constancia de una fuga. Los adaptadores registran el tipo de la excepción y no
+  la URL; el riesgo estaba en el `str(exc)` que el runner registra de cualquier excepción.
+- **Solución:** `_redact` aplica `redact_text` a todo valor `str`, también dentro de listas y tuplas,
+  y el patrón acepta el prefijo `bot`. Pruebas en `tests/unit/ops/` (log, alerta y URL).
+  **Resuelto** (PQ-118).
+
+### KE-018: el stream de futuros de Binance abre pero no envía nada
+
+- **Síntoma:** encontrado al probar PQ-80 contra Binance. `wss://fstream.binance.com/stream?streams=solusdt@markPrice@1s`
+  completa el handshake en ~1,6 s, pero no llega ningún mensaje: `recv` vence a los 10 s. El stream
+  spot (`stream.binance.com:9443/stream`) sí funciona.
+- **Causa:** Binance movió los streams de mercado de USDⓈ-M a la ruta **`/market`**
+  (`wss://fstream.binance.com/market/stream?...`, verificado el 2026-11-22, también para `kline_1h`).
+  La ruta antigua sigue aceptando conexiones, por eso no hay error.
+- **Solución:** `FUTURES_WS` apunta a `/market`. Además, el hilo del stream trata **el silencio como
+  un corte** (`recv(timeout=30)`) y reconecta, y el runner cae a REST si el precio tiene más de 15 s.
+  Un cambio parecido en el futuro ya no deja precios viejos. **Resuelto** (PR de PQ-80).
+
+### KE-019: `capture_logs` no ve los eventos del runner después de otras pruebas
+
+- **Síntoma:** al agregar la prueba de datos atrasados (PQ-98), pasaba sola pero fallaba en la
+  suite: `structlog.testing.capture_logs()` no capturaba ningún evento del runner.
+- **Causa:** `test_paper_monitoring.py` hace `monkeypatch.setattr(runner.log, "error", …)` sobre el
+  *proxy* perezoso de structlog. Para restaurarlo, `monkeypatch` guarda `getattr(log, "error")`, que
+  resuelve el logger con la configuración de ese momento, y al deshacer **fija** ese método en el
+  proxy. Desde entonces, `log.error` ya no sigue la configuración global y `capture_logs` no lo ve.
+- **Solución:** en las pruebas del runner, verificar los eventos con el mismo patrón
+  (`monkeypatch.setattr(runner_module.log, "<nivel>", …)`), que no depende del orden de las
+  pruebas. Una corrección de fondo sería no parchear el proxy en `test_paper_monitoring.py`.
+  **Resuelto** (PQ-98).
+
+### KE-020: en Docker Desktop, la «red del host» no es la de WSL
+
+- **Síntoma:** al probar el perfil `observability` en la laptop (PQ-71), Prometheus no podía leer
+  `127.0.0.1:9108` del runner (`connection refused`). Desde WSL tampoco respondían Grafana ni
+  Prometheus en `127.0.0.1`, aunque los contenedores estaban sanos.
+- **Causa:** con `network_mode: host`, Docker Desktop usa el espacio de red de **su** VM
+  (`docker-desktop`). Su `127.0.0.1` no es el de la distro de WSL donde corre el runner. En una VM
+  Linux con Docker Engine (el servidor, PQ-57), el host es la propia VM y funciona como está
+  diseñado.
+- **Solución:** en la laptop, para probar la pila, el exportador corre en un contenedor con
+  `--network host` y la imagen del proyecto, y las consultas se hacen con `docker exec` desde un
+  contenedor de la pila (ver «Verificación de la pila» en el
+  [runbook de observabilidad](observabilidad.md#verificacion-de-la-pila)). En el servidor no
+  hace falta nada. **Workaround documentado.**

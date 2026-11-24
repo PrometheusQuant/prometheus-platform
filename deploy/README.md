@@ -13,12 +13,14 @@ código (*infrastructure as code*). La infraestructura crece por fases de presup
 deploy/
 ├── compose/        # docker compose con perfiles: research, pipeline, live, observability
 ├── systemd/        # unidades para el proceso live en el VPS
-├── observability/  # configuración de Prometheus, Grafana (dashboards) y alertas
+├── observability/  # Prometheus, reglas de alerta, Alertmanager → Telegram y tablero de Grafana (PQ-71)
 └── runbooks/ →     # los procedimientos de operación viven en docs/runbooks/
 ```
 
 ## Reglas
 
-- Secretos con `sops` + `age` o variables del servidor; nunca en texto plano en este directorio.
+- Secretos con `sops` + `age` (`deploy/secretos.sh`, `.sops.yaml`); nunca en texto plano en este directorio.
+- Solo se despliegan imágenes que acepta `deploy/verificar-imagen.sh` (firma cosign + SBOM). Ver
+  [cadena de suministro](../docs/runbooks/cadena-de-suministro.md).
 - Las claves de exchange en producción: **sin permiso de retiro** y con lista blanca de IP.
 - Cada cambio de infraestructura entra por PR con su ticket, igual que el código.

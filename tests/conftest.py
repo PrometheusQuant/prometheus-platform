@@ -1,7 +1,10 @@
 import hashlib
+import importlib.util
 import io
+import os
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import pytest
 
@@ -20,3 +23,39 @@ def zip_csv(name: str, text: str) -> tuple[bytes, str]:
 @pytest.fixture
 def make_zip() -> ZipFactory:
     return zip_csv
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_local_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Ningún test lee el ``.env`` ni las variables ``PQ_*`` de quien los ejecuta (KE-013).
+
+    Con un ``.env`` real (token de Telegram, claves de Binance) un test podría elegir el canal real
+    o enviar una alerta. Los tests que prueban la lectura de ``.env`` la reactivan explícitamente.
+    El registro de ensayos apunta a una carpeta temporal: N real no se toca desde un test.
+
+    El import es diferido: el job e2e de la CI instala solo Playwright, sin el paquete, y este
+    conftest se carga también allí.
+    """
+    for name in [n for n in os.environ if n.startswith("PQ_")]:
+        monkeypatch.delenv(name)
+    # Un test que ejecute `pq research` nunca escribe en el registro de ensayos real (PQ-112).
+    monkeypatch.setenv("PQ_RESEARCH_LEDGER_DIR", str(tmp_path / "ensayos"))
+    if importlib.util.find_spec("prometheus_platform") is None:
+        return
+    from prometheus_platform.ops.settings import Settings  # noqa: PLC0415 (ver docstring)
+
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_logging_after_each_test() -> Iterator[None]:
+    """Un test que llama a ``cli.main`` configura structlog sobre el stderr capturado por pytest.
+
+    Al cerrarse ese stream, los tests siguientes fallaban con «I/O operation on closed file».
+    Se restablece structlog después de cada test, en lugar de repetir el fixture en cada módulo.
+    """
+    yield
+    if importlib.util.find_spec("structlog") is not None:
+        import structlog  # noqa: PLC0415 (el job e2e no lo instala)
+
+        structlog.reset_defaults()

@@ -25,7 +25,12 @@ from datetime import datetime, timedelta
 
 import polars as pl
 
-REBALANCE_DRIFT = 0.10
+from prometheus_platform.domain.carry_rules import (
+    CarryAction,
+    CarryParams,
+    decide,
+    needs_rebalance,
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +50,10 @@ class CostModel:
         return self.perp_fee + self.slippage
 
 
+# Enmienda 1.1 del pre-registro: la orden de una decisión en t se ejecuta en la vela que abre en
+# t + 1 h (KE-016). Es la misma latencia que el runner de paper (PQ-54).
+EXECUTION_DELAY = timedelta(hours=1)
+
 MAIN_COSTS = CostModel()
 ALT_COSTS = CostModel(slippage=0.0005)  # SOL, BNB, XRP: 5 pb de slippage
 MAKER_COSTS = CostModel(spot_fee=0.00075, perp_fee=0.0002, slippage=0.0)  # solo sensibilidad
@@ -62,6 +71,10 @@ class CarryConfig:
             "B1-siempre-activo" if self.always_on else f"k{self.k}-theta{round(self.theta * 100)}"
         )
 
+    @property
+    def params(self) -> CarryParams:
+        return CarryParams(self.k, self.theta, self.always_on)
+
 
 @dataclass
 class SymbolResult:
@@ -74,6 +87,8 @@ class SymbolResult:
     hours_invested: int = 0
     hours_total: int = 0
     trades: list[tuple[datetime, str]] = field(default_factory=list)
+    # Ejecuciones: (apertura de la vela, pata, precio). Permite auditar la latencia (KE-016).
+    executions: list[tuple[datetime, str, float]] = field(default_factory=list)
 
 
 class _CarryBook:
@@ -89,6 +104,7 @@ class _CarryBook:
         self.q_spot = self.q_perp = 0.0
         self.spot_mark = self.perp_mark = math.nan
         self.pending_spot = self.pending_perp = False
+        self.executable_from: datetime | None = None  # enm. 1.1: la vela que abre en t + 1 h
         self.target_notional = 0.0
         self.is_open = False
         self.result = SymbolResult(symbol=symbol, daily_equity=pl.DataFrame())
@@ -135,7 +151,12 @@ class _CarryBook:
     def _order(self, notional: float, label: str, at: datetime) -> None:
         self.target_notional = notional
         self.pending_spot = self.pending_perp = True
+        self.executable_from = at + EXECUTION_DELAY
         self.result.trades.append((at, label))
+
+    def due(self, open_time: datetime) -> bool:
+        """KE-016: la orden decidida en t se ejecuta en una vela que abre en t + 1 h o después."""
+        return self.executable_from is not None and open_time >= self.executable_from
 
     def settle_and_decide(self, at: datetime, rate: float, s_k: float | None) -> None:
         """Liquidación de funding (enm. 1.2) y decisión con la regla de histéresis (§4)."""
@@ -143,23 +164,18 @@ class _CarryBook:
             received = self.q_perp * self.perp_mark * rate
             self.cash += received
             self.result.funding_pnl += received
-        if s_k is None:  # ventana inicial de la señal
-            return
-        config = self.config
-        if not self.is_open and (config.always_on or s_k >= config.theta):
+        action = decide(is_open=self.is_open, s_k=s_k, last_rate=rate, params=self.config.params)
+        if action is CarryAction.ENTRAR:
             self.is_open = True
             self.result.cycles += 1
             self._order(self.equity / 2, "entrada", at)
-        elif self.is_open and not config.always_on and (s_k < config.theta / 2 or rate < 0):
+        elif action is CarryAction.SALIR:
             self.is_open = False
             self._order(0.0, "salida", at)
-        elif self.is_open and self.q_perp and self.q_spot:
+        elif s_k is not None and self.is_open and self.q_perp and self.q_spot:
             # Enmienda 2: cada pata vale capital/2 (1x); se rebalancea si una se desvía > 10 %.
             target = self.equity / 2
-            spot_value = self.q_spot * self.spot_mark
-            perp_value = self.q_perp * self.perp_mark
-            drift = max(abs(spot_value - target), abs(perp_value - target)) / target
-            if drift > REBALANCE_DRIFT:
+            if needs_rebalance(self.q_spot * self.spot_mark, self.q_perp * self.perp_mark, target):
                 self._order(target, "rebalanceo", at)
 
 
@@ -173,7 +189,14 @@ def simulate_symbol(  # noqa: PLR0913 - keyword-only: cada argumento es una dime
     capital: float,
     end: datetime | None = None,
 ) -> SymbolResult:
-    """Simula un símbolo con su parte del capital. ``hourly`` viene de ``hourly_prices``."""
+    """Simula un símbolo con su parte del capital. ``hourly`` viene de ``hourly_prices``.
+
+    - **Latencia de 1 h (enm. 1.1, KE-016):** la orden de una decisión en *t* se ejecuta al ``open``
+      de la vela que abre en *t* + 1 h, o de la siguiente con precio si esa falta.
+    - **Frontera (KE-014):** con ``end``, el periodo cuenta sus eventos en ``[inicio, end)``. La
+      última vela cierra en ``end`` y da la última valoración, pero la liquidación de ``end`` (del
+      periodo siguiente, p. ej. del holdout) ni se cobra ni decide.
+    """
     bars = hourly if end is None else hourly.filter(pl.col("open_time") < end)
     signal = f"s_{config.k}"
     by_time = {
@@ -186,10 +209,12 @@ def simulate_symbol(  # noqa: PLR0913 - keyword-only: cada argumento es una dime
     for o, s_open, s_close, p_open, p_close in bars.select(
         "open_time", "spot_open", "spot_close", "perp_open", "perp_close"
     ).iter_rows():
-        if book.pending_spot and s_open is not None:
+        if book.pending_spot and s_open is not None and book.due(o):
             book.execute_spot(s_open)
-        if book.pending_perp and p_open is not None:
+            book.result.executions.append((o, "spot", s_open))
+        if book.pending_perp and p_open is not None and book.due(o):
             book.execute_perp(p_open)
+            book.result.executions.append((o, "perp", p_open))
         if p_close is not None:
             book.mark_perp(p_close)
         if s_close is not None:
@@ -198,7 +223,7 @@ def simulate_symbol(  # noqa: PLR0913 - keyword-only: cada argumento es una dime
         close_time = o + timedelta(hours=1)
         book.result.hours_total += 1
         book.result.hours_invested += int(book.is_open)
-        if close_time in by_time:
+        if close_time in by_time and (end is None or close_time < end):  # KE-014
             book.settle_and_decide(close_time, *by_time[close_time])
         if close_time.hour == 0:  # enm. 1.3: valoración a las 00:00 UTC, tras la liquidación
             days.append((close_time, book.equity))

@@ -103,6 +103,7 @@ def test_empty_lake_reports_every_missing_artifact_with_its_command(tmp_path: Pa
         "carry H2",
         "modelo de funding",
         "simulación",
+        "presupuesto de capital",
     ]
     assert all(m.command.startswith("uv run pq ") for m in art.missing)
     assert quality_table(art.quality).is_empty()
@@ -110,12 +111,16 @@ def test_empty_lake_reports_every_missing_artifact_with_its_command(tmp_path: Pa
 
 def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
     art = load_artifacts(lake)
-    assert [m.artifact for m in art.missing] == ["carry H1"]  # el JSON roto se ignora
+    # El JSON roto se ignora; el presupuesto (PQ-83) no está en este lago.
+    assert [m.artifact for m in art.missing] == ["carry H1", "presupuesto de capital"]
 
     assert quality_table(art.quality).row(0, named=True)["desde"] == "2020-09-13"
     h2 = art.carry["H2"]
-    assert gates_table(h2)["pasa"].to_list() == ["sí"]
-    assert performance_table(h2)["B1 siempre activo"][0] == 0.6
+    assert gates_table(h2)["resultado"].to_list() == ["✅ pasa"]
+    perf = performance_table(h2)
+    assert perf["métrica"][0] == "Sharpe"
+    assert perf["referencia: siempre invertido"][0] == "0,60"
+    assert perf["qué significa"][0].startswith("Rentabilidad por unidad de riesgo")
     curve = equity_curves(art.carry_returns["H2"], "k9-theta20")
     assert curve["k9-theta20"].to_list() == pytest.approx([1.01, 1.01 * 1.02])
     assert equity_curves(art.carry_returns["H2"], "no-existe").is_empty()
@@ -139,10 +144,15 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
 
 def app_labels() -> list[str]:
     return [
-        "¿Qué pasó? Datos y calidad",
+        "Inicio: ¿cómo va?",
         "¿Funciona? Carry y gates",
         "¿Qué predice? Modelo",
         "¿Qué riesgo hay? Simulación",
+        "¿Y si invierto? Simula tu inversión",
+        "¿Qué predice hoy? Funding en vivo",
+        "¿Cómo va en vivo? Paper trading",
+        "¿Cómo se reparte? Cartera",
+        "Datos y calidad (técnico)",
     ]
 
 
@@ -159,7 +169,7 @@ def test_app_renders_every_tab_with_artifacts(lake: Path, monkeypatch: pytest.Mo
     assert not at.exception
     assert [t.label for t in at.tabs] == app_labels()
     metrics = {m.label: m.value for m in at.metric}
-    assert metrics["Configuración elegida (CPCV)"] == "k9-theta20"
+    assert metrics["Configuración elegida"] == "k9-theta20"
     assert metrics["Probabilidad de quiebra anual de equilibrio"] == "0.40%"
     assert any("carry H1" in i.value for i in at.info)
 
@@ -169,7 +179,9 @@ def test_app_degrades_gracefully_without_artifacts(
 ) -> None:
     at = run_app(tmp_path / "vacio", monkeypatch)
     assert not at.exception
-    assert len(at.info) == 5
+    # 6 artefactos faltantes + simulador y predicción sin silver + paper trading sin diario, en la
+    # cartera: sin operaciones y sin bandas, y en la portada: sin paper ni evaluaciones (PQ-124)
+    assert len(at.info) == 13
     assert not at.dataframe
 
 
@@ -179,3 +191,92 @@ def test_model_falls_back_to_the_level_formulation(tmp_path: Path) -> None:
     art = load_artifacts(tmp_path)
     assert art.model_mode == "level"
     assert art.model == {"regression": []}
+
+
+def test_live_tab_shows_the_paper_trading_journal(
+    lake: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PQ-55: la pestaña en vivo lee el diario y el heartbeat que deja el runner."""
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
+
+    from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal  # noqa: PLC0415
+    from prometheus_platform.domain.events import (  # noqa: PLC0415
+        FundingSettled,
+        OrderFilled,
+        OrderSubmitted,
+        PortfolioValued,
+        RunnerStarted,
+    )
+    from prometheus_platform.domain.model import InstrumentId, Side, Venue  # noqa: PLC0415
+
+    now = datetime.now(UTC)
+    t0 = now - timedelta(days=1)
+    perp = InstrumentId("SOLUSDT-PERP", Venue.BINANCE)
+    journal = JsonlEventJournal(lake / "paper/diario.jsonl")
+    for event in (
+        RunnerStarted(
+            occurred_at=t0,
+            broker="simulado",
+            strategy_id="carry-h2",
+            symbols="SOLUSDT",
+            params="k=9",
+        ),
+        PortfolioValued(
+            occurred_at=t0, equity=Decimal(1000), cash=Decimal(1000), gross_notional=Decimal(0)
+        ),
+        OrderSubmitted(
+            occurred_at=t0,
+            client_order_id="20261101T1600-entrada-20261101T170100-SOLUSDT-PERP",
+            instrument=perp,
+            side=Side.SELL,
+            quantity=Decimal(2),
+        ),
+        OrderFilled(
+            occurred_at=t0,
+            client_order_id="20261101T1600-entrada-20261101T170100-SOLUSDT-PERP",
+            fill_price=Decimal(100),
+            fill_quantity=Decimal(2),
+            fee=Decimal("0.2"),
+        ),
+        FundingSettled(
+            occurred_at=now,
+            symbol="SOLUSDT",
+            funding_time=now,
+            rate=Decimal("0.0003"),
+            interval_hours=8,
+            amount=Decimal("0.06"),
+            action="mantener",
+            s_k="0.33",
+            target_open=True,
+            was_open=True,
+            rebalance=False,
+        ),
+        PortfolioValued(
+            occurred_at=now,
+            equity=Decimal("1001.5"),
+            cash=Decimal(800),
+            gross_notional=Decimal(400),
+        ),
+    ):
+        journal.append(event)
+    write(
+        lake / "paper/heartbeat.json",
+        {
+            "at": now.isoformat(),
+            "ok": True,
+            "detail": "",
+            "broker": "simulado",
+            "kill_switch": False,
+        },
+    )
+
+    at = run_app(lake, monkeypatch)
+
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Capital"] == "1.001,50 USD"
+    assert metrics["Ganancia acumulada"] == "+1,50 USD"
+    assert metrics["Funding cobrado"] == "+0,06 USD"
+    assert any("Runner en marcha" in m.value for m in at.success)
+    assert any("Kill-switch armado" in m.value for m in at.success)

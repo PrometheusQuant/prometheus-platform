@@ -10,8 +10,9 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,7 @@ class Environment(StrEnum):
 
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+MAX_LEVERAGE_CAP = 2.0  # ningún entorno puede configurar más apalancamiento que esto
 
 
 class Settings(BaseSettings):
@@ -45,6 +47,80 @@ class Settings(BaseSettings):
 
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
+    # Chats que pueden darle comandos al bot (PQ-72), separados por comas.
+    # Vacío: solo el chat de alertas.
+    telegram_authorized_chat_ids: str = ""
+    # Zona horaria IANA en la que se muestran las alertas a las personas (los logs siguen en UTC).
+    alert_timezone: str = "America/La_Paz"
+
+    # Asistente /pregunta del bot (PQ-90): clave de la API de Claude y límite de gasto diario.
+    anthropic_api_key: SecretStr | None = None
+    assistant_daily_limit_usd: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+
+    # Límites de riesgo (PQ-53). Valores conservadores para paper trading con < 1.000 USD.
+    risk_max_notional_symbol_usd: float = Field(default=500.0, gt=0, allow_inf_nan=False)
+    risk_max_notional_total_usd: float = Field(default=1_000.0, gt=0, allow_inf_nan=False)
+    risk_max_leverage: float = Field(default=1.0, gt=0, le=MAX_LEVERAGE_CAP, allow_inf_nan=False)
+    risk_hard_leverage: float = Field(default=1.5, gt=0, le=MAX_LEVERAGE_CAP, allow_inf_nan=False)
+    risk_max_daily_loss: float = Field(default=0.02, gt=0, lt=1, allow_inf_nan=False)
+    risk_max_hedge_imbalance: float = Field(default=0.15, gt=0, lt=1, allow_inf_nan=False)
+    risk_imbalance_grace_seconds: int = Field(default=300, ge=0)
+
+    # Registro de ensayos compartido (PQ-112): cada carril escribe en su archivo.
+    research_lane: str = "david"
+    research_author: str = ""  # vacío: se toma de `git config user.name`
+    research_ledger_dir: Path = Path("docs/estrategias/ensayos")
+
+    # Monitoreo del paper trading (PQ-55).
+    paper_drawdown_alert: float = Field(default=0.03, gt=0, lt=1, allow_inf_nan=False)
+    paper_heartbeat_max_age_minutes: int = Field(default=10, ge=1)
+
+    # Respaldos cifrados de data/paper (PQ-73): clave PÚBLICA age (no es secreta) y retención.
+    backup_age_recipient: str = ""
+    backup_keep_days: int = Field(default=14, ge=1)
+
+    # Verificación externa de disponibilidad (PQ-97): URL de ping de Healthchecks.io o similar.
+    # El vigilante la llama en cada revisión; si deja de llegar, el servicio externo avisa.
+    healthcheck_url: SecretStr | None = None
+
+    @field_validator("alert_timezone")
+    @classmethod
+    def _check_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"Zona horaria desconocida: {value!r} (usa un nombre IANA)") from exc
+        return value
+
+    @field_validator("healthcheck_url")
+    @classmethod
+    def _check_healthcheck(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None or not value.get_secret_value().strip():
+            return None
+        if not value.get_secret_value().startswith("https://"):
+            raise ValueError("PQ_HEALTHCHECK_URL debe empezar con https://")
+        return value
+
+    @field_validator("research_lane")
+    @classmethod
+    def _check_lane(cls, value: str) -> str:
+        if not value.isidentifier():
+            raise ValueError(
+                f"PQ_RESEARCH_LANE debe ser un nombre simple (p. ej. david): {value!r}"
+            )
+        return value
+
+    @property
+    def alert_tz(self) -> ZoneInfo:
+        return ZoneInfo(self.alert_timezone)
+
+    @property
+    def bot_authorized_chats(self) -> frozenset[str]:
+        """Chats que pueden darle comandos al bot. Sin lista explícita, solo el chat de alertas."""
+        listed = {c.strip() for c in self.telegram_authorized_chat_ids.split(",") if c.strip()}
+        if listed:
+            return frozenset(listed)
+        return frozenset({self.telegram_chat_id}) if self.telegram_chat_id else frozenset()
 
     @model_validator(mode="after")
     def _check_environment_invariants(self) -> Self:
@@ -60,6 +136,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "El entorno live no puede usar la testnet: PQ_BINANCE_TESTNET=false"
                 )
+        if self.risk_hard_leverage < self.risk_max_leverage:
+            raise ValueError("PQ_RISK_HARD_LEVERAGE debe ser >= PQ_RISK_MAX_LEVERAGE")
+        if self.risk_max_notional_symbol_usd > self.risk_max_notional_total_usd:
+            raise ValueError("El nocional por símbolo no puede superar al nocional total")
         if self.environment is Environment.PAPER and not self.binance_testnet:
             raise ValueError("El paper trading solo opera en testnet: PQ_BINANCE_TESTNET=true")
         return self

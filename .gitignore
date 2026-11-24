@@ -45,3 +45,17 @@ site/
 
 # Exportaciones de sesiones para NotebookLM (scripts/export_sessions.py)
 notebooklm/
+
+# Worktrees temporales de los agentes de Claude Code
+.claude/worktrees/
+
+# Terraform (deploy/oci): el estado lo guarda Resource Manager, nunca el repo
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+deploy/oci/*.zip
+
+# Mutation testing (PQ-99): copia de trabajo de mutmut e informe
+mutants/
+mutmut-informe.md

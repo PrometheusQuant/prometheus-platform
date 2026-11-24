@@ -1,6 +1,6 @@
 [project]
 name = "prometheus-platform"
-version = "0.2.0"
+version = "0.3.0"
 description = "Plataforma de trading multiestrategia de PrometheusQuant: datos, investigación, backtesting, paper y ejecución en vivo."
 readme = "README.md"
 license = "Apache-2.0"
@@ -9,6 +9,8 @@ requires-python = ">=3.12,<3.13"
 authors = [{ name = "David Quintela", email = "david.a.quintela@gmail.com" }]
 dependencies = [
     "alembic>=1.20.1",
+    "anthropic>=0.80",
+    "duckdb>=1.4",
     "httpx>=0.28",
     "matplotlib>=3.9",
     "mlflow-skinny>=3",
@@ -16,13 +18,16 @@ dependencies = [
     "optuna>=4",
     "pandera[polars]>=0.35.0",
     "polars>=1",
+    "prometheus-client>=0.21",
     "pyarrow>=26",
     "pydantic>=2.14",
     "pydantic-settings>=2.16",
+    "pyrage>=1.4.0",
     "scikit-learn>=1.6",
     "scipy>=1.14",
     "sqlalchemy>=2.1.6",
     "structlog>=26.1",
+    "websockets>=15",
 ]
 
 [project.scripts]
@@ -36,6 +41,7 @@ dev = [
     "commitizen>=4.19",
     "hypothesis>=6.170",
     "import-linter>=2.15",
+    "mutmut>=3.8",
     "mypy>=2.4",
     "pre-commit>=4.7",
     "pyarrow-stubs>=20.0.0.20260819",
@@ -51,9 +57,13 @@ docs = [
 e2e = [
     "pytest-playwright>=0.7",
 ]
+orquestacion = [
+    "dagster>=1.13",
+    "dagster-webserver>=1.13",
+]
 
 [tool.uv]
-default-groups = ["dev", "docs", "dashboard"]
+default-groups = ["dev", "docs", "dashboard", "orquestacion"]
 
 [build-system]
 requires = ["hatchling"]
@@ -97,7 +107,7 @@ files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["sklearn.*", "mlflow.*", "optuna.*", "playwright.*"]
+module = ["sklearn.*", "mlflow.*", "optuna.*", "playwright.*", "pyrage.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -134,6 +144,25 @@ source_modules = ["prometheus_platform.domain"]
 forbidden_modules = ["structlog", "pydantic_settings", "httpx", "pyarrow"]
 
 [[tool.importlinter.contracts]]
+# PQ-22 / ADR-0010: Dagster solo orquesta. Ni el trading en vivo ni la lógica dependen de él.
+name = "Solo api.orquestacion importa Dagster"
+type = "forbidden"
+source_modules = [
+    "prometheus_platform.domain",
+    "prometheus_platform.ops",
+    "prometheus_platform.data_platform",
+    "prometheus_platform.research",
+    "prometheus_platform.strategies",
+    "prometheus_platform.portfolio_risk",
+    "prometheus_platform.execution",
+    "prometheus_platform.adapters",
+    "prometheus_platform.api.cli",
+    "prometheus_platform.api.dashboard",
+    "prometheus_platform.api.report",
+]
+forbidden_modules = ["dagster"]
+
+[[tool.importlinter.contracts]]
 name = "Las estrategias no conocen la ejecución ni el riesgo"
 type = "independence"
 modules = [
@@ -150,3 +179,26 @@ tag_format = "v$version"
 version_provider = "pep621"
 version_files = ["src/prometheus_platform/__init__.py:__version__"]
 update_changelog_on_bump = true
+
+# --- Mutation testing (PQ-99): job semanal, no en cada PR -------------------------
+
+[tool.mutmut]
+# Código que protege el dinero (riesgo, kill switch, contraparte, presupuesto) y el protocolo
+# (validación, gold.validate). De gold.py solo se ejecutan los mutantes de validate (ver Makefile).
+# Cuentan solo las pruebas del propio módulo: las del runner (tests/unit/api/) multiplican el tiempo
+# por ~20 y el gate debe medir si el módulo se defiende con sus propios tests.
+source_paths = [
+    "src/prometheus_platform/portfolio_risk/",
+    "src/prometheus_platform/research/validation.py",
+    "src/prometheus_platform/data_platform/gold.py",
+]
+also_copy = ["src/prometheus_platform/", "tests/", "docs/"]
+pytest_add_cli_args = ["--no-cov", "-p", "no:cacheprovider"]
+# Con 8 procesos en paralelo las pruebas de gold superan el tiempo estimado y salían «timeout»
+# espurios (contados como detectados). 10 s fijos de margen los reclasifican.
+timeout_constant = 10.0
+pytest_add_cli_args_test_selection = [
+    "tests/unit/portfolio_risk/",
+    "tests/unit/research/test_validation.py",
+    "tests/unit/data_platform/test_gold.py",
+]

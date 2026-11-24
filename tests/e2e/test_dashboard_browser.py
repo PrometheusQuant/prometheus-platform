@@ -1,4 +1,4 @@
-"""El dashboard, tal como lo ve un usuario: abre, muestra las 4 pestañas y ninguna falla.
+"""El dashboard, tal como lo ve un usuario: abre, muestra todas las pestañas y ninguna falla.
 
 Funciona con o sin artefactos: cada pestaña debe mostrar datos o el aviso con el comando que
 los genera (la CI lo prueba con un lakehouse vacío; en local, con los datos reales).
@@ -11,10 +11,15 @@ pytest.importorskip("playwright", reason="instala el grupo e2e: uv sync --group 
 from playwright.sync_api import Page, expect
 
 TABS = {
-    "¿Qué pasó? Datos y calidad": "Calidad de la capa silver",
+    "Inicio: ¿cómo va?": "¿Cómo va?",
     "¿Funciona? Carry y gates": "Carry de funding: periodo de desarrollo",
     "¿Qué predice? Modelo": "Modelo predictivo del funding (cap. 5)",
     "¿Qué riesgo hay? Simulación": "Simulación de Markov y Monte Carlo (cap. 6)",
+    "¿Y si invierto? Simula tu inversión": "Simula tu inversión en el carry (H2)",
+    "¿Qué predice hoy? Funding en vivo": "¿Habrá funding alto en la próxima liquidación?",
+    "¿Cómo va en vivo? Paper trading": "Paper trading del carry H2 en vivo",
+    "¿Cómo se reparte? Cartera": "Cartera multiestrategia: capital, PnL y riesgo",
+    "Datos y calidad (técnico)": "Calidad de la capa silver",
 }
 TIMEOUT_MS = 30_000
 
@@ -27,7 +32,7 @@ def dashboard(page: Page, base_url: str) -> Page:
     return page
 
 
-def test_opens_with_title_and_the_four_tabs(dashboard: Page) -> None:
+def test_opens_with_title_and_all_the_tabs(dashboard: Page) -> None:
     expect(dashboard).to_have_title("PrometheusQuant")
     expect(dashboard.get_by_role("heading", level=1)).to_contain_text("tablero de investigación")
     expect(dashboard.get_by_role("tab")).to_have_text(list(TABS))
@@ -38,6 +43,23 @@ def test_each_tab_shows_data_or_how_to_generate_it(dashboard: Page, tab: str, he
     dashboard.get_by_role("tab", name=tab).click()
     panel = dashboard.get_by_role("tabpanel")
     expect(panel.get_by_role("heading", name=heading)).to_be_visible()
-    content = panel.locator('[data-testid="stDataFrame"], [data-testid="stAlert"]')
+    content = panel.locator(
+        '[data-testid="stDataFrame"], [data-testid="stAlert"], [data-testid="stMetric"]'
+    )
     expect(content.first).to_be_visible()
     expect(dashboard.locator('[data-testid="stException"]')).to_have_count(0)
+
+
+def test_fair_mode_shows_the_guided_tour_with_big_type(page: Page, base_url: str) -> None:
+    """PQ-102: ``?modo=feria`` abre el recorrido de 7 pasos y agranda la tipografía."""
+    page.set_default_timeout(TIMEOUT_MS)
+    page.goto(f"{base_url}/?modo=feria")
+    sidebar = page.get_by_test_id("stSidebar")
+    expect(sidebar).to_contain_text("paso 1 de 7")
+    sidebar.get_by_role("button", name="Siguiente ▶").click()
+    expect(sidebar).to_contain_text("paso 2 de 7")
+    expect(sidebar).to_contain_text("Datos y calidad (técnico)")
+    title = page.get_by_role("heading", level=1)
+    size = title.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+    assert size >= 60  # 3rem sobre 22 px; el modo normal ronda los 44 px
+    expect(page.locator('[data-testid="stException"]')).to_have_count(0)

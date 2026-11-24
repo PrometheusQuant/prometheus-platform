@@ -2,6 +2,7 @@ import io
 import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 import structlog
@@ -108,6 +109,13 @@ def test_render_is_plain_text_and_truncates_long_details() -> None:
     assert len(lines[3]) == len("b: ") + 300
 
 
+def test_render_shows_local_time_first_and_utc_as_reference() -> None:
+    alert = Alert(severity=AlertSeverity.WARNING, title="t", occurred_at=T0, environment="dev")
+    assert alert.render().splitlines()[1] == "entorno=dev hora=2026-11-05T12:00:00+00:00"
+    local = alert.render(ZoneInfo("America/La_Paz")).splitlines()[1]
+    assert local == "entorno=dev hora=2026-11-05 08:00:00 -04 (12:00:00 UTC)"
+
+
 def test_cli_alert_test_reports_missing_channel_and_delivery(
     tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -122,3 +130,14 @@ def test_cli_alert_test_reports_missing_channel_and_delivery(
     assert cli.main(["alert", "test"]) == 0
     assert recorder.alerts[0].title == "alerta de prueba"
     assert "entregada=sí" in capsys.readouterr().out
+
+
+def test_forwarded_alert_does_not_carry_secrets_from_free_text() -> None:
+    """PQ-118: la alerta a Telegram se arma después de enmascarar, también en textos libres."""
+    notifier = RecordingNotifier()
+    settings = Settings(environment=Environment.PAPER)
+    configure_logging(settings, stream=io.StringIO(), notifier=notifier)
+    token = "123456789:" + "AAH4kq9" + "x" * 28  # por partes: no es una credencial real
+    get_logger().error("paper_tick_failed", detail=f"url 'https://api.telegram.org/bot{token}/x'")
+    [alert] = notifier.alerts
+    assert "AAH4kq9" not in alert.render(None)

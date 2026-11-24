@@ -9,7 +9,8 @@ reactivaría. Las decisiones grandes tienen su ADR; aquí está la lista complet
 | Mensajería (Kafka, NATS JetStream) | Diferido a la fase 2 de `deploy/` | Con un solo proceso no hay a quién enviar mensajes | Separar el proceso live y el de research en dos nodos |
 | Base de series temporales (TimescaleDB, QuestDB) | Diferido | Parquet y DuckDB alcanzan para el research batch ([ADR-0003](../adr/0003-lakehouse-parquet-duckdb.md)) | Captura de ticks en vivo desde varios procesos |
 | PySpark y Delta Lake | Descartado | En OmniVoC causaron errores de compatibilidad Scala y de falta de memoria con 5,7 GB; Polars y DuckDB cubren nuestro volumen | Datos que no quepan en una máquina |
-| Orquestación con Dagster (PQ-22) | Sprint 3 | La CLI `pq` cubre hoy la ingesta y el research | Ingesta diaria automática del mes en curso |
+| Orquestación con Dagster (PQ-22) | **Hecho** ([ADR-0010](../adr/0010-dagster-para-orquestar-el-lakehouse.md)) | — | — |
+| Catálogo DuckLake | Diferido (ADR-0010) | `gold.duckdb` ya da SQL sobre gold; DuckLake descarga su extensión en tiempo de ejecución y no aporta con un solo escritor | Varios procesos escribiendo el lakehouse, o versiones de tablas (*time travel*) |
 | Ejecución con NautilusTrader | Propuesta ([ADR-0006](../adr/0006-nautilustrader-para-ejecucion.md)) | Primero hay que validar la estrategia fuera de muestra | Holdout de H2 aprobado (requiere PQ-17) |
 | Señal del carry con ML (H3) | Pendiente de pre-registro | El clasificador mejora el AUC, pero adoptarlo tras verlo funcionar sería sobreajuste ([informe del modelo](../investigacion/2026-10-30-modelo-predictivo-funding.md)) | Su propio pre-registro con N actualizado |
 | Carry siempre activo en BTC y ETH | Pendiente de pre-registro | Surgió al mirar los resultados de H1 ([decisión](../estrategias/01-carry/decision.md)) | Su propio pre-registro |

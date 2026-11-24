@@ -7,15 +7,18 @@ paper trading o los tests, y son intercambiables entre sí (LSP).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
-from datetime import datetime
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
 from prometheus_platform.domain.alerts import Alert
+from prometheus_platform.domain.chat import ChatMessage
+from prometheus_platform.domain.counterparty import CounterpartyReading
 from prometheus_platform.domain.datasets import ArchiveRef, RawArchive
-from prometheus_platform.domain.events import DomainEvent
-from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId, Side
+from prometheus_platform.domain.events import DomainEvent, OrderFilled
+from prometheus_platform.domain.market import MarketSnapshot
+from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId, Side, Signal
 
 
 class Clock(Protocol):
@@ -86,3 +89,87 @@ class Notifier(Protocol):
     """
 
     def notify(self, alert: Alert) -> bool: ...
+
+
+class ChatTransport(Protocol):
+    """Canal de chat de ida y vuelta: recibe comandos y responde (bot de Telegram, PQ-72).
+
+    Como ``Notifier``, nunca lanza por fallos de red: devuelve una lista vacía o ``False``.
+    """
+
+    def updates(self, offset: int | None, timeout_seconds: int) -> list[ChatMessage]: ...
+
+    def send(self, chat_id: str, text: str) -> bool: ...
+
+
+class Strategy(Protocol):
+    """Contrato de una estrategia (PQ-113, ADR-0011): instantánea point-in-time → señales.
+
+    - Recibe solo una ``MarketSnapshot``: no ve la ejecución, el riesgo, el reloj ni la red.
+    - Devuelve ``Signal`` (peso objetivo por instrumento, en [-1, 1]). El tamaño y las órdenes los
+      deciden el runner, ``portfolio_risk`` y el bróker.
+    - Puede tener estado (por ejemplo, la histéresis del carry), pero debe ser **determinista**: la
+      misma secuencia de instantáneas da las mismas señales.
+    - ``lookback`` es cuánta historia necesita cada instantánea. En paper solo recibe esa ventana,
+      y la prueba de contrato verifica que con ella decide lo mismo que con todo el pasado.
+    """
+
+    strategy_id: str
+
+    @property
+    def instruments(self) -> Sequence[InstrumentId]: ...
+
+    @property
+    def lookback(self) -> timedelta: ...
+
+    def on_snapshot(self, snapshot: MarketSnapshot) -> list[Signal]: ...
+
+
+class LiveMarket(Protocol):
+    """Datos de mercado en vivo para el runner (PQ-54). Implementación: API pública de Binance."""
+
+    def prices(self, symbol: str) -> tuple[Decimal, Decimal]:
+        """Último precio spot y mark price del perpetuo."""
+        ...
+
+    def recent_funding(self, symbol: str, limit: int) -> list[FundingRate]:
+        """Últimas liquidaciones **ya ocurridas**, de la más antigua a la más reciente."""
+        ...
+
+
+class CounterpartyFeed(Protocol):
+    """Señales públicas del riesgo de contraparte del exchange (PQ-96).
+
+    Nunca lanza: lo que no pudo leer queda en ``None`` dentro de la lectura.
+    """
+
+    def read(self) -> CounterpartyReading: ...
+
+
+class Broker(OrderGateway, Protocol):
+    """Bróker del paper trading: simulado (MVP) o Binance Demo (PQ-52), intercambiables."""
+
+    name: str
+
+    def positions(self) -> dict[InstrumentId, Decimal]:
+        """Cantidad con signo por instrumento (negativa en un corto)."""
+        ...
+
+    def cash(self) -> Decimal: ...
+
+    def drain_fills(self) -> list[OrderFilled]:
+        """Fills ocurridos desde la última llamada."""
+        ...
+
+    def settle_funding(
+        self, instrument: InstrumentId, funding_time: datetime, rate: Decimal, mark: Decimal
+    ) -> Decimal:
+        """Aplica una liquidación a la posición perp y devuelve el importe (+ cobrado, - pagado).
+
+        Idempotente por ``funding_time``: una liquidación ya aplicada devuelve 0 sin tocar nada.
+        """
+        ...
+
+    def equity(self, marks: Mapping[InstrumentId, Decimal]) -> Decimal:
+        """Valor de la cuenta a los precios dados (el simulado los usa; un exchange real, no)."""
+        ...

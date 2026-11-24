@@ -1,0 +1,132 @@
+# Trabajo en dos carriles con agentes de IA
+
+Desde el Sprint 3 el equipo trabaja en **dos carriles en paralelo**, cada uno con su agente:
+
+| Carril | Persona | Agente | Lee las reglas en |
+|---|---|---|---|
+| David | David Quintela | Claude Code | `CLAUDE.md`, que importa `AGENTS.md` |
+| Boris | Boris Miranda | Codex CLI (ChatGPT) | `AGENTS.md` (Codex lo lee solo) |
+
+Desde el 21-nov-2026 pueden trabajar a la vez **tres agentes** (Claude A, Claude B y Codex), y
+cualquiera puede tomar tickets de cualquier carril: el carril dice quién responde (el asignado en
+Jira, que no cambia), no qué agente ejecuta. Cómo se reparten sin pisarse está en la sección
+«Coordinación entre agentes» de `AGENTS.md`.
+
+Las reglas del proyecto viven en un solo lugar, [`AGENTS.md`](https://github.com/PrometheusQuant/prometheus-platform/blob/develop/AGENTS.md).
+Esta página explica **cómo arrancar** y **cómo trabajar un ticket** de principio a fin.
+
+## 1. Preparar la máquina (una vez)
+
+**Atajo para Boris:** el [prompt inicial para Codex](prompt-inicial-codex.md) hace todo esto y lo
+que sigue, fase por fase.
+
+
+Requisitos: Linux o WSL2 con Ubuntu, `git`, [`uv`](https://docs.astral.sh/uv/) 0.13 o superior,
+[`gh`](https://cli.github.com/) con sesión iniciada, y Codex CLI instalado según la documentación
+oficial de OpenAI. Docker Desktop es opcional (solo para `make e2e`).
+
+```bash
+git clone https://github.com/PrometheusQuant/prometheus-platform.git
+cd prometheus-platform
+make setup                 # entorno con uv y hooks de git (commit-msg valida el formato)
+cp .env.example .env       # tu configuración local; nunca se sube a git
+make check                 # debe pasar entero antes de empezar a programar
+```
+
+### Conectar Codex con Jira
+
+Codex CLI puede leer y actualizar los tickets con el
+[servidor MCP oficial de Atlassian](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/):
+
+```bash
+codex mcp add atlassian --url https://mcp.atlassian.com/v2/mcp
+codex mcp login atlassian     # abre el navegador: inicia sesión con tu cuenta de Jira y autoriza
+codex mcp list                # debe mostrar «atlassian» autenticado
+```
+
+El endpoint `v2` es el que Atlassian recomienda en su
+[guía de migración](https://support.atlassian.com/atlassian-ai-gateway/docs/how-to-upgrade-from-atlassian-rovo-mcp-v1-to-atlassian-rovo-mcp-v2/).
+Si tu versión de Codex no lo acepta, usa el de la guía de inicio (`…/v1/mcp/authv2`).
+
+Prueba: pídele a Codex «lista mis tickets del sprint activo del proyecto PQ». Si no responde, la
+autorización de OAuth no se completó: repite `codex mcp login atlassian`.
+
+## 2. Reconstruir el lakehouse (una vez, y cuando haga falta)
+
+`data/` no está en git. Los **tests no lo necesitan**: usan datos sintéticos. Sí lo necesitas para
+investigar y para ver el dashboard con datos reales.
+
+```bash
+for s in BTCUSDT ETHUSDT SOLUSDT BNBUSDT XRPUSDT; do
+  uv run pq ingest funding --symbol $s --start 2020-01
+  uv run pq ingest klines --market spot --symbol $s --interval 1h --start 2020-01
+  uv run pq ingest klines --market um   --symbol $s --interval 1h --start 2020-01
+  uv run pq ingest --source api funding --symbol $s                       # mes en curso
+  uv run pq ingest --source api klines --market spot --symbol $s --interval 1h
+  uv run pq ingest --source api klines --market um   --symbol $s --interval 1h
+  uv run pq silver build --symbol $s
+done
+uv run pq gold build
+```
+
+También se puede hacer desde la interfaz de Dagster (`make orquestador`).
+
+!!! warning "No regeneres los resultados de research por tu cuenta"
+    `pq research carry`, `funding-model` y similares son **ensayos**: cada ejecución suma a N en el
+    Deflated Sharpe. Si necesitas los artefactos ya evaluados (`data/research/`), pídeselos a David.
+    Ejecuta research solo para tus propias hipótesis pre-registradas, y deja registro de cada
+    ejecución (ver la sección 4).
+
+## 3. Trabajar un ticket con Codex
+
+1. **Toma un ticket libre** del sprint activo (sin etiqueta `agente-*`). Puedes pedírselo a Codex:
+   «lee PQ-<n>, ponle la etiqueta agente-codex y muévelo a In Progress». No cambies el asignado.
+2. **Crea la rama** desde `develop` actualizado:
+   ```bash
+   git switch develop && git pull
+   git switch -c feature/PQ-<n>-descripcion-corta
+   ```
+3. **Arranca Codex en la raíz del repo** y dale el ticket con este molde:
+
+   ```text
+   Lee AGENTS.md antes de nada. Trabajas en el ticket PQ-<n> del carril de Boris.
+   Lee el ticket en Jira (proyecto PQ) y cumple sus criterios de aceptación.
+
+   Reglas: rama actual feature/PQ-<n>-…; commits Conventional Commits con la clave PQ-<n>;
+   si es research, primero el pre-registro y nunca el holdout; si la historia es de 5 puntos o
+   más, escribe primero specs/PQ-<n>-<nombre>/spec.md y plan.md. Antes de afirmar algo no
+   trivial, aplica .claude/skills/doubt-driven-development/SKILL.md. Al terminar corre
+   `make check` y `make docs-build`, y no inventes cifras.
+   ```
+
+4. **Revisa lo que hizo Codex** antes de commitear. Tú eres el responsable del PR, no el agente.
+5. **Abre el PR** a `develop` con la plantilla, en borrador desde el primer commit
+   (`gh pr create --draft`).
+6. Revisa el diff con la guía `code-review-and-quality`, deja el resultado como comentario y, solo
+   con la CI en verde, fusiona con **squash** y mueve el ticket a *Done* (pasos en la sección
+   «Coordinación entre agentes» de `AGENTS.md`).
+
+## 4. Reglas que no se negocian (resumen de `AGENTS.md`)
+
+- **Pre-registro antes de mirar resultados.** El holdout se abre una sola vez.
+- **Cada ejecución de research cuenta en N.** Con `PQ_RESEARCH_LANE=boris` en tu `.env`, los
+  comandos `pq research *` escriben sus filas en `docs/estrategias/ensayos/boris.jsonl`. Súbelas en
+  el mismo PR que los resultados ([registro de ensayos](../estrategias/registro-de-ensayos.md)).
+- **Costes reales** (`CostModel`) y **point-in-time** (`knowledge_time`) siempre.
+- **Secretos** solo en tu `.env`. Nunca en el código, en los logs ni en el chat con el agente.
+- **No toques el núcleo del otro carril.** Usa los puertos de `domain/ports.py`. Si te falta algo,
+  pídelo en un ticket.
+
+## 5. Revisión cruzada
+
+Desde el 21-nov-2026 cada agente revisa su propio PR antes de fusionarlo (decisión del titular,
+ver `AGENTS.md`), con la guía
+[`code-review-and-quality`](https://github.com/PrometheusQuant/prometheus-platform/blob/develop/.claude/skills/code-review-and-quality/SKILL.md).
+Es también la evidencia del code review del capítulo 9.3. Además, dos modelos distintos
+(Claude y GPT) detectan errores distintos.
+
+| Prefijo | Significado |
+|---|---|
+| **Crítico:** | Bloquea el merge |
+| *(sin prefijo)* | Cambio requerido |
+| **Considera:** / **Nit:** | Opcional |

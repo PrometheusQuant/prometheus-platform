@@ -38,19 +38,32 @@ Con menos de 1.000 USD de capital, la cuenta estará siempre en VIP 0.
 **Para el modelo de costes** del pre-registro del carry (PQ-18):
 se usan las tasas sin descuento de BNB hasta que la sección 3 confirme las reales.
 
-## 3. Verificación desde la cuenta (pendiente: titular)
+## 3. Verificación desde la cuenta (hecha: 2026-11-23)
 
 Completar con la fecha de consulta. Si algo difiere de la sección 2, manda la cuenta.
+Cómo obtener cada dato sin operar:
 
-| Comprobación | Dónde se ve | Resultado | Fecha |
-|---|---|---|---|
-| Nivel de KYC | Perfil → Verificación | _pendiente_ | |
-| Spot habilitado | Trade → Spot | _pendiente_ | |
-| Futuros USDⓈ-M habilitados (¿cuestionario o test?) | Derivados → Futuros USDⓈ-M | _pendiente_ | |
-| Margin habilitado | Trade → Margin | _pendiente_ | |
-| Comisión spot maker / taker real | Perfil → Panel → Nivel VIP / comisiones | _pendiente_ | |
-| Comisión USDⓈ-M maker / taker real | Futuros → Comisiones | _pendiente_ | |
-| Claves de Demo Trading creadas **sin permiso de retiro** | Demo Trading → Gestión de API | _pendiente_ | |
+- con `scripts/comisiones_binance.py`, que usa una clave de solo lectura y se niega a seguir si
+  tiene más permisos;
+- o desde la web.
+
+Ver [pasos del titular](pasos-del-titular.md#paso-1-comisiones-reales-de-binance-pq-17).
+
+El titular la hizo el 2026-11-23 con el script y una clave de solo lectura, que borró después.
+Resultado: **las comisiones reales son iguales a las del modelo de costes** (sección 2).
+
+| Comprobación | Resultado | Fecha |
+|---|---|---|
+| Nivel VIP | VIP 0 | 2026-11-23 |
+| Futuros USDⓈ-M habilitados | Sí | 2026-11-23 |
+| Margin habilitado | No (la Estrategia 1 no lo necesita: spot + perpetuo) | 2026-11-23 |
+| Comisión spot maker / taker (BTCUSDT, ETHUSDT) | 0,100 % / 0,100 % | 2026-11-23 |
+| Descuento con BNB en spot | Habilitado para la cuenta: con BNB se paga el 75 % (25 % de descuento). El modelo no lo usa | 2026-11-23 |
+| Comisión USDⓈ-M maker / taker (BTCUSDT, ETHUSDT) | 0,020 % / 0,050 % | 2026-11-23 |
+| Claves de Demo Trading creadas **sin permiso de retiro** | _pendiente_ (paso 2 de la guía) | |
+
+El script usa la API, así que el KYC queda implícito: Binance no deja crear claves de API sin
+verificación. El nivel exacto no se registra.
 
 **Si los futuros USDⓈ-M no están habilitados:** crear un ticket para replantear la Estrategia 1
 (otro exchange de la [nota de regulación](../investigacion/notas/acceso_regulacion_bolivia.md):

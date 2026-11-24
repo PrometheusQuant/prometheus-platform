@@ -13,18 +13,16 @@ de silver sobre ``knowledge_time``.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
 
 from prometheus_platform.data_platform.silver import asof_join, silver_path
 from prometheus_platform.domain.datasets import DatasetKind, Market
+from prometheus_platform.domain.protocol import DEV_END
 
 SIGNAL_WINDOWS = (3, 9, 21)  # k pre-declarados (pre-registro, sección 5)
 HOURS_PER_YEAR = 8760
-DEV_END = datetime(2024, 6, 30, 23, 59, 59, tzinfo=UTC)  # fin del periodo de desarrollo
-HOLDOUT_START = datetime(2024, 7, 1, tzinfo=UTC)
 
 
 def load_silver(silver_root: Path, symbol: str) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:

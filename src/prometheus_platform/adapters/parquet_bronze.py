@@ -19,6 +19,7 @@ import io
 import json
 import os
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +140,19 @@ class ParquetBronzeStore:
         pq.write_table(table, tmp, compression="zstd")
         os.replace(tmp, path)
         return count
+
+    def written_after(self, ref: ArchiveRef, moment: datetime) -> bool:
+        """True si el archivo existe y se escribió después de ``moment``.
+
+        Sirve para la ingesta incremental de la API (PQ-65): un día descargado cuando aún estaba
+        en curso no cuenta como completo aunque su archivo exista.
+        """
+        path = self.path_for(ref)
+        if not path.exists():
+            return False
+        ingested = pq.read_table(path, columns=["_ingested_at"])["_ingested_at"]
+        first = ingested[0].as_py() if len(ingested) else None
+        return isinstance(first, datetime) and first >= moment
 
     def record_rejection(self, ref: ArchiveRef, reason: str) -> None:
         self._root.mkdir(parents=True, exist_ok=True)

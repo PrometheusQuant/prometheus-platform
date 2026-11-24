@@ -75,3 +75,24 @@ def test_notifier_selection_by_settings() -> None:
     assert isinstance(notifier_from_settings(configured), TelegramNotifier)
     blank = Settings(telegram_bot_token=SecretStr("  "), telegram_chat_id="42")
     assert notifier_from_settings(blank) is None
+
+
+def test_notifiers_show_local_time_from_settings_and_keep_utc() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    settings = Settings(telegram_bot_token=SecretStr(TOKEN), telegram_chat_id="42")
+    notifier = notifier_from_settings(
+        settings, httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    assert notifier is not None
+    assert notifier.notify(ALERT)
+    text = json.loads(seen[0].content)["text"]
+    assert "hora=2026-11-04 20:00:00 -04 (00:00:00 UTC)" in text  # Bolivia, UTC-4
+
+    stream = io.StringIO()
+    assert ConsoleNotifier(stream, local_tz=settings.alert_tz).notify(ALERT)
+    assert "(00:00:00 UTC)" in stream.getvalue()

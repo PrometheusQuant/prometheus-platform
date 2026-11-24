@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format typecheck arch test check audit docs docs-build dashboard report e2e screenshots
+.PHONY: help setup lint format typecheck arch test check audit mutation docs docs-build dashboard report informe-semanal poster e2e screenshots orquestador
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -33,9 +33,24 @@ e2e: ## Pruebas en navegador real contra el dashboard en Docker (Playwright)
 	uv run --group e2e playwright install chromium
 	uv run --group e2e pytest tests/e2e --no-cov --base-url http://127.0.0.1:8501
 
+poster: ## Póster A3 de la feria con QR, desde los resultados (Typst)
+	@command -v quarto >/dev/null || { echo "Falta Quarto: https://quarto.org/docs/get-started/"; exit 1; }
+	uv run pq report inputs --out reports/poster
+	cd reports/poster && quarto typst compile poster.typ poster.pdf
+	cp reports/poster/poster.pdf docs/academico/poster-feria.pdf
+	@echo "Póster en docs/academico/poster-feria.pdf"
+
 screenshots: ## Captura cada pestaña del dashboard en reports/storytelling/_img/dashboard/
 	docker compose up -d --build --wait
 	uv run --group e2e python scripts/capture_dashboard.py
+
+orquestador: ## Interfaz de Dagster en http://127.0.0.1:3000: assets del lakehouse y checks (PQ-22)
+	mkdir -p data/.dagster
+	DAGSTER_HOME=$(CURDIR)/data/.dagster uv run dagster dev \
+		-m prometheus_platform.api.orquestacion.definitions -h 127.0.0.1 -p 3000
+
+informe-semanal: ## PDF del paper trading de la última semana ISO terminada (PQ-85)
+	uv run pq paper weekly-report --pdf
 
 report: ## Genera el informe ejecutivo en PDF desde los resultados (Quarto + Typst)
 	@command -v quarto >/dev/null || { echo "Falta Quarto: https://quarto.org/docs/get-started/"; exit 1; }
@@ -43,6 +58,16 @@ report: ## Genera el informe ejecutivo en PDF desde los resultados (Quarto + Typ
 	cd reports/storytelling && quarto render informe.qmd --to typst
 	cp reports/storytelling/informe.pdf docs/academico/informe-ejecutivo.pdf
 	@echo "Informe en docs/academico/informe-ejecutivo.pdf"
+
+MUTANTES = "prometheus_platform.portfolio_risk.*" "prometheus_platform.research.validation.*" \
+	"prometheus_platform.data_platform.gold.x_validate__*" "prometheus_platform.data_platform.gold.x__validate_calendar__*"
+
+MUTATION_UMBRAL = 78  # score ajustado mínimo (%); trinquete: docs/metodologia/mutation-testing.md
+
+mutation: ## Mutation testing del riesgo y la validación con mutmut (~10 min en 8 núcleos; PQ-99)
+	rm -rf mutants
+	uv run mutmut run $(MUTANTES)
+	uv run python scripts/mutmut_informe.py --umbral $(MUTATION_UMBRAL) --salida mutmut-informe.md
 
 audit: ## Busca vulnerabilidades conocidas en las dependencias del uv.lock (pip-audit)
 	uv export --frozen --no-emit-project --format requirements-txt -o .audit-requirements.txt

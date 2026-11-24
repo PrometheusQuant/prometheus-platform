@@ -14,7 +14,7 @@ PQ-
 ## Si toca investigación o estrategias (CRISP-ML(Q))
 
 - [ ] Hipótesis económica registrada en el ticket antes de mirar resultados
-- [ ] Ensayos registrados (N) en el registro de experimentos
+- [ ] Las filas de cada ejecución están en `docs/estrategias/ensayos/<carril>.jsonl` (PQ-112)
 - [ ] Costes reales (comisiones VIP0, slippage) incluidos
 - [ ] No se abrió el holdout final
 

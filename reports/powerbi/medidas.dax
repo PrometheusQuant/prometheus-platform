@@ -1,0 +1,251 @@
+// Medidas DAX del dashboard de Power BI (PQ-47) sobre el modelo gold.
+//
+// Cómo usarlas: cree una tabla vacía llamada «Medidas» (Inicio > Escribir datos), y por cada bloque
+// de abajo use «Nueva medida» con esa tabla seleccionada. Copie desde el nombre hasta el final del
+// bloque. Las fórmulas replican research/validation.py: año de 365 días, desviación muestral
+// (STDEV.S) y drawdown sobre la curva de capital compuesta.
+//
+// Las medidas de rendimiento solo tienen sentido para UNA configuración a la vez: si hay varias
+// en el contexto, devuelven vacío en lugar de mezclar estrategias. Con «configuracion_id» en la
+// leyenda de un gráfico, cada línea se calcula por separado.
+//
+// Formato recomendado (Herramientas de medidas > Formato): porcentaje con 2 decimales para las
+// medidas en %, número con 2 decimales para Sharpe y Calmar.
+
+
+// ---------------------------------------------------------------------------------------------
+// Estrategia (fact_retorno_estrategia; periodo de desarrollo hasta el 2024-06-29)
+// ---------------------------------------------------------------------------------------------
+
+// Configuración en contexto, p. ej. «H2/k9-theta20». Vacío si hay más de una.
+Configuración actual =
+SELECTEDVALUE ( dim_configuracion[configuracion_id] )
+
+// Días con retorno en el contexto (filtros de fecha incluidos).
+Días evaluados =
+DISTINCTCOUNT ( fact_retorno_estrategia[fecha] )
+
+// Producto de (1 + retorno) menos 1: lo que creció el capital en el periodo filtrado.
+Retorno acumulado =
+IF (
+    HASONEVALUE ( dim_configuracion[configuracion_id] ),
+    PRODUCTX ( fact_retorno_estrategia, 1 + fact_retorno_estrategia[retorno] ) - 1
+)
+
+// Crecimiento anual compuesto: (1 + retorno acumulado) ^ (365 / días) - 1.
+CAGR =
+VAR dias = [Días evaluados]
+RETURN
+    IF (
+        HASONEVALUE ( dim_configuracion[configuracion_id] ) && dias > 1,
+        POWER ( 1 + [Retorno acumulado], 365 / dias ) - 1
+    )
+
+// Desviación estándar muestral de los retornos diarios, anualizada con raíz de 365.
+Volatilidad anual =
+IF (
+    HASONEVALUE ( dim_configuracion[configuracion_id] ),
+    STDEV.S ( fact_retorno_estrategia[retorno] ) * SQRT ( 365 )
+)
+
+// Media / desviación de los retornos diarios, anualizado con raíz de 365 (pre-registro §8).
+Sharpe anualizado =
+IF (
+    HASONEVALUE ( dim_configuracion[configuracion_id] ),
+    DIVIDE (
+        AVERAGE ( fact_retorno_estrategia[retorno] ),
+        STDEV.S ( fact_retorno_estrategia[retorno] )
+    ) * SQRT ( 365 )
+)
+
+// Peor caída desde un máximo de la curva de capital compuesta dentro del periodo filtrado.
+// Es negativa (p. ej. -0,39 %). Cálculo cuadrático en el número de días: tarda ~1 s.
+Máximo drawdown =
+IF (
+    HASONEVALUE ( dim_configuracion[configuracion_id] ),
+    VAR serie =
+        SELECTCOLUMNS (
+            fact_retorno_estrategia,
+            "f", fact_retorno_estrategia[fecha],
+            "r", fact_retorno_estrategia[retorno]
+        )
+    VAR curva =
+        ADDCOLUMNS (
+            serie,
+            "@capital",
+                VAR d = [f]
+                RETURN PRODUCTX ( FILTER ( serie, [f] <= d ), 1 + [r] )
+        )
+    VAR picos =
+        ADDCOLUMNS (
+            curva,
+            "@pico",
+                VAR d = [f]
+                RETURN MAXX ( FILTER ( curva, [f] <= d ), [@capital] )
+        )
+    RETURN MINX ( picos, DIVIDE ( [@capital], [@pico] ) - 1 )
+)
+
+// CAGR / |máximo drawdown|.
+Calmar =
+DIVIDE ( [CAGR], ABS ( [Máximo drawdown] ) )
+
+// Aproximación del tiempo con posición: días con retorno distinto de cero. Es mayor que el
+// «tiempo invertido» de research (27 % en H2), porque un día con la posición abierta solo unas
+// horas, o con solo el coste de una orden, ya cuenta.
+% días con exposición =
+DIVIDE (
+    CALCULATE ( COUNTROWS ( fact_retorno_estrategia ), fact_retorno_estrategia[retorno] <> 0 ),
+    COUNTROWS ( fact_retorno_estrategia )
+)
+
+// Curva de capital para un gráfico de líneas con dim_fecha[fecha] en el eje: compone solo los días
+// del periodo SELECCIONADO (no desde 2020), así el segmentador de fechas la reescala.
+Capital acumulado =
+VAR fin = MAX ( dim_fecha[fecha] )
+RETURN
+    CALCULATE (
+        PRODUCTX ( fact_retorno_estrategia, 1 + fact_retorno_estrategia[retorno] ),
+        FILTER ( ALLSELECTED ( dim_fecha[fecha] ), dim_fecha[fecha] <= fin )
+    )
+
+
+// ---------------------------------------------------------------------------------------------
+// Métricas de research (fact_desempeno): las del informe, sobre 1.642 días
+// ---------------------------------------------------------------------------------------------
+
+// Valores tal como los publicó la evaluación (incluyen el día frontera de KE-014).
+Sharpe (research) =
+SELECTEDVALUE ( fact_desempeno[sharpe] )
+
+CAGR (research) =
+SELECTEDVALUE ( fact_desempeno[cagr] )
+
+Máximo drawdown (research) =
+SELECTEDVALUE ( fact_desempeno[max_drawdown] )
+
+// El benchmark B1 de la hipótesis en contexto, aunque el segmentador tenga otra configuración.
+Sharpe B1 =
+CALCULATE (
+    MAX ( fact_desempeno[sharpe] ),
+    REMOVEFILTERS ( dim_configuracion ),
+    VALUES ( dim_configuracion[hipotesis] ),
+    dim_configuracion[es_benchmark] = TRUE ()
+)
+
+CAGR B1 =
+CALCULATE (
+    MAX ( fact_desempeno[cagr] ),
+    REMOVEFILTERS ( dim_configuracion ),
+    VALUES ( dim_configuracion[hipotesis] ),
+    dim_configuracion[es_benchmark] = TRUE ()
+)
+
+// La configuración que eligió la CPCV en la hipótesis en contexto.
+Configuración elegida =
+CALCULATE (
+    MAX ( dim_configuracion[configuracion] ),
+    REMOVEFILTERS ( dim_configuracion ),
+    VALUES ( dim_configuracion[hipotesis] ),
+    dim_configuracion[es_seleccionada] = TRUE ()
+)
+
+
+// ---------------------------------------------------------------------------------------------
+// Gates (fact_gates; sin relación: filtrar por su columna «hipotesis»)
+// ---------------------------------------------------------------------------------------------
+
+Gates aprobados =
+CALCULATE ( COUNTROWS ( fact_gates ), fact_gates[pasa] = TRUE () )
+
+Gates totales =
+COUNTROWS ( fact_gates )
+
+// Texto para una tarjeta: «4 de 4».
+Gates (texto) =
+FORMAT ( [Gates aprobados], "0" ) & " de " & FORMAT ( [Gates totales], "0" )
+
+
+// ---------------------------------------------------------------------------------------------
+// Mercado y funding (fact_funding_diario, fact_mercado_diario)
+// ---------------------------------------------------------------------------------------------
+
+// Media de las tasas anualizadas diarias. Ojo: los días extremos pesan (SOL, quiebra de FTX en
+// noviembre de 2022: -6.144 % anualizado el 2022-11-10); la mediana es más representativa.
+Funding anualizado medio =
+AVERAGE ( fact_funding_diario[funding_anualizado_medio] )
+
+// Suma de las tasas liquidadas: lo que habría cobrado un short de 1 USD todo el periodo.
+Funding total acumulado =
+SUM ( fact_funding_diario[funding_total] )
+
+Base media =
+AVERAGE ( fact_mercado_diario[base] )
+
+Volumen perpetuo (USD) =
+SUM ( fact_mercado_diario[volumen_perp_usd] )
+
+// Días con menos de 24 velas horarias en spot o en el perpetuo (huecos de la fuente).
+Días incompletos =
+COUNTROWS (
+    FILTER (
+        fact_mercado_diario,
+        fact_mercado_diario[horas_spot] < 24 || fact_mercado_diario[horas_perp] < 24
+    )
+)
+
+
+// ---------------------------------------------------------------------------------------------
+// Calidad de datos (fact_calidad)
+// ---------------------------------------------------------------------------------------------
+
+Filas en silver =
+SUM ( fact_calidad[filas] )
+
+Huecos detectados =
+SUM ( fact_calidad[huecos] )
+
+Outliers marcados =
+SUM ( fact_calidad[outliers] )
+
+
+// ---------------------------------------------------------------------------------------------
+// Modelo de funding (fact_metricas_modelo + dim_modelo)
+// ---------------------------------------------------------------------------------------------
+
+Mejor AUC =
+MAX ( fact_metricas_modelo[auc] )
+
+Mejor R2 =
+MAX ( fact_metricas_modelo[r2] )
+
+// Nombre del modelo con el mejor AUC.
+Mejor clasificador =
+VAR mejor = [Mejor AUC]
+RETURN
+    MAXX (
+        FILTER ( fact_metricas_modelo, fact_metricas_modelo[auc] = mejor ),
+        fact_metricas_modelo[modelo_id]
+    )
+
+
+// ---------------------------------------------------------------------------------------------
+// Riesgo: Monte Carlo (fact_escenarios) y optimización con CVaR (fact_frontera)
+// ---------------------------------------------------------------------------------------------
+
+// Con un segmentador de selección única sobre fact_escenarios[escenario].
+Retorno anual medio simulado =
+SELECTEDVALUE ( fact_escenarios[media] )
+
+P(pérdida) =
+SELECTEDVALUE ( fact_escenarios[prob_perdida] )
+
+P(rendir menos que el 4 %) =
+SELECTEDVALUE ( fact_escenarios[prob_bajo_hurdle] )
+
+CVaR 95 % =
+SELECTEDVALUE ( fact_escenarios[cvar95] )
+
+// Mayor peso del carry en la cartera que respeta el límite de CVaR.
+Peso máximo que cumple =
+CALCULATE ( MAX ( fact_frontera[peso_carry] ), fact_frontera[cumple] = TRUE () )

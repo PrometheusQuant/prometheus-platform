@@ -7,10 +7,11 @@ carpeta a partir de esa evidencia.
 
 | Ítem | Contenido exigido | Evidencia | Épica |
 |---|---|---|---|
-| 0.1–0.3 | Título, equipo, línea temática, resumen ejecutivo | `README.md`, este documento, `informe/` | PQ-10 |
-| 1.1–1.2 | Antecedentes, causas y solución actual | [`investigacion/`](../investigacion/README.md) | PQ-2 |
-| 1.3 | Pregunta de investigación y objetivos | `estrategias/*/pre-registro.md` | PQ-2 |
-| 1.4 | Alcance, limitaciones y supuestos | ADR-0005, [`compliance/`](../compliance/README.md) | PQ-2 |
+| 0.1–0.3 | Título, equipo, línea temática, resumen ejecutivo | `README.md`, este documento; resumen ejecutivo en el [informe final](informe-ejecutivo.pdf) (`make report`) | PQ-10 (PQ-59) |
+| 1.1 | Antecedentes y contexto | [`investigacion/`](../investigacion/README.md) | PQ-2 |
+| 1.2 | Causas (Ishikawa, 5 porqués) y solución actual | [Planteamiento del problema](planteamiento-del-problema.md) | PQ-2 (PQ-45) |
+| 1.3 | Pregunta de investigación y objetivos (matriz de consistencia) | [Planteamiento del problema](planteamiento-del-problema.md), `estrategias/*/pre-registro.md` | PQ-2 (PQ-45) |
+| 1.4 | Alcance, limitaciones y supuestos; matriz de riesgos | [Planteamiento del problema](planteamiento-del-problema.md), ADR-0005, [`compliance/`](../compliance/README.md) | PQ-2 (PQ-45) |
 | 1.5 | Auditoría de fuentes (≥ 5.000 registros) | Spike de Data Vision | PQ-2 (PQ-19) |
 | 2.1 | Estado del arte (APA 7) | `academico/marco-de-referencia.md` | PQ-2 (PQ-28) |
 | 2.2–2.3 | PESTEL; marco normativo y ético | `academico/marco-de-referencia.md`, `compliance/` | PQ-2 (PQ-28) |
@@ -21,12 +22,13 @@ carpeta a partir de esa evidencia.
 | 5.1–5.3 | Selección de algoritmos, entrenamiento, evaluación | `research/`, `estrategias/*/evaluacion.md` | PQ-4, PQ-5, PQ-6, PQ-12 |
 | 6.1–6.2 | Pseudoaleatorios con bondad de ajuste; simulación y optimización | `research/`, `academico/simulacion.md` | PQ-9 |
 | 6.3 | Rediseño del proceso con PDCA | `metodologia/`, ciclo de `estrategias/` | PQ-9 |
-| 7.1 | Modelado de datos y ETL | Lakehouse gold, modelo tabular de BI | PQ-3, PQ-10 |
-| 7.2 | Dashboard interactivo y KPIs | [Dashboard en Streamlit](../runbooks/dashboard.md) (PQ-34); Grafana para la operación | PQ-10 |
+| 7.1 | Modelado de datos y ETL | [Capa gold: modelo en estrella](../arquitectura/modelo-gold.md) (`pq gold build`) | PQ-3, PQ-10 (PQ-46) |
+| 7.2 | Dashboard interactivo y KPIs | [Dashboard de negocio en Power BI](dashboard-power-bi.md) sobre la capa gold (PQ-47) y [tablero en Streamlit](../runbooks/dashboard.md) (PQ-34); Grafana para la operación | PQ-10 |
 | 7.3 | Despliegue (TRL 5) | Imagen Docker del dashboard; paper trading en testnet | PQ-7 |
-| 7.4 | Validación estadística | Deflated Sharpe, PBO, pruebas de hipótesis | PQ-4 |
-| 8.1–8.4 | Competencia, Canvas, costes cloud, ROI | `academico/modelo-de-negocio.md`, [`deploy/`](https://github.com/PrometheusQuant/prometheus-platform/tree/develop/deploy) | PQ-10 |
-| 9.1–9.4 | Conclusiones, pitch, code review, evaluación 360 | `academico/informe/`, historial de PRs | PQ-10 |
+| 7.4 | Validación estadística | [Pruebas t con HAC, bootstrap, ANOVA y Friedman](../investigacion/2026-11-06-validacion-estadistica.md) (`pq research stats`), además de Deflated Sharpe y PBO | PQ-4, PQ-9 (PQ-48) |
+| 8.1–8.2 | Competencia y Canvas | [Modelo de negocio](modelo-de-negocio.md) §3–4 | PQ-10 (PQ-44) |
+| 8.3–8.4 | Costes cloud cotizados, VAN, TIR y capital de equilibrio | [Modelo de negocio](modelo-de-negocio.md) §6.2, generado con `uv run pq research finance`; [`deploy/`](https://github.com/PrometheusQuant/prometheus-platform/tree/develop/deploy) | PQ-10 (PQ-49) |
+| 9.1–9.4 | Conclusiones, pitch, code review, evaluación 360 | Conclusiones y recomendaciones en el [informe final](informe-ejecutivo.pdf) (9.1); [póster y video de la demo](feria.md) (9.2); [code review y trazabilidad](revision-de-codigo.md) (9.3); historial de PRs | PQ-10 (PQ-59, PQ-61, PQ-77) |
 
 ## Marcos de referencia
 
@@ -43,6 +45,7 @@ Material con copyright (libros, papers en PDF) ni datos personales: se citan en 
 
 | Capítulo | Evidencia |
 |---|---|
+| 1.2–1.4 Planteamiento del problema | [Planteamiento del problema](planteamiento-del-problema.md) (PQ-45, 2026-11-06): Ishikawa con 5 porqués, matriz de consistencia, registro de supuestos y matriz de riesgos |
 | 1.5 Auditoría de fuentes | [Auditoría de Data Vision](../investigacion/2026-10-23-auditoria-binance-data-vision.md): 2.903 archivos y ≈1,1 M filas |
 | 2.1–2.3 Marco de referencia | [Marco de referencia](marco-de-referencia.md): estado del arte en APA 7, PESTEL aplicado y marco normativo y ético |
 | 4.1–4.2 Extracción y limpieza | Ingesta bronze (`pq ingest`) y capa silver con checks (`pq silver build`, `specs/PQ-21-capa-silver/`) |
