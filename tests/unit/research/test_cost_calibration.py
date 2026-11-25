@@ -104,3 +104,31 @@ def test_report_and_artifact_say_what_is_worse() -> None:
     assert {o["leg"] for o in artifact["orders"]} == {"spot", "perp"}
     assert Decimal(artifact["orders"][0]["reference"]) == 100
     assert summarize([]) == []
+
+
+def test_majors_and_altcoins_are_compared_with_their_own_assumption() -> None:
+    btc = InstrumentId("BTCUSDT", Venue.BINANCE)
+    events = [
+        order("x", btc, Side.BUY, "1"),
+        fill("x", "100.03", "1", "0.10003", "0.03"),  # 3 pb frente a 2 pb: peor
+        order("y", SPOT, Side.BUY, "1"),
+        fill("y", "100.03", "1", "0.10003", "0.03"),  # 3 pb frente a 5 pb: mejor
+    ]
+    models = {"BTCUSDT": CostModel(slippage=0.0002), "SOLUSDT": ALT}
+    major, alt = summarize(order_costs(events, models.__getitem__))
+    assert major.assumed_slippage_bp == pytest.approx(2.0)
+    assert major.orders == 1
+    assert major.slippage_worse
+    assert alt.assumed_slippage_bp == pytest.approx(5.0)
+    assert alt.orders == 1
+    assert not alt.slippage_worse
+
+
+def test_fee_rounding_from_the_base_asset_is_not_a_worse_fee() -> None:
+    events = [order("z", SPOT, Side.BUY, "1"), fill("z", "100", "1", "0.10005", "0")]
+    (spot,) = summarize(order_costs(events, costs_for))
+    assert spot.fee_rate_mean == pytest.approx(0.0010005)
+    assert not spot.fee_worse  # 0,10005 % frente al 0,1 %: conversión, no tarifa
+    events = [order("w", SPOT, Side.BUY, "1"), fill("w", "100", "1", "0.12", "0")]
+    (spot,) = summarize(order_costs(events, costs_for))
+    assert spot.fee_worse

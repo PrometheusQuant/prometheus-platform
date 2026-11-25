@@ -29,6 +29,10 @@ from prometheus_platform.research.backtest import CostModel
 
 BP = Decimal(10_000)
 PERP_SUFFIX = "-PERP"
+# La comisión spot se cobra en el activo comprado y se pasa a USDT al precio del fill: el
+# redondeo deja la tasa medida en 0,10005 % frente al 0,1 % de la tarifa. Menos de un 1 % relativo
+# por encima no es una comisión peor, es ruido de la conversión.
+FEE_TOLERANCE = 1.01
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +77,7 @@ class LegSummary:
 
     @property
     def fee_worse(self) -> bool:
-        return self.fee_rate_mean > self.assumed_fee_rate
+        return self.fee_rate_mean > self.assumed_fee_rate * FEE_TOLERANCE
 
 
 def order_costs(
@@ -114,26 +118,31 @@ def order_costs(
 
 
 def summarize(orders: Sequence[OrderCost]) -> list[LegSummary]:
-    """Una fila por pata con órdenes, en orden ``spot``, ``perp``."""
+    """Una fila por pata y supuesto de slippage: ``spot`` y luego ``perp``, de menor a mayor.
+
+    BTC y ETH suponen 2 pb y las altcoins 5 pb: mezclarlos en una fila compararía la mediana de
+    todos con el supuesto más laxo.
+    """
     rows = []
     for leg in ("spot", "perp"):
-        chosen = [o for o in orders if o.leg == leg]
-        if not chosen:
-            continue
-        slips = sorted(o.slippage_bp for o in chosen)
-        rows.append(
-            LegSummary(
-                leg=leg,
-                orders=len(chosen),
-                slippage_bp_median=statistics.median(slips),
-                slippage_bp_mean=statistics.fmean(slips),
-                slippage_bp_p90=_quantile(slips, 0.9),
-                fee_rate_mean=statistics.fmean(o.fee_rate for o in chosen),
-                assumed_slippage_bp=max(o.assumed_slippage_bp for o in chosen),
-                assumed_fee_rate=max(o.assumed_fee_rate for o in chosen),
-            )
-        )
+        for assumed in sorted({o.assumed_slippage_bp for o in orders if o.leg == leg}):
+            chosen = [o for o in orders if o.leg == leg and o.assumed_slippage_bp == assumed]
+            rows.append(_leg_summary(leg, chosen))
     return rows
+
+
+def _leg_summary(leg: str, chosen: Sequence[OrderCost]) -> LegSummary:
+    slips = sorted(o.slippage_bp for o in chosen)
+    return LegSummary(
+        leg=leg,
+        orders=len(chosen),
+        slippage_bp_median=statistics.median(slips),
+        slippage_bp_mean=statistics.fmean(slips),
+        slippage_bp_p90=_quantile(slips, 0.9),
+        fee_rate_mean=statistics.fmean(o.fee_rate for o in chosen),
+        assumed_slippage_bp=chosen[0].assumed_slippage_bp,
+        assumed_fee_rate=max(o.assumed_fee_rate for o in chosen),
+    )
 
 
 def _quantile(ordered: Sequence[float], q: float) -> float:

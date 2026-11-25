@@ -56,7 +56,10 @@ def orders_frame(artifacts: Sequence[dict[str, Any]]) -> pl.DataFrame:
     """Una fila por orden con su slippage y el supuesto, para el gráfico de puntos."""
     rows = [
         {
-            "serie": f"{art.get('source', '?')} · {_leg_name(o.get('leg'))}",
+            "serie": (
+                f"{art.get('source', '?')} · {_leg_name(o.get('leg'))} · "
+                f"supuesto {style.number(o.get('assumed_slippage_bp'), 0)} pb"
+            ),
             "símbolo": str(o.get("symbol", "?")),
             "slippage (pb)": float(o.get("slippage_bp", 0.0)),
             "supuesto (pb)": float(o.get("assumed_slippage_bp", 0.0)),

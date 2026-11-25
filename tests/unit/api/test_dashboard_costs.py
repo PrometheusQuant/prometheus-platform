@@ -67,8 +67,8 @@ def test_the_headline_says_when_an_amendment_is_due() -> None:
 def test_orders_feed_the_chart() -> None:
     frame = costs.orders_frame([ARTIFACT])
     assert frame["serie"].to_list() == [
-        "binance-demo/muestreo · contado",
-        "binance-demo/muestreo · perpetuo",
+        "binance-demo/muestreo · contado · supuesto 2 pb",
+        "binance-demo/muestreo · perpetuo · supuesto 5 pb",
     ]
     assert frame["slippage (pb)"].to_list() == [1.25, 6.5]
 

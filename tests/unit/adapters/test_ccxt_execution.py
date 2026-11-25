@@ -143,7 +143,12 @@ class FakeExchange:
         return [{"symbol": "SOL/USDT:USDT", "contracts": 1.5, "side": "short"}]
 
     def fetch_ticker(self, symbol: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"last": self.last, "bid": self.last - 0.01, "ask": self.last + 0.01}
+        return {"last": self.last, "bid": None, "ask": None}  # como los futuros de Binance
+
+    def fetch_order_book(
+        self, symbol: str, limit: int | None = None, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return {"bids": [[self.last - 0.01, 3.0]], "asks": [[self.last + 0.01, 2.0]]}
 
     def fetch_open_orders(
         self,
@@ -326,8 +331,16 @@ def test_an_order_without_execution_data_fails_loudly() -> None:
         gateway.market_order("c15", PERP, Side.SELL, Decimal("0.2"))
 
 
-def test_a_crossed_or_empty_book_is_refused() -> None:
+@pytest.mark.parametrize(
+    "book",
+    [
+        {"bids": [[2.0, 1.0]], "asks": [[1.0, 1.0]]},  # cruzado
+        {"bids": [], "asks": [[1.0, 1.0]]},  # sin compradores
+        {"bids": None, "asks": None},  # vacío
+    ],
+)
+def test_a_crossed_or_empty_book_is_refused(book: dict[str, Any]) -> None:
     fake = FakeExchange()
-    fake.fetch_ticker = lambda symbol, params=None: {"last": 1.0, "bid": 2.0, "ask": 1.0}  # type: ignore[method-assign]
+    fake.fetch_order_book = lambda symbol, limit=None, params=None: book  # type: ignore[method-assign]
     with pytest.raises(ExecutionError, match="libro inválido"):
         make(fake).quote(SPOT)

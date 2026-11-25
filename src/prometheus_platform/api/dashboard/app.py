@@ -800,7 +800,9 @@ def _live_costs(art: Artifacts) -> None:
     )
     st.caption(
         "Cada punto es una orden. La marca gris es el slippage que suponen los backtests (2 pb en "
-        "BTC y ETH, 5 pb en las altcoins). Lo medido solo cambia los backtests siguientes."
+        "BTC y ETH, 5 pb en las altcoins). El muestreo se hace en Binance Demo, cuyo libro tiene "
+        "otra liquidez que el real: las cifras son orientativas. Lo medido solo cambia los "
+        "backtests siguientes."
     )
 
 
