@@ -38,6 +38,7 @@ class Artifacts:
     budget_scenarios: pl.DataFrame | None = None
     trend: dict[str, dict[str, Any]] = field(default_factory=dict)  # T1, T2 y holdout (PQ-68)
     carry_holdout: dict[str, Any] | None = None  # holdout de H2 (PQ-50)
+    costs: list[dict[str, Any]] = field(default_factory=list)  # pq paper costes (PQ-95)
     missing: list[Missing] = field(default_factory=list)
 
 
@@ -95,6 +96,8 @@ def load_artifacts(data_dir: Path) -> Artifacts:
         art.missing.append(Missing("presupuesto de capital", "uv run pq research budget"))
     elif (budget_dir / "scenarios.parquet").exists():
         art.budget_scenarios = pl.read_parquet(budget_dir / "scenarios.parquet")
+    costs_dir = data_dir / "research" / "costes"
+    art.costs = [c for p in sorted(costs_dir.glob("*.json")) if (c := _read_json(p)) is not None]
     return art
 
 

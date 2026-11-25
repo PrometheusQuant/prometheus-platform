@@ -247,6 +247,21 @@ def _add_research(commands: Commands) -> None:
     ledger.add_argument("action", choices=["resumen", "importar-mlflow", "verificar"])
 
 
+def _add_paper_backup_parser(paper_actions: Any) -> None:
+    backup = paper_actions.add_parser(
+        "backup", help="Respaldos cifrados (age) de data/paper y su restauración (PQ-73)"
+    )
+    backup_actions = backup.add_subparsers(dest="backup_action", required=True)
+    keygen = backup_actions.add_parser("keygen", help="Crea el par de claves age (una vez)")
+    keygen.add_argument("--out", type=Path, required=True, help="archivo de la clave privada")
+    create = backup_actions.add_parser("create", help="Cifra data/paper y poda lo viejo")
+    create.add_argument("--out", type=Path, required=True, help="carpeta de los respaldos")
+    restore = backup_actions.add_parser("restore", help="Restaura un respaldo en data/paper")
+    restore.add_argument("archive", type=Path, help="paper-<fecha>.tar.gz.age")
+    restore.add_argument("--identity", type=Path, required=True, help="clave privada age")
+    restore.add_argument("--force", action="store_true", help="reemplaza el diario existente")
+
+
 def _add_operations(commands: Commands) -> None:
     report = commands.add_parser("report", help="Informe ejecutivo en Quarto (PQ-39)")
     report_actions = report.add_subparsers(dest="action", required=True)
@@ -323,18 +338,7 @@ def _add_operations(commands: Commands) -> None:
     paper_actions.add_parser(
         "bot", help="Bot de Telegram: /estado, /pnl y /kill desde los chats autorizados (PQ-72)"
     )
-    backup = paper_actions.add_parser(
-        "backup", help="Respaldos cifrados (age) de data/paper y su restauración (PQ-73)"
-    )
-    backup_actions = backup.add_subparsers(dest="backup_action", required=True)
-    keygen = backup_actions.add_parser("keygen", help="Crea el par de claves age (una vez)")
-    keygen.add_argument("--out", type=Path, required=True, help="archivo de la clave privada")
-    create = backup_actions.add_parser("create", help="Cifra data/paper y poda lo viejo")
-    create.add_argument("--out", type=Path, required=True, help="carpeta de los respaldos")
-    restore = backup_actions.add_parser("restore", help="Restaura un respaldo en data/paper")
-    restore.add_argument("archive", type=Path, help="paper-<fecha>.tar.gz.age")
-    restore.add_argument("--identity", type=Path, required=True, help="clave privada age")
-    restore.add_argument("--force", action="store_true", help="reemplaza el diario existente")
+    _add_paper_backup_parser(paper_actions)
     weekly = paper_actions.add_parser(
         "weekly-report", help="Informe semanal del paper trading: PDF y envío a Telegram (PQ-85)"
     )
