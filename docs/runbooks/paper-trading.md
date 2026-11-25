@@ -283,6 +283,28 @@ uv run pq paper kill --broker binance-demo --reason "..."   # su propio kill-swi
 - **Si una orden queda por debajo del mínimo** al redondear (`stepSize`; nocional mínimo de 5
   USDT), se rechaza antes de enviarla con `OrderTooSmallError`.
 
+## Costes reales frente a los supuestos (PQ-95)
+
+```bash
+cd ~/code/pq-runtime
+# Idas y vueltas pequeñas en Binance Demo, en un diario propio (no toca el libro del runner).
+PQ_ENVIRONMENT=paper uv run pq paper muestreo-costes --symbols BTCUSDT,ETHUSDT,DOGEUSDT \
+  --rondas 3 --nocional 250
+# Slippage y comisión medidos frente al CostModel, del runner y del muestreo.
+PQ_ENVIRONMENT=paper uv run pq paper costes --broker binance-demo
+```
+
+- `costes` imprime una tabla por fuente y deja un JSON por fuente en `data/research/costes/`. El
+  dashboard lo muestra en la página del paper, con un punto por orden y el supuesto marcado en
+  gris.
+- El muestreo **rechaza SOL, BNB y XRP**, que los opera el runner de Demo en la misma cuenta. Solo
+  se pueden incluir con `--incluir-simbolos-del-runner` y con ese runner detenido.
+- Límites del muestreo: de 1 a 10 rondas y de 10 a 1.000 USDT por orden. El perpetuo de BTC exige
+  al menos 100 USDT por orden: usar 250 deja margen tras el redondeo de la cantidad.
+- Si lo medido es peor que lo supuesto, se abre un ticket de enmienda para los backtests
+  siguientes. Los ya evaluados no se tocan. Primer resultado:
+  [calibración del 2026-11-25](../investigacion/2026-11-25-calibracion-costes.md).
+
 ## Limitaciones conocidas
 
 - Con el bróker simulado, ejecutar al precio actual no es el precio real. Con `--broker

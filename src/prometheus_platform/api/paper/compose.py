@@ -224,7 +224,7 @@ def _broker(  # noqa: PLR0913 - keyword-only: las piezas que necesita cada brók
         return SimulatedBroker(market, costs_for, clock, paths.broker_state, capital)
     if kind != "binance-demo":
         raise ValueError(f"Bróker desconocido: {kind!r} (opciones: {', '.join(BROKERS)})")
-    gateway = execution or _binance_demo(settings, clock)
+    gateway = execution or binance_demo_execution(settings, clock)
     exchange = ExchangeBroker(
         gateway, market=market, clock=clock, state_path=paths.broker_state, initial_cash=capital
     )
@@ -238,7 +238,8 @@ def _broker(  # noqa: PLR0913 - keyword-only: las piezas que necesita cada brók
     return exchange
 
 
-def _binance_demo(settings: Settings, clock: Clock) -> ExecutionPort:
+def binance_demo_execution(settings: Settings, clock: Clock) -> ExecutionPort:
+    """Adaptador de Binance Demo con las claves del ``.env``; lanza si faltan."""
     key, secret = settings.binance_api_key, settings.binance_api_secret
     if key is None or secret is None:
         raise ValueError(

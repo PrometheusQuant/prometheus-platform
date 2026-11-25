@@ -101,6 +101,10 @@ class Exchange(Protocol):
 
     def fetch_ticker(self, symbol: str, params: dict[str, Any] | None = None) -> dict[str, Any]: ...
 
+    def fetch_order_book(
+        self, symbol: str, limit: int | None = None, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]: ...
+
     def fetch_open_orders(
         self,
         symbol: str | None = None,
@@ -199,6 +203,16 @@ class CcxtExecution:
     def price(self, instrument: InstrumentId) -> Decimal:
         ticker = self._call(lambda: self._ex.fetch_ticker(self._symbol(instrument)))
         return _dec(ticker["last"])
+
+    def quote(self, instrument: InstrumentId) -> tuple[Decimal, Decimal]:
+        # El libro y no el ticker: el ticker de futuros de Binance no trae bid ni ask (llegan a 0).
+        book = self._call(lambda: self._ex.fetch_order_book(self._symbol(instrument), 5))
+        bids, asks = book.get("bids") or [], book.get("asks") or []
+        bid = _dec(bids[0][0]) if bids else Decimal(0)
+        ask = _dec(asks[0][0]) if asks else Decimal(0)
+        if bid <= 0 or ask < bid:
+            raise ExecutionError(f"{instrument}: libro inválido (bid {bid}, ask {ask})")
+        return bid, ask
 
     def market_order(
         self, client_order_id: str, instrument: InstrumentId, side: Side, quantity: Decimal

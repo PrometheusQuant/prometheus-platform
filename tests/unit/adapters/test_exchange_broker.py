@@ -35,6 +35,7 @@ class FakeGateway:
         self.net_cut = Decimal(0)
         self.remote: dict[InstrumentId, Decimal] = {}
         self.cancelled = 0
+        self.sent: list[tuple[str, InstrumentId, Side, Decimal]] = []
 
     def balance(self, asset: str, *, perp: bool) -> Decimal:
         return Decimal(5000)
@@ -42,9 +43,13 @@ class FakeGateway:
     def price(self, instrument: InstrumentId) -> Decimal:
         return self.price_
 
+    def quote(self, instrument: InstrumentId) -> tuple[Decimal, Decimal]:
+        return self.price_ - Decimal("0.01"), self.price_ + Decimal("0.01")
+
     def market_order(
         self, client_order_id: str, instrument: InstrumentId, side: Side, quantity: Decimal
     ) -> ExchangeFill:
+        self.sent.append((client_order_id, instrument, side, quantity))
         return ExchangeFill(client_order_id, "1", quantity - self.net_cut, self.price_, self.fee)
 
     def cancel_all(self) -> None:

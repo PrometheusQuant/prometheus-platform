@@ -22,7 +22,7 @@ from streamlit.navigation.page import StreamlitPage
 
 from prometheus_platform.adapters.clock import SystemClock
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
-from prometheus_platform.api.dashboard import portfolio, style, tour
+from prometheus_platform.api.dashboard import costs, portfolio, style, tour
 from prometheus_platform.api.dashboard import summary as resumen
 from prometheus_platform.api.dashboard.artifacts import (
     Artifacts,
@@ -749,10 +749,61 @@ def _tab_live(
     _live_status(paths, max_age_minutes)
     _live_curve(view, _expected_cagr(art))
     _live_tables(view, resumen.entry_threshold(art.carry.get("H2", {}).get("selected")))
+    _live_costs(art)
     if auto_refresh:
         st.caption(f"Se actualiza sola cada {tour.LIVE_REFRESH.seconds} s.")
     else:
         st.caption("Recarga la página para ver el último ciclo.")
+
+
+def _live_costs(art: Artifacts) -> None:
+    """Slippage y comisiones de fills reales frente a lo que suponen los backtests (PQ-95)."""
+    st.markdown("**Costes reales frente a los supuestos**")
+    if not art.costs:
+        st.caption("Todavía no hay costes medidos.")
+        st.caption("Para el equipo: `uv run pq paper costes` (y `pq paper muestreo-costes`).")
+        return
+    st.markdown(costs.headline(art.costs))
+    st.dataframe(
+        costs.legs_table(art.costs),
+        hide_index=True,
+        width="stretch",
+        alt="Slippage y comisión medidos frente a los supuestos, por fuente y pata",
+    )
+    frame = costs.orders_frame(art.costs)
+    if frame.is_empty():
+        return
+    y = alt.Y("serie:N", title=None, axis=alt.Axis(labelLimit=320))
+    points = (
+        alt.Chart(frame)
+        .mark_circle(size=60, opacity=0.6, color=style.BRAND)
+        .encode(
+            x=alt.X("slippage (pb):Q", title="slippage por orden (pb; positivo es coste)"),
+            y=y,
+            tooltip=[
+                "símbolo:N",
+                alt.Tooltip("slippage (pb):Q", format=",.2f"),
+                alt.Tooltip("supuesto (pb):Q", format=",.0f"),
+            ],
+        )
+    )
+    assumed = (
+        alt.Chart(frame)
+        .mark_tick(color=style.NEUTRAL, thickness=3, size=26)
+        .encode(x="max(supuesto (pb)):Q", y=y, tooltip=["max(supuesto (pb)):Q"])
+    )
+    st.altair_chart(
+        alt.layer(points, assumed).properties(height=max(90, 46 * frame["serie"].n_unique())),
+        width="stretch",
+        theme=None,
+        alt=costs.headline(art.costs),
+    )
+    st.caption(
+        "Cada punto es una orden. La marca gris es el slippage que suponen los backtests (2 pb en "
+        "BTC y ETH, 5 pb en las altcoins). El muestreo se hace en Binance Demo, cuyo libro tiene "
+        "otra liquidez que el real: las cifras son orientativas. Lo medido solo cambia los "
+        "backtests siguientes."
+    )
 
 
 def _tab_portfolio(data_dir: Path, art: Artifacts) -> None:

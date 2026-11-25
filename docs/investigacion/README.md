@@ -9,6 +9,7 @@
 | [2026-11-05 Simulación del carry](2026-11-05-simulacion-carry.md) | PQ-33 (cap. 6): Markov de regímenes, bondad de ajuste, Monte Carlo validado, riesgo de quiebra del exchange y asignación óptima |
 | [2026-11-24 Spike de datos de Polymarket](2026-11-24-spike-datos-polymarket.md) | PQ-78: qué historial dan las API públicas, cuántos mercados resueltos hay, trampa de point-in-time en `closedTime` y go/no-go para PQ-87 |
 | [2026-11-24 Spike de sentimiento](2026-11-24-spike-sentimiento.md) | PQ-103: el Fear & Greed Index es point-in-time (sin revisiones en 67 copias archivadas); el sentimiento de texto con CryptoBERT, no; por qué el overlay va sobre el momentum y no sobre el carry |
+| [2026-11-25 Calibración de costes](2026-11-25-calibracion-costes.md) | PQ-95: slippage y comisión medidos en 42 órdenes de Binance Demo frente al `CostModel`; nada es peor que lo supuesto, sin enmienda |
 | [`notas/`](notas/README.md) | Notas de investigación por tema, con fuentes y lo marcado como *no verificado* |
 
 La investigación inicial previa (arquitectura de motores, sesgos de backtesting, riesgo y ejecución)

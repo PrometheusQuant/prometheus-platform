@@ -70,6 +70,10 @@ class ExecutionPort(Protocol):
         """Último precio negociado en el exchange."""
         ...
 
+    def quote(self, instrument: InstrumentId) -> tuple[Decimal, Decimal]:
+        """Mejor oferta de compra y de venta (bid, ask) del libro del exchange."""
+        ...
+
     def market_order(
         self, client_order_id: str, instrument: InstrumentId, side: Side, quantity: Decimal
     ) -> ExchangeFill:
