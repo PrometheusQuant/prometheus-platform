@@ -7,7 +7,8 @@
 Una página con:
 
 - el problema y el protocolo como respuesta;
-- la evidencia: H1 y H2 contra sus benchmarks, el exceso sobre el 4 % y el holdout cerrado;
+- la evidencia: H1 y H2 contra sus benchmarks, el exceso sobre el 4 % y la prueba final con
+  datos nunca vistos, en la que el carry y la tendencia se descartaron;
 - el riesgo de quiebra del exchange;
 - la arquitectura y lo que sigue;
 - un QR a la [página de resultados](../resultados.md).

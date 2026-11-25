@@ -13,7 +13,7 @@
 #let rust = rgb("#9C4F12")
 
 #set page(paper: "a3", margin: (x: 15mm, top: 12mm, bottom: 12mm), fill: paper)
-#set text(font: ("Liberation Sans", "DejaVu Sans"), size: 13pt, fill: ink, lang: "es")
+#set text(font: ("Liberation Sans", "DejaVu Sans"), size: 12pt, fill: ink, lang: "es")
 #set par(leading: 0.62em)
 
 #let eyebrow(body) = text(size: 11pt, weight: "bold", fill: rust, tracking: 1.5pt, upper(body))
@@ -24,17 +24,17 @@
 ]
 
 // --- Cabecera ----------------------------------------------------------------------------------
-#block(fill: navy, radius: 10pt, inset: (x: 18pt, y: 12pt), width: 100%)[
+#block(fill: navy, radius: 10pt, inset: (x: 18pt, y: 9pt), width: 100%)[
   #text(size: 11pt, weight: "bold", fill: amber, tracking: 1.5pt)[PROYECTO INTEGRADOR · FERIA DEL 4 DE DICIEMBRE DE 2026]
   #v(4pt)
-  #text(size: 40pt, weight: "bold", fill: paper)[PrometheusQuant]
+  #text(size: 34pt, weight: "bold", fill: paper)[PrometheusQuant]
   #v(2pt)
-  #text(size: 17pt, fill: rgb("#C9D3E0"))[Cobrar el funding sin apostar al precio, y sin engañarnos con el backtest.]
+  #text(size: 15pt, fill: rgb("#C9D3E0"))[Probar estrategias de cripto sin engañarnos con el backtest, aunque el resultado sea «no».]
   #v(2pt)
   #text(size: 12pt, fill: rgb("#C9D3E0"))[David Quintela · Boris Miranda]
 ]
 
-#v(6pt)
+#v(4pt)
 
 // --- Problema y solución -----------------------------------------------------------------------
 #grid(
@@ -57,13 +57,13 @@
     + Pre-registro antes de mirar resultados.
     + Costes reales en cada pata.
     + CPCV, Deflated Sharpe y PBO, con #r.ensayos.total ensayos contados.
-    + Holdout de un solo uso (sigue cerrado).
+    + Prueba final con datos nunca vistos, una sola vez.
     + Paper trading con kill-switch y alertas.
     + Recién ahí, capital real.
   ],
 )
 
-#v(6pt)
+#v(4pt)
 
 // --- Evidencia ---------------------------------------------------------------------------------
 #card(fill: rgb("#FBFAF7"))[
@@ -73,7 +73,7 @@
     columns: (1.6fr, 1fr, 1fr, 1fr, 0.8fr, 1.5fr),
     stroke: 0.5pt + sand,
     fill: (col, row) => if row == 0 { sand } else { none },
-    inset: (x: 6pt, y: 7pt),
+    inset: (x: 6pt, y: 5pt),
     [*Hipótesis*], [*Retorno anual*], [*Siempre invertido*], [*Caída máx.*], [*PBO*], [*Veredicto*],
     [H1 · BTC y ETH], [#r.h1.cagr], [#r.h1.b1_cagr], [#r.h1.max_dd], [#r.h1.pbo], [#r.h1.veredicto],
     [H2 · SOL, BNB y XRP], [#r.h2.cagr], [#r.h2.b1_cagr], [#r.h2.max_dd], [#r.h2.pbo], [*#r.h2.veredicto*],
@@ -85,9 +85,24 @@
     [*Le gana a estar siempre invertido:* #r.stats.he1_exceso más al año (p = #r.stats.he1_p).],
     [*Frente a una stablecoin al 4 %, todavía no:* p = #r.stats.he2_p. Por eso no hay capital real aún.],
   )
+  #v(6pt)
+  #block(fill: navy, radius: 6pt, inset: 10pt, width: 100%)[
+    #set text(fill: paper)
+    #text(size: 11pt, weight: "bold", fill: amber, tracking: 1.5pt)[LA PRUEBA FINAL · JULIO 2024 A SEPTIEMBRE 2026, DATOS NUNCA VISTOS]
+    #v(4pt)
+    #grid(
+      columns: (1fr, 1fr),
+      gutter: 14pt,
+      [*Carry H2:* #r.final_carry.cagr al año (se exigía más de 4 %): *#r.final_carry.veredicto*.],
+      [*Tendencia:* #r.final_tendencia.cagr al año, Sharpe #r.final_tendencia.sharpe: *#r.final_tendencia.veredicto*.],
+    )
+    #v(4pt)
+    Las dos pasaron en el desarrollo y fallaron con datos nunca vistos. El protocolo hizo su trabajo:
+    ninguna opera con dinero real, y el paper trading sigue como demostración del sistema.
+  ]
 ]
 
-#v(6pt)
+#v(4pt)
 
 // --- Riesgo y arquitectura ---------------------------------------------------------------------
 #grid(
@@ -100,8 +115,8 @@
     #grid(
       columns: (1fr, 1fr),
       gutter: 10pt,
-      [#text(size: 30pt, weight: "bold", fill: amber)[#r.sim.media] \ #text(size: 11.5pt, fill: rgb("#C9D3E0"))[retorno medio simulado, sin quiebra]],
-      [#text(size: 30pt, weight: "bold", fill: amber)[#r.sim.media_p2] \ #text(size: 11.5pt, fill: rgb("#C9D3E0"))[si el exchange quiebra con un 2 % anual]],
+      [#text(size: 24pt, weight: "bold", fill: amber)[#r.sim.media] \ #text(size: 11.5pt, fill: rgb("#C9D3E0"))[retorno medio simulado, sin quiebra]],
+      [#text(size: 24pt, weight: "bold", fill: amber)[#r.sim.media_p2] \ #text(size: 11.5pt, fill: rgb("#C9D3E0"))[si el exchange quiebra con un 2 % anual]],
     )
     #v(6pt)
     Por encima de *#r.sim.quiebra_equilibrio* anual de probabilidad de quiebra, conviene la
@@ -126,7 +141,7 @@
   ],
 )
 
-#v(6pt)
+#v(4pt)
 
 // --- Qué sigue ---------------------------------------------------------------------------------
 #card[
@@ -135,9 +150,9 @@
   #grid(
     columns: (1fr, 1fr, 1fr),
     gutter: 12pt,
-    [*Abrir el holdout, una sola vez*, tras verificar las comisiones reales en la cuenta.],
-    [*Más estrategias por el mismo filtro:* tendencia, carry con señal de ML y Polymarket.],
-    [*Repartir el carry entre exchanges*, para que una quiebra no lo borre todo.],
+    [*Más estrategias por el mismo filtro:* momentum transversal y Polymarket, en evaluación.],
+    [*Ejecución real en Binance Demo*, para medir el slippage verdadero y no suponerlo.],
+    [*Repartir el capital entre exchanges*, para que una quiebra no lo borre todo.],
   )
   #v(4pt)
   #text(size: 15pt, weight: "bold", fill: navy)[No prometemos rentabilidad. Prometemos no engañarnos.]
@@ -150,15 +165,14 @@
   #grid(
     columns: (auto, 1fr),
     gutter: 16pt,
-    image("qr-resultados.svg", width: 40mm),
+    image("qr-resultados.svg", width: 30mm),
     [
       #text(size: 18pt, weight: "bold")[Escanea: los resultados, actualizados]
       #v(2pt)
       prometheusquant.github.io/prometheus-platform/resultados \
       Código abierto: github.com/PrometheusQuant/prometheus-platform
-      #v(6pt)
-      #text(size: 10.5pt, fill: soft)[No es asesoramiento financiero. Resultados de desarrollo y de paper trading con dinero
-      simulado; rentabilidades pasadas no garantizan las futuras.]
+      #v(3pt)
+      #text(size: 10pt, fill: soft)[No es asesoramiento financiero. Desarrollo y paper trading con dinero simulado; el pasado no garantiza el futuro.]
     ],
   )
 ]

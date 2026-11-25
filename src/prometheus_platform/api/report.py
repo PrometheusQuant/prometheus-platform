@@ -265,15 +265,33 @@ def _finance_values(finance: dict[str, Any] | None) -> dict[str, str]:
     }
 
 
+def _holdout_values(summary: dict[str, Any] | None) -> dict[str, str]:
+    """La prueba final (holdout) de una estrategia: rendimiento y veredicto."""
+    if summary is None:
+        return dict.fromkeys(("cagr", "sharpe", "max_dd", "veredicto", "config"), NA)
+    perf = summary.get("rendimiento", {})
+    return {
+        "cagr": pct(perf.get("cagr"), 2),
+        "sharpe": num(perf.get("sharpe")),
+        "max_dd": pct(perf.get("max_drawdown")),
+        "veredicto": "pasa" if summary.get("pasa") else "descartada",
+        "config": str(summary.get("seleccionada", NA)),
+    }
+
+
 def _ledger_values(ledger_dir: Path) -> dict[str, str]:
     """N del registro de ensayos compartido (PQ-112): lo que cuenta en el Deflated Sharpe."""
     if not any(ledger_dir.glob("*.jsonl")):
-        return dict.fromkeys(("total", "carry", "modelo"), NA)
+        return dict.fromkeys(("total", "carry", "modelo", "tendencia", "otras"), NA)
     n = counts(ledger_dir)
+    named = {"carry", "modelo-funding", "tendencia"}
     return {
         "total": str(n["total"]),
         "carry": str(n.get("carry", 0)),
         "modelo": str(n.get("modelo-funding", 0)),
+        "tendencia": str(n.get("tendencia", 0)),
+        # El resto de familias (Polymarket, ML...): así el desglose siempre suma el total.
+        "otras": str(sum(v for k, v in n.items() if k not in named and k != "total")),
     }
 
 
@@ -290,6 +308,12 @@ def build_report_inputs(data_dir: Path, repo_root: Path, out_dir: Path) -> list[
         "stats": _stats_values(_read_summary(research / "stats" / "summary.json")),
         "finanzas": _finance_values(_read_summary(research / "finance" / "summary.json")),
         "ensayos": _ledger_values(repo_root / "docs" / "estrategias" / "ensayos"),
+        "final_carry": _holdout_values(
+            _read_summary(research / "carry" / "holdout" / "summary.json")
+        ),
+        "final_tendencia": _holdout_values(
+            _read_summary(research / "trend" / "holdout" / "summary.json")
+        ),
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     # JSON es YAML válido: así no hace falta otra dependencia.
@@ -446,6 +470,28 @@ def build_public_page(data_dir: Path, repo_root: Path, now: datetime) -> str:
     )
     h2_summary = art.carry.get("H2")
     gates = to_markdown(gates_table(h2_summary)) if h2_summary else "*Artefacto no disponible.*\n"
+    finals = pl.DataFrame(
+        [
+            {
+                "estrategia": name,
+                "configuración": v["config"],
+                "retorno anual": v["cagr"],
+                "Sharpe": v["sharpe"],
+                "caída máx.": v["max_dd"],
+                "veredicto": v["veredicto"],
+            }
+            for name, v in (
+                (
+                    "Carry H2",
+                    _holdout_values(_read_summary(research / "carry/holdout/summary.json")),
+                ),
+                (
+                    "Tendencia T1",
+                    _holdout_values(_read_summary(research / "trend/holdout/summary.json")),
+                ),
+            )
+        ]
+    )
     tests = pl.DataFrame(
         [
             {
@@ -477,13 +523,25 @@ def build_public_page(data_dir: Path, repo_root: Path, now: datetime) -> str:
             "",
             "## ¿Funciona? El carry de funding en el periodo de desarrollo",
             "",
-            "Neto de comisiones VIP 0 y slippage, de enero de 2020 a junio de 2024. El holdout "
-            "(julio de 2024 en adelante) sigue cerrado: se abre una sola vez.",
+            "Neto de comisiones VIP 0 y slippage, de enero de 2020 a junio de 2024. La prueba "
+            "final, con datos nunca vistos (julio de 2024 a septiembre de 2026), va en la sección "
+            "siguiente.",
             "",
             to_markdown(carry),
             "**Gates de H2**",
             "",
             gates,
+            "## La prueba final: datos nunca vistos, una sola vez",
+            "",
+            "Cada estrategia que pasa sus condiciones en el desarrollo se prueba una sola vez con "
+            "julio de 2024 a septiembre de 2026, sin ajustar nada. Se exige más de un 4 % anual "
+            "neto de costes.",
+            "",
+            to_markdown(finals),
+            "Las dos pasaron en el desarrollo y fallaron con datos nunca vistos, así que ninguna "
+            "opera con dinero real. El paper trading del carry sigue como demostración del "
+            "sistema completo.",
+            "",
             "## ¿Es significativo? Validación estadística",
             "",
             to_markdown(tests),
@@ -505,13 +563,14 @@ def build_public_page(data_dir: Path, repo_root: Path, now: datetime) -> str:
             _paper_section(data_dir / "paper"),
             "## Cuántas veces probamos",
             "",
-            f"Ensayos registrados: **{ledger['total']}** (carry {ledger['carry']}, modelo del "
-            f"funding {ledger['modelo']}). Ninguna ejecución se descarta: cada una queda en el "
+            f"Ensayos registrados: **{ledger['total']}** (carry {ledger['carry']}, tendencia "
+            f"{ledger['tendencia']}, modelo del funding {ledger['modelo']} y otras "
+            f"{ledger['otras']}). Ninguna ejecución se descarta: cada una queda en el "
             "[registro de ensayos](estrategias/registro-de-ensayos.md). El Deflated Sharpe de cada "
             "estrategia descuenta los ensayos de su familia (el N del gate G1).",
             "",
-            "La Estrategia 2 (tendencia con volatility targeting) está pre-registrada; su "
-            "evaluación está pendiente.",
+            "En evaluación con el mismo protocolo: el momentum transversal en perpetuos y el sesgo "
+            "favorito-longshot en Polymarket.",
             "",
         ]
     )
