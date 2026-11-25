@@ -377,7 +377,7 @@ def test_prices_have_knowledge_time_equal_to_the_point() -> None:
     assert row["event_time"] == row["knowledge_time"] == datetime(2024, 3, 1, tzinfo=UTC)
     assert row["price"] == 0.42
     assert row["source_request"] == "https://clob"
-    assert "precios en [0, 1]" in report.checks
+    assert "precios fuera de [0, 1] (precio nulo, raw_price intacto): 0" in report.checks
 
 
 def test_a_half_that_has_not_moved_for_24_hours_is_a_placeholder() -> None:
@@ -411,10 +411,24 @@ def test_identical_duplicates_are_dropped_and_conflicts_fail() -> None:
         build_prices(bronze_prices([("111", "0x1", T0, 0.4), ("111", "0x1", T0, 0.6)]), markets)
 
 
-def test_prices_outside_zero_one_fail() -> None:
+def test_an_impossible_price_is_kept_raw_with_a_null_price() -> None:
+    """KE-023: el CLOB devolvió 1,0025 y -0,0025 en un mercado. No tumba el silver entero."""
     markets, _ = build_markets(bronze_markets(market("1")))
+    prices, report = build_prices(
+        bronze_prices([("111", "0x1", T0, 1.0025), ("112", "0x1", T0, -0.0025)]), markets
+    )
+    assert prices["price"].to_list() == [None, None]
+    assert prices["raw_price"].to_list() == [1.0025, -0.0025]
+    assert prices["is_out_of_range"].all()
+    assert "precios fuera de [0, 1] (precio nulo, raw_price intacto): 2" in report.checks
+
+
+def test_many_impossible_prices_still_stop_the_silver(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(polymarket_module, "MAX_OUT_OF_RANGE", 1)
+    markets, _ = build_markets(bronze_markets(market("1")))
+    rows = [("111", "0x1", T0, 1.2), ("112", "0x1", T0, -0.2)]
     with pytest.raises(SilverValidationError, match="precios"):
-        build_prices(bronze_prices([("111", "0x1", T0, 1.2)]), markets)
+        build_prices(bronze_prices(rows), markets)
 
 
 def test_prices_asof_never_looks_ahead_and_skips_placeholders() -> None:

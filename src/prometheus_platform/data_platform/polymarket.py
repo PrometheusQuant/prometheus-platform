@@ -50,6 +50,7 @@ DAILY = 1440
 MIN_MARKETS = 5000  # criterio de PQ-92 (y del capítulo 1.5): al menos 5.000 registros
 PLACEHOLDER_PRICE = 0.5
 PLACEHOLDER_AFTER = timedelta(hours=24)
+MAX_OUT_OF_RANGE = 100  # más precios imposibles que esto es un fallo de la fuente (KE-023)
 _TS: pl.DataType = pl.Datetime("ms", "UTC")
 
 
@@ -575,10 +576,14 @@ def build_prices(bronze: pl.DataFrame, markets: pl.DataFrame) -> tuple[pl.DataFr
         )
     report.duplicates_removed = before - frame.height
     report.checks.append("sin duplicados en conflicto")
-    out_of_range = frame.filter((pl.col("raw_price") < 0) | (pl.col("raw_price") > 1))
-    if out_of_range.height:
-        raise SilverValidationError(table, "precios en [0, 1]", f"{out_of_range.height} filas")
-    report.checks.append("precios en [0, 1]")
+    # Un precio fuera de [0, 1] es imposible: se conserva en raw_price y price queda nulo, como
+    # el relleno (KE-023). Muchos a la vez serían un fallo de la fuente, y eso sí frena el silver.
+    out_of_range = (pl.col("raw_price") < 0) | (pl.col("raw_price") > 1)
+    n_out = frame.filter(out_of_range).height
+    if n_out > MAX_OUT_OF_RANGE:
+        raise SilverValidationError(table, "precios en [0, 1]", f"{n_out} filas")
+    frame = frame.with_columns(out_of_range.alias("is_out_of_range"))
+    report.checks.append(f"precios fuera de [0, 1] (precio nulo, raw_price intacto): {n_out}")
 
     frame = frame.sort("token_id", "event_time")
     is_half = pl.col("raw_price") == PLACEHOLDER_PRICE
@@ -590,7 +595,7 @@ def build_prices(bronze: pl.DataFrame, markets: pl.DataFrame) -> tuple[pl.DataFr
     frame = (
         frame.with_columns(placeholder.alias("is_placeholder"))
         .with_columns(
-            pl.when(pl.col("is_placeholder"))
+            pl.when(pl.col("is_placeholder") | pl.col("is_out_of_range"))
             .then(None)
             .otherwise(pl.col("raw_price"))
             .alias("price"),
@@ -632,7 +637,7 @@ def build_prices(bronze: pl.DataFrame, markets: pl.DataFrame) -> tuple[pl.DataFr
         report.last = str(frame["event_time"].max())
     return frame.select(
         "token_id", "condition_id", "outcome_index", "event_time", "knowledge_time",
-        "price", "raw_price", "is_placeholder", "after_close", "source_request",
+        "price", "raw_price", "is_placeholder", "is_out_of_range", "after_close", "source_request",
     ), report  # fmt: skip
 
 

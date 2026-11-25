@@ -28,6 +28,7 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-018 | El stream de futuros de Binance abre la conexión pero no envía nada | Resuelto |
 | KE-021 | El silver de mercados de Polymarket cargaba el JSON crudo de todo el catálogo y tumbó WSL | Resuelto (PQ-93) |
 | KE-022 | La descarga del catálogo de Polymarket juntaba el mes entero en memoria: 3,4 GB con 2026-06 | Resuelto (PQ-93) |
+| KE-023 | El silver de precios de Polymarket fallaba entero por un precio imposible (1,0025 y −0,0025) del CLOB | Resuelto (PQ-93) |
 
 ---
 
@@ -282,3 +283,18 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
   **Resuelto.**
 - **Prevención:** mientras corre una ingesta larga, `~/pq-ingesta/vigilante-memoria.sh` la corta
   si pasa de 3,8 GB. Repetir un mes cuesta menos que un cierre de WSL.
+
+## KE-023: un precio imposible del CLOB tumbaba todo el silver de precios de Polymarket
+
+- **Síntoma:** `pq polymarket silver` termina con «silver no se construyó: polymarket/prices: falló
+  el check 'precios en [0, 1]': 2 filas».
+- **Causa:** el CLOB devolvió, para un mercado de mayo de 2025, el punto diario del 2025-04-26
+  00:00:06 UTC con precios 1,0025 y −0,0025 en sus dos resultados (suman 1, pero se salen del
+  rango). El check rechazaba la tabla entera por esas dos filas.
+- **Arreglo:** como el relleno de 0,5 (pre-registro §4), el punto se conserva en `raw_price`,
+  `price` queda nulo y la fila lleva `is_out_of_range`. La evaluación ya ignora los precios nulos.
+  Si hay más de `MAX_OUT_OF_RANGE` (100) a la vez, el silver sigue fallando: sería un fallo de la
+  fuente, no un dato suelto. La regla se fijó **antes** de ejecutar la evaluación de PQ-93.
+
+  **Resuelto.**
+- **Prevención:** el informe de calidad cuenta los precios fuera de rango en cada construcción.
