@@ -46,7 +46,7 @@ from prometheus_platform.adapters.trial_ledger import (
     git_author,
     read_rows,
 )
-from prometheus_platform.api import polymarket_cli
+from prometheus_platform.api import polymarket_cli, sentiment_cli
 from prometheus_platform.api.paper import cost_cli
 from prometheus_platform.api.paper.compose import (
     BROKERS,
@@ -121,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_research(commands)
     _add_operations(commands)
     polymarket_cli.add_parser(commands)
+    sentiment_cli.add_parser(commands)
     return parser
 
 
@@ -193,6 +194,11 @@ def _add_research(commands: Commands) -> None:
         help="Momentum transversal (X1 y X2): desarrollo, las 6 configuraciones (PQ-114)",
     )
     momentum.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    sentimiento = studies.add_parser(
+        "sentimiento",
+        help="Overlay de Fear & Greed sobre el momentum (S1 y S2): desarrollo (PQ-128)",
+    )
+    sentimiento.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
     carry_holdout = studies.add_parser(
         "carry-holdout",
         help="Carry H2: abre el holdout UNA SOLA VEZ con la configuración elegida (PQ-50)",
@@ -671,6 +677,44 @@ def _research_momentum(data_dir: Path, figures: Path | None, ledger: TrialLedger
     return 0
 
 
+def _research_sentiment(data_dir: Path, figures: Path | None, ledger: TrialLedger) -> int:
+    from prometheus_platform.data_platform.sentiment import read_silver  # noqa: PLC0415
+    from prometheus_platform.research import momentum as mo  # noqa: PLC0415
+    from prometheus_platform.research import momentum_evaluation as me  # noqa: PLC0415
+    from prometheus_platform.research import sentiment_overlay as so  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_equity,
+        write_overlay_outputs,
+    )
+
+    universe = json.loads(MOMENTUM_UNIVERSE_FILE.read_text(encoding="utf-8"))
+    data = [me.load_market(data_dir / "silver", s) for s in universe["universo"]]
+    costs = mo.main_costs(universe["menor_volumen_10pb"])
+    research = data_dir / "research"
+    lookbacks = {h: so.selected_lookback(research, h) for h in so.OVERLAYS.values()}
+    fng = read_silver(data_dir / "silver")
+    # S1 y S2 se registran (N) antes de evaluar cualquiera de los dos.
+    evaluations = so.evaluate(
+        data, ledger, fng, lookbacks=lookbacks, costs=costs, others=me.other_returns(research)
+    )
+    for name, evaluation in evaluations.items():
+        path = write_overlay_outputs(evaluation, research / "sentimiento" / name)
+        if figures is not None:
+            plot_equity(
+                evaluation,
+                figures / f"{name.lower()}-curvas.png",
+                evaluation.base_returns,
+                benchmark_label=f"{evaluation.base_name} sin filtro",
+            )
+        verdict = "PASA" if evaluation.passed else "NO PASA"
+        weeks = evaluation.secondary["semanas_fuera"]
+        print(f"{name}: semanas fuera={weeks:.0f} gates={verdict} resumen={path}")
+        for gate in evaluation.gates:
+            mark = "OK " if gate.passed else "NO "
+            print(f"  {gate.name} {mark}{gate.criterion}: {gate.value:.4f}")
+    return 0
+
+
 def _development_panel(data_dir: Path) -> pl.DataFrame:
     from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
     from prometheus_platform.research.panel import development_only  # noqa: PLC0415
@@ -912,7 +956,11 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
     if args.study == "carry":
         ledger = _ledger(settings, "carry", command)
         return _research_carry(data_dir, args.hypothesis, args.figures, ledger)
-    trend_family = {"trend": _research_trend, "momentum": _research_momentum}
+    trend_family = {
+        "trend": _research_trend,
+        "momentum": _research_momentum,
+        "sentimiento": _research_sentiment,
+    }
     if args.study in trend_family:
         ledger = _ledger(settings, "tendencia", command)
         return trend_family[args.study](data_dir, args.figures, ledger)
@@ -1430,6 +1478,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "monitor": lambda: _monitor_drift(args, settings, notifier),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
         "polymarket": lambda: polymarket_cli.run(args, data_dir, http_client),
+        "sentimiento": lambda: sentiment_cli.run(args, data_dir, http_client),
     }
     return handlers[args.command]()
 

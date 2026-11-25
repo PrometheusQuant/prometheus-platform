@@ -18,6 +18,7 @@ from scipy import stats
 from prometheus_platform.research.carry_evaluation import CarryHoldout, HypothesisEvaluation
 from prometheus_platform.research.funding_model import ModelStudy
 from prometheus_platform.research.momentum_evaluation import MomentumEvaluation
+from prometheus_platform.research.sentiment_overlay import OverlayEvaluation
 from prometheus_platform.research.simulation import REGIME_NAMES, Regime, SimulationStudy
 from prometheus_platform.research.trend_evaluation import HoldoutEvaluation, TrendEvaluation
 
@@ -71,6 +72,17 @@ def write_momentum_outputs(evaluation: MomentumEvaluation, out_dir: Path) -> Pat
     """Como ``write_outputs``, más las métricas secundarias y las correlaciones (§8, PQ-114)."""
     path = write_outputs(evaluation, out_dir)
     data = json.loads(path.read_text())
+    data["secondary"] = evaluation.secondary
+    data["correlations"] = evaluation.correlations
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+    return path
+
+
+def write_overlay_outputs(evaluation: OverlayEvaluation, out_dir: Path) -> Path:
+    """Como ``write_outputs``, más la base sin filtro, lo que pide el §8 y las correlaciones."""
+    path = write_outputs(evaluation, out_dir)
+    data = json.loads(path.read_text())
+    data["base"] = evaluation.base_name
     data["secondary"] = evaluation.secondary
     data["correlations"] = evaluation.correlations
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str))

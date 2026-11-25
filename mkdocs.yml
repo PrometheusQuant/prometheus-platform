@@ -116,6 +116,8 @@ nav:
       - "Momentum transversal · decisión": estrategias/03-momentum-transversal/decision.md
       - "Polymarket · pre-registro": estrategias/04-polymarket/pre-registro.md
       - "Sentimiento · pre-registro": estrategias/05-sentimiento/pre-registro.md
+      - "Sentimiento · evaluación": estrategias/05-sentimiento/evaluacion.md
+      - "Sentimiento · decisión": estrategias/05-sentimiento/decision.md
   - Compliance:
       - compliance/README.md
       - Pasos manuales del titular: compliance/pasos-del-titular.md
