@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from prometheus_platform.api.dashboard import app as dashboard_app
 from prometheus_platform.api.dashboard import tour
 
 from .test_dashboard import APP, app_labels
@@ -73,6 +74,19 @@ def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fair: bool) -> AppTe
     return at.run()
 
 
+def live_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fair: bool) -> AppTest:
+    """La página en vivo suelta; el modo feria se recuerda en la sesión (PQ-127)."""
+    monkeypatch.chdir(tmp_path)
+    for name in [n for n in os.environ if n.startswith("PQ_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("PQ_DATA_DIR", str(tmp_path / "lago"))
+    script = "from prometheus_platform.api.dashboard import app\napp.render_page('paper-trading')"
+    at = AppTest.from_string(script, default_timeout=60)
+    if fair:
+        at.session_state[dashboard_app.FAIR_KEY] = True
+    return at.run()
+
+
 def sidebar_text(at: AppTest) -> str:
     return " ".join(m.value for m in at.sidebar.markdown)
 
@@ -102,7 +116,6 @@ def test_normal_mode_has_no_tour_and_no_big_type(
     assert not at.exception
     assert not at.sidebar.markdown
     assert not any("font-size: 22px" in m.value for m in at.markdown)
-    assert [t.label for t in at.tabs] == app_labels()
 
 
 def test_fair_mode_works_without_internet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,7 +128,7 @@ def test_fair_mode_works_without_internet(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(socket, "create_connection", no_network)
     at = app(tmp_path, monkeypatch, fair=True)
     assert not at.exception
-    assert [t.label for t in at.tabs] == app_labels()
+    assert at.title[0].value == "PrometheusQuant"
 
 
 def test_fair_mode_live_tab_refreshes_by_itself(
@@ -139,11 +152,11 @@ def test_fair_mode_live_tab_refreshes_by_itself(
             occurred_at=now, equity=Decimal(1000), cash=Decimal(1000), gross_notional=Decimal(0)
         )
     )
-    fair = app(tmp_path, monkeypatch, fair=True)
+    fair = live_page(tmp_path, monkeypatch, fair=True)
     assert not fair.exception
     captions = " ".join(c.value for c in fair.caption)
     assert f"Se actualiza sola cada {tour.LIVE_REFRESH.seconds} s." in captions
-    normal = app(tmp_path, monkeypatch, fair=False)
+    normal = live_page(tmp_path, monkeypatch, fair=False)
     assert "Recarga la página para ver el último ciclo." in " ".join(
         c.value for c in normal.caption
     )

@@ -110,3 +110,49 @@ Para no pisar PQ-124, se propone:
 - La accesibilidad se comprobó de forma automática. No hubo pruebas con un lector de pantalla
   real (VoiceOver, NVDA) ni solo con teclado.
 - No hubo usuarios: eso es PQ-76.
+
+## Después de PQ-126
+
+Capturas del 24-nov-2026 con los hallazgos 1, 5 a 8 y 12 a 17 resueltos. Las de «antes» están en
+`img/ux-segunda-opinion/`.
+
+| Pestaña | Antes | Después |
+|---|---|---|
+| Inicio | ![](img/ux-segunda-opinion/01-inicio-como-va.png) | ![](img/pq-126/01-inicio-como-va.png) |
+| Carry y gates | ![](img/ux-segunda-opinion/02-funciona-carry-y-gates.png) | ![](img/pq-126/02-funciona-carry-y-gates.png) |
+| Paper trading | ![](img/ux-segunda-opinion/07-como-va-en-vivo-paper-trading.png) | ![](img/pq-126/07-como-va-en-vivo-paper-trading.png) |
+| Cartera | ![](img/ux-segunda-opinion/08-como-se-reparte-cartera.png) | ![](img/pq-126/08-como-se-reparte-cartera.png) |
+
+## Después de PQ-127
+
+Hallazgos 2, 3, 4, 9, 10 y 11. Las capturas del 24-nov-2026 están en `img/pq-127/`.
+
+**Tiempos.** Medidos con la API de agente de Streamlit (`scripts/medir_dashboard.py`), en la misma
+laptop, con los datos reales y con la ingesta de Polymarket corriendo de fondo en los dos casos.
+
+| Medida | Antes (9 pestañas) | Después (páginas) |
+|---|---|---|
+| Primera carga, servidor recién arrancado | 22,4 s | 4,8 s |
+| Primera carga, segunda sesión | 2,2 s | 0,6 s |
+| Cambio en el simulador (mediana de 3) | 1,75 s | 0,51 s |
+| Visita a una página, con la caché caliente | (todo en cada rerun) | de 0,17 a 2,2 s |
+
+El coste de entrenar el clasificador del cap. 5 no desaparece: se traslada a la primera visita de
+«¿Qué predice hoy?», que tardó 32,9 s con la caché fría. Se paga una vez por servidor
+(`st.cache_resource`) y solo si alguien abre esa página. Antes de la feria conviene abrirla una
+vez para calentar la caché.
+
+Antes del cambio, el informe midió unos 36 s en la primera carga. Esta vez se midieron 22,4 s
+sobre el mismo código, con otra carga en la máquina. La comparación de la tabla se hizo en las
+mismas condiciones.
+
+| Pantalla | Escritorio | 375 px |
+|---|---|---|
+| Portada | ![](img/pq-127/01-inicio-como-va.png) | ![](img/pq-127/movil-01-inicio-como-va.png) |
+| Simulador | ![](img/pq-127/05-y-si-invierto-simula-tu-inversion.png) | ![](img/pq-127/movil-05-y-si-invierto-simula-tu-inversion.png) |
+| Funding hoy | ![](img/pq-127/06-que-predice-hoy-funding-en-vivo.png) | |
+| Paper trading | ![](img/pq-127/07-como-va-en-vivo-paper-trading.png) | |
+
+**Pendiente:** en una frase larga, «20 %» puede partirse entre el número y el signo. Habría que usar
+un espacio duro (`\u00a0`) en `style.pct` y `style.usd`, lo que obliga a actualizar las
+expectativas de los tests. Queda como mejora.

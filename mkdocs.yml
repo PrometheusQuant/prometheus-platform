@@ -83,6 +83,7 @@ nav:
       - "0011 Contrato de estrategia": adr/0011-contrato-de-estrategia.md
       - "0012 Presupuesto de capital con CVaR": adr/0012-presupuesto-de-capital-con-cvar.md
       - "0013 Asistente de solo lectura": adr/0013-asistente-de-solo-lectura.md
+      - "0014 CCXT detrás de los puertos": adr/0014-ccxt-detras-de-los-puertos-para-ejecutar.md
       - Plantilla: adr/0000-plantilla.md
   - Metodología:
       - metodologia/README.md
@@ -111,7 +112,12 @@ nav:
       - "Tendencia · holdout": estrategias/02-tendencia/holdout.md
       - "Tendencia · decisión": estrategias/02-tendencia/decision.md
       - "Momentum transversal · pre-registro": estrategias/03-momentum-transversal/pre-registro.md
+      - "Momentum transversal · evaluación": estrategias/03-momentum-transversal/evaluacion.md
+      - "Momentum transversal · decisión": estrategias/03-momentum-transversal/decision.md
       - "Polymarket · pre-registro": estrategias/04-polymarket/pre-registro.md
+      - "Sentimiento · pre-registro": estrategias/05-sentimiento/pre-registro.md
+      - "Sentimiento · evaluación": estrategias/05-sentimiento/evaluacion.md
+      - "Sentimiento · decisión": estrategias/05-sentimiento/decision.md
   - Compliance:
       - compliance/README.md
       - Pasos manuales del titular: compliance/pasos-del-titular.md
@@ -148,6 +154,8 @@ nav:
       - "2026-11-06 Validación estadística (cap. 7.4)": investigacion/2026-11-06-validacion-estadistica.md
       - "2026-11-22 Funding entre exchanges": investigacion/funding-entre-exchanges.md
       - "2026-11-24 Spike de datos de Polymarket": investigacion/2026-11-24-spike-datos-polymarket.md
+      - "2026-11-24 Spike de sentimiento": investigacion/2026-11-24-spike-sentimiento.md
+      - "2026-11-25 Calibración de costes": investigacion/2026-11-25-calibracion-costes.md
       - Notas:
           - investigacion/notas/README.md
           - Acceso y regulación en Bolivia: investigacion/notas/acceso_regulacion_bolivia.md

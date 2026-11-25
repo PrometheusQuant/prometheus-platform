@@ -1,11 +1,13 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import polars as pl
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from prometheus_platform.api.dashboard import app, style
 from prometheus_platform.api.dashboard.artifacts import (
     equity_curves,
     gates_table,
@@ -14,6 +16,7 @@ from prometheus_platform.api.dashboard.artifacts import (
     performance_table,
     quality_table,
     scenario_table,
+    strategy_overview,
     transition_table,
     validation_table,
 )
@@ -116,7 +119,7 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
 
     assert quality_table(art.quality).row(0, named=True)["desde"] == "2020-09-13"
     h2 = art.carry["H2"]
-    assert gates_table(h2)["resultado"].to_list() == ["✅ pasa"]
+    assert gates_table(h2)["resultado"].to_list() == ["✓ pasa"]
     perf = performance_table(h2)
     assert perf["métrica"][0] == "Sharpe"
     assert perf["referencia: siempre invertido"][0] == "0,60"
@@ -129,7 +132,7 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
     assert art.model_mode == "residual"
     regression, classification = model_tables(art.model)
     assert regression["modelo"].to_list() == ["ridge (ajustado)"]
-    assert classification["F1"].to_list() == [None]  # NaN se muestra vacío
+    assert classification["F1"].to_list() == ["—"]  # NaN se muestra como raya
 
     assert art.simulation is not None
     assert transition_table(art.simulation).columns == [
@@ -139,7 +142,7 @@ def test_tables_are_built_from_the_artifacts(lake: Path) -> None:
         "alto",
     ]
     assert validation_table(art.simulation).height == 1
-    assert scenario_table(art.simulation)["P(pérdida)"].to_list() == [0.16]
+    assert scenario_table(art.simulation)["prob. de perder"].to_list() == ["16,0 %"]
 
 
 def app_labels() -> list[str]:
@@ -156,33 +159,59 @@ def app_labels() -> list[str]:
     ]
 
 
-def run_app(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
+def _environment(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(data_dir.parent)
     for name in [n for n in os.environ if n.startswith("PQ_")]:
         monkeypatch.delenv(name)
     monkeypatch.setenv("PQ_DATA_DIR", str(data_dir))
+
+
+def run_app(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
+    """El tablero completo: con st.navigation solo se dibuja la portada."""
+    _environment(data_dir, monkeypatch)
     return AppTest.from_file(str(APP), default_timeout=60).run()
 
 
-def test_app_renders_every_tab_with_artifacts(lake: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def run_page(data_dir: Path, monkeypatch: pytest.MonkeyPatch, url_path: str) -> AppTest:
+    """Una página suelta. AppTest solo sabe navegar a páginas que son archivos (PQ-127)."""
+    _environment(data_dir, monkeypatch)
+    script = f"from prometheus_platform.api.dashboard import app\napp.render_page({url_path!r})"
+    return AppTest.from_string(script, default_timeout=60).run()
+
+
+def test_app_opens_on_the_home_page_with_a_short_title(
+    lake: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     at = run_app(lake, monkeypatch)
     assert not at.exception
-    assert [t.label for t in at.tabs] == app_labels()
-    metrics = {m.label: m.value for m in at.metric}
-    assert metrics["Configuración elegida"] == "k9-theta20"
-    assert metrics["Probabilidad de quiebra anual de equilibrio"] == "0.40%"
-    assert any("carry H1" in i.value for i in at.info)
+    assert app_labels() == app.LABELS
+    assert at.title[0].value == "PrometheusQuant"  # a 375 px el largo se partía (PQ-127)
+    assert any("¿Cómo va?" in h.value for h in at.subheader)
+    assert not any(str(lake) in c.value for c in at.caption)  # la ruta local, solo en datos
+
+
+def test_every_page_renders_with_artifacts(lake: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pages = {p.url_path: run_page(lake, monkeypatch, p.url_path) for p in app.PAGES}
+    assert not [path for path, at in pages.items() if at.exception]
+    carry = {m.label: m.value for m in pages["carry"].metric}
+    assert carry["Configuración elegida"] == "k9-theta20"
+    assert any("carry H1" in i.value for i in pages["carry"].info)
+    simulation = {m.label: m.value for m in pages["simulacion"].metric}
+    assert simulation["Probabilidad de quiebra anual de equilibrio"] == "0,40 %"
+    assert any(str(lake) in c.value for c in pages["datos"].caption)
 
 
 def test_app_degrades_gracefully_without_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    at = run_app(tmp_path / "vacio", monkeypatch)
-    assert not at.exception
+    empty = tmp_path / "vacio"
+    pages = [run_page(empty, monkeypatch, p.url_path) for p in app.PAGES]
+    assert not [at for at in pages if at.exception]
     # 6 artefactos faltantes + simulador y predicción sin silver + paper trading sin diario, en la
-    # cartera: sin operaciones y sin bandas, y en la portada: sin paper ni evaluaciones (PQ-124)
-    assert len(at.info) == 13
-    assert not at.dataframe
+    # cartera: sin operaciones y sin bandas, y en la portada: sin paper (PQ-124). Las evaluaciones
+    # no faltan: la portada muestra las estrategias en curso (PQ-127).
+    assert sum(len(at.info) for at in pages) == 12
+    assert not any(at.dataframe for at in pages)
 
 
 def test_model_falls_back_to_the_level_formulation(tmp_path: Path) -> None:
@@ -271,12 +300,85 @@ def test_live_tab_shows_the_paper_trading_journal(
         },
     )
 
-    at = run_app(lake, monkeypatch)
+    at = run_page(lake, monkeypatch, "paper-trading")
 
     assert not at.exception
     metrics = {m.label: m.value for m in at.metric}
     assert metrics["Capital"] == "1.001,50 USD"
     assert metrics["Ganancia acumulada"] == "+1,50 USD"
     assert metrics["Funding cobrado"] == "+0,06 USD"
-    assert any("Runner en marcha" in m.value for m in at.success)
-    assert any("Kill-switch armado" in m.value for m in at.success)
+    # Estado normal: insignias (Markdown), no recuadros de éxito (PQ-126).
+    badges = [m.value for m in at.markdown]
+    assert any("Runner en marcha" in b for b in badges)
+    assert any("Kill-switch armado" in b for b in badges)
+    assert not at.success
+
+
+def test_no_table_shows_a_decimal_point_or_a_raw_float(lake: Path) -> None:
+    """PQ-126: las cifras de las tablas van en español. La tabla de Streamlit formatea los floats
+    en inglés, así que ninguna columna puede ser numérica decimal ni llevar «0.95» en un texto."""
+    art = load_artifacts(lake)
+    assert art.model is not None
+    assert art.simulation is not None
+    tables = [
+        quality_table(art.quality),
+        gates_table(art.carry["H2"]),
+        performance_table(art.carry["H2"]),
+        *model_tables(art.model),
+        transition_table(art.simulation),
+        validation_table(art.simulation),
+        scenario_table(art.simulation),
+    ]
+    decimal_point = re.compile(r"\d\.\d")
+    for table in tables:
+        for name, dtype in table.schema.items():
+            assert not dtype.is_float(), f"{name}: número decimal sin formatear"
+            if dtype == pl.String:
+                bad = [v for v in table[name].to_list() if v and decimal_point.search(v)]
+                assert not bad, f"{name}: punto decimal en {bad}"
+
+
+def test_localize_turns_decimal_points_and_percent_signs_into_spanish() -> None:
+    assert style.localize("Deflated Sharpe > 0.95 (N = 29)") == "Deflated Sharpe > 0,95 (N = 29)"
+    assert style.localize("Sharpe > B1 (8.75) y CAGR > 4%") == "Sharpe > B1 (8,75) y CAGR > 4 %"
+    assert style.localize("H2 · SOL.USDT") == "H2 · SOL.USDT"  # un punto entre letras no cambia
+
+
+def test_overview_shows_the_development_verdicts_of_the_new_strategies(tmp_path: Path) -> None:
+    """PQ-129: momentum, sentimiento y Polymarket salen con su veredicto, no desaparecen."""
+    research = tmp_path / "research"
+    perf = {"sharpe": 0.24, "cagr": 0.0293, "t_stat": 0.4453}
+    for name in ("X1", "X2"):
+        write(
+            research / f"momentum/{name}/summary.json",
+            {"passed": False, "selected_performance": perf},
+        )
+    write(
+        research / "sentimiento/S1/summary.json",
+        {
+            "passed": False,
+            "selected_performance": {"sharpe": 0.48},
+            "secondary": {"sharpe_base": 0.24},
+        },
+    )
+    write(
+        research / "polymarket/P1/summary.json",
+        {"passed": True, "gates": [{"name": "G1", "passed": True}]},
+    )
+    overview = {s.name: s for s in strategy_overview(load_artifacts(tmp_path))}
+
+    momentum = overview["Momentum transversal"]
+    assert (momentum.level, momentum.stage) == ("bad", "Descartada en desarrollo")
+    assert momentum.summary.startswith("Largo/corto: 2,9 % anual; solo largo: 2,9 % anual.")
+    assert "t ≤ 0,45" in momentum.summary
+    assert "0,48 frente a 0,24" in overview["Filtro de sentimiento"].summary
+    polymarket = overview["Polymarket"]
+    assert (polymarket.level, polymarket.stage) == (
+        "warn",
+        "Aprobada en desarrollo · prueba final pendiente",
+    )
+
+
+def test_overview_without_the_new_artifacts_adds_nothing(tmp_path: Path) -> None:
+    names = {s.name for s in strategy_overview(load_artifacts(tmp_path))}
+    assert not names & {"Momentum transversal", "Filtro de sentimiento", "Polymarket"}

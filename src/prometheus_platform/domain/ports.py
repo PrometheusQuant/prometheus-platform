@@ -18,7 +18,14 @@ from prometheus_platform.domain.counterparty import CounterpartyReading
 from prometheus_platform.domain.datasets import ArchiveRef, RawArchive
 from prometheus_platform.domain.events import DomainEvent, OrderFilled
 from prometheus_platform.domain.market import MarketSnapshot
-from prometheus_platform.domain.model import Bar, FundingRate, InstrumentId, Side, Signal
+from prometheus_platform.domain.model import (
+    Bar,
+    ExchangeFill,
+    FundingRate,
+    InstrumentId,
+    Side,
+    Signal,
+)
 from prometheus_platform.domain.prediction_markets import RawPage
 
 
@@ -43,6 +50,48 @@ class OrderGateway(Protocol):
 
     def cancel_all(self) -> None:
         """Usado por el kill-switch: cancela todas las órdenes abiertas."""
+        ...
+
+
+class ExecutionPort(Protocol):
+    """Ejecución real en un exchange de pruebas (PQ-52, ADR-0014): Binance Demo o Bybit testnet.
+
+    Las implementaciones solo apuntan a entornos de prueba y redondean a los filtros del exchange.
+    Lanzan ``ExecutionError`` con el mensaje ya sin secretos.
+    """
+
+    name: str
+
+    def balance(self, asset: str, *, perp: bool) -> Decimal:
+        """Saldo libre de ``asset`` en la billetera spot o en la de futuros."""
+        ...
+
+    def price(self, instrument: InstrumentId) -> Decimal:
+        """Último precio negociado en el exchange."""
+        ...
+
+    def quote(self, instrument: InstrumentId) -> tuple[Decimal, Decimal]:
+        """Mejor oferta de compra y de venta (bid, ask) del libro del exchange."""
+        ...
+
+    def market_order(
+        self, client_order_id: str, instrument: InstrumentId, side: Side, quantity: Decimal
+    ) -> ExchangeFill:
+        """Orden de mercado idempotente: un reintento con el mismo id no duplica la orden."""
+        ...
+
+    def cancel_all(self) -> None:
+        """Cancela las órdenes abiertas de los instrumentos que opera (kill-switch)."""
+        ...
+
+    def positions(self, instruments: Sequence[InstrumentId]) -> dict[InstrumentId, Decimal]:
+        """Cantidad con signo en el exchange: saldo del activo base en spot, posición en perp."""
+        ...
+
+    def funding_income(
+        self, instrument: InstrumentId, since: datetime
+    ) -> list[tuple[datetime, Decimal]]:
+        """Funding cobrado (+) o pagado (-) desde ``since``, tal como lo registra el exchange."""
         ...
 
 

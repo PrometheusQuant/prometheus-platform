@@ -38,6 +38,11 @@ class Artifacts:
     budget_scenarios: pl.DataFrame | None = None
     trend: dict[str, dict[str, Any]] = field(default_factory=dict)  # T1, T2 y holdout (PQ-68)
     carry_holdout: dict[str, Any] | None = None  # holdout de H2 (PQ-50)
+    costs: list[dict[str, Any]] = field(default_factory=list)  # pq paper costes (PQ-95)
+    # Evaluaciones de desarrollo de las estrategias nuevas (PQ-129): X1/X2, S1/S2 y P1/P2.
+    momentum: dict[str, dict[str, Any]] = field(default_factory=dict)
+    sentiment: dict[str, dict[str, Any]] = field(default_factory=dict)
+    polymarket: dict[str, dict[str, Any]] = field(default_factory=dict)
     missing: list[Missing] = field(default_factory=list)
 
 
@@ -47,6 +52,17 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _load_development(art: Artifacts, research: Path) -> None:
+    """Evaluaciones de desarrollo de las estrategias nuevas (PQ-129)."""
+    for attr, sub, names in (
+        ("momentum", "momentum", ("X1", "X2")),
+        ("sentiment", "sentimiento", ("S1", "S2")),
+        ("polymarket", "polymarket", ("P1", "P2")),
+    ):
+        found = {n: s for n in names if (s := _read_json(research / sub / n / "summary.json"))}
+        setattr(art, attr, found)
 
 
 def load_artifacts(data_dir: Path) -> Artifacts:
@@ -89,12 +105,15 @@ def load_artifacts(data_dir: Path) -> Artifacts:
         trend = _read_json(data_dir / "research" / "trend" / name / "summary.json")
         if trend is not None:
             art.trend[name] = trend
+    _load_development(art, data_dir / "research")
     budget_dir = data_dir / "research" / "budget"
     art.budget = _read_json(budget_dir / "summary.json")
     if art.budget is None:
         art.missing.append(Missing("presupuesto de capital", "uv run pq research budget"))
     elif (budget_dir / "scenarios.parquet").exists():
         art.budget_scenarios = pl.read_parquet(budget_dir / "scenarios.parquet")
+    costs_dir = data_dir / "research" / "costes"
+    art.costs = [c for p in sorted(costs_dir.glob("*.json")) if (c := _read_json(p)) is not None]
     return art
 
 
@@ -171,6 +190,74 @@ def strategy_overview(art: Artifacts) -> list[StrategyStatus]:
             else ("bad", "Descartada en desarrollo")
         )
         out.append(StrategyStatus("Tendencia", level, stage, "Ver la evaluación de tendencia."))
+    out.extend(_development_verdicts(art))
+    return out
+
+
+def _development_verdicts(art: Artifacts) -> list[StrategyStatus]:
+    """Estrategias evaluadas solo en el desarrollo (PQ-129): su veredicto, en lenguaje simple."""
+    out: list[StrategyStatus] = []
+    if art.momentum:
+        perf = {n: s.get("selected_performance", {}) for n, s in art.momentum.items()}
+        passed = any(s.get("passed") for s in art.momentum.values())
+        t_max = max(p.get("t_stat", 0.0) for p in perf.values())
+        parts = [
+            f"{label} {style.pct(perf[n].get('cagr'))} anual"
+            for n, label in (("X1", "largo/corto:"), ("X2", "solo largo:"))
+            if n in perf
+        ]
+        out.append(
+            StrategyStatus(
+                "Momentum transversal",
+                "warn" if passed else "bad",
+                "Aprobada en desarrollo · prueba final pendiente"
+                if passed
+                else "Descartada en desarrollo",
+                "Pasó las condiciones mínimas en el desarrollo."
+                if passed
+                else f"{'; '.join(parts).capitalize()}. Ninguna se distingue del azar"
+                f" (t ≤ {style.number(t_max, 2)}; se exigía más de 3).",
+            )
+        )
+    if art.sentiment:
+        best = max(
+            art.sentiment.values(),
+            key=lambda s: s.get("selected_performance", {}).get("sharpe", float("-inf")),
+        )
+        passed = any(s.get("passed") for s in art.sentiment.values())
+        sharpe = best.get("selected_performance", {}).get("sharpe")
+        base = best.get("secondary", {}).get("sharpe_base")
+        out.append(
+            StrategyStatus(
+                "Filtro de sentimiento",
+                "warn" if passed else "bad",
+                "Aprobada en desarrollo · prueba final pendiente"
+                if passed
+                else "Descartada en desarrollo",
+                "Pasó las condiciones mínimas en el desarrollo."
+                if passed
+                else "Quedarse fuera en las semanas de miedo extremo mejoró el momentum (Sharpe"
+                f" {style.number(sharpe)} frente a {style.number(base)}), pero no lo bastante para"
+                " distinguirlo del azar.",
+            )
+        )
+    principal = art.polymarket.get("P1")
+    if principal is not None:
+        passed = bool(principal.get("passed"))
+        failed = [g["name"] for g in principal.get("gates", []) if not g.get("passed")]
+        out.append(
+            StrategyStatus(
+                "Polymarket",
+                "warn" if passed else "bad",
+                "Aprobada en desarrollo · prueba final pendiente"
+                if passed
+                else "Descartada en desarrollo",
+                "Comprar al favorito pasó las condiciones mínimas en el desarrollo."
+                if passed
+                else "Comprar al favorito no pasó las condiciones mínimas en el desarrollo"
+                f" (falló {', '.join(failed) or 'algún gate'}).",
+            )
+        )
     return out
 
 
@@ -181,7 +268,7 @@ def quality_table(quality: list[dict[str, Any]]) -> pl.DataFrame:
             "filas": q.get("rows", 0),
             "huecos": q.get("gaps", 0),
             "periodos faltantes": q.get("missing_periods", 0),
-            "hueco mayor (h)": q.get("largest_gap_hours", 0.0),
+            "hueco mayor (h)": style.number(q.get("largest_gap_hours", 0.0), 1),
             "outliers": q.get("outliers", 0),
             "desde": str(q.get("first", ""))[:10],
             "hasta": str(q.get("last", ""))[:10],
@@ -196,8 +283,8 @@ def gates_table(summary: dict[str, Any]) -> pl.DataFrame:
         [
             {
                 "condición": g["name"],
-                "criterio": g["criterion"],
-                "valor": style.number(float(g["value"]), 3),
+                "criterio": style.localize(str(g["criterion"])),
+                "valor": style.number(float(g["value"]), 2),
                 "resultado": style.status(bool(g["passed"])),
             }
             for g in summary.get("gates", [])
@@ -238,9 +325,9 @@ def model_tables(model: dict[str, Any]) -> tuple[pl.DataFrame, pl.DataFrame]:
         [
             {
                 "modelo": r["name"] + (" (ajustado)" if r.get("tuned") else ""),
-                "RMSE": _num(r.get("rmse")),
-                "MAE": _num(r.get("mae")),
-                "R²": _num(r.get("r2")),
+                "RMSE": style.number(_num(r.get("rmse")), 3),
+                "MAE": style.number(_num(r.get("mae")), 3),
+                "R²": style.number(_num(r.get("r2")), 3),
             }
             for r in model.get("regression", [])
         ]
@@ -249,8 +336,8 @@ def model_tables(model: dict[str, Any]) -> tuple[pl.DataFrame, pl.DataFrame]:
         [
             {
                 "modelo": c["name"] + (" (ajustado)" if c.get("tuned") else ""),
-                "AUC": _num(c.get("auc")),
-                "F1": _num(c.get("f1")),
+                "AUC": style.number(_num(c.get("auc")), 3),
+                "F1": style.number(_num(c.get("f1")), 3),
             }
             for c in model.get("classification", [])
         ]
@@ -262,11 +349,11 @@ def scenario_table(simulation: dict[str, Any]) -> pl.DataFrame:
     rows = [
         {
             "escenario": name,
-            "media": _num(s.get("media")),
-            "mediana": _num(s.get("mediana")),
-            "P(< 4 %)": _num(s.get("prob_bajo_hurdle")),
-            "P(pérdida)": _num(s.get("prob_perdida")),
-            "CVaR 95 %": _num(s.get("cvar95")),
+            "retorno medio": style.pct(_num(s.get("media")), 2),
+            "retorno mediano": style.pct(_num(s.get("mediana")), 2),
+            "prob. de rendir menos del 4 %": style.pct(_num(s.get("prob_bajo_hurdle"))),
+            "prob. de perder": style.pct(_num(s.get("prob_perdida"))),
+            "pérdida media en el peor 5 %": style.pct(_num(s.get("cvar95"))),
         }
         for name, s in simulation.get("escenarios", {}).items()
     ]
@@ -278,9 +365,9 @@ def validation_table(simulation: dict[str, Any]) -> pl.DataFrame:
         [
             {
                 "modelo": v["model"],
-                "ciclos/año": _num(v.get("cycles")),
-                "retorno medio": _num(v.get("mean_return")),
-                "tiempo invertido": _num(v.get("invested")),
+                "ciclos por año": style.number(_num(v.get("cycles")), 1),
+                "retorno medio": style.pct(_num(v.get("mean_return")), 2),
+                "tiempo invertido": style.pct(_num(v.get("invested"))),
             }
             for v in simulation.get("validacion", [])
         ]
@@ -296,7 +383,7 @@ def transition_table(simulation: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "desde \\ hacia": states,
-            **{s: [_num(r[j]) for r in matrix] for j, s in enumerate(states)},
+            **{s: [style.pct(_num(r[j])) for r in matrix] for j, s in enumerate(states)},
         }
     )
 

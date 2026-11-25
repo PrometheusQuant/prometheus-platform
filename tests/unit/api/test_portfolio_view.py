@@ -15,14 +15,13 @@ from streamlit.testing.v1 import AppTest
 from tests.contract.example_strategies import BTC
 
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
-from prometheus_platform.api.dashboard import portfolio
+from prometheus_platform.api.dashboard import portfolio, style
 from prometheus_platform.api.paper.report import StrategyRow, build_view, strategy_breakdown
 from prometheus_platform.domain.events import PortfolioValued
 from prometheus_platform.domain.protocol import HOLDOUT_START
 from prometheus_platform.portfolio_risk.budget import bootstrap_bands, cvar95, cvar_contributions
 from prometheus_platform.strategies.carry import perp_instrument, spot_instrument
 
-from .test_dashboard import APP
 from .test_strategy_executor import BTC_PRICE, CARRY, Rig, at
 
 D = Decimal
@@ -166,8 +165,8 @@ SCENARIOS = pl.DataFrame(
 def test_allocation_table_compares_the_budget_with_the_paper() -> None:
     table = portfolio.allocation_table(BUDGET, {"carry-h2": 0.49})
     assert table.to_dicts() == [
-        {"estrategia": "carry-h2", "recomendado": "0%", "en paper ahora": "49%"},
-        {"estrategia": "efectivo", "recomendado": "100%", "en paper ahora": "51%"},
+        {"estrategia": "carry-h2", "recomendado": "0 %", "en paper ahora": "49 %"},
+        {"estrategia": "efectivo", "recomendado": "100 %", "en paper ahora": "51 %"},
     ]
 
 
@@ -175,13 +174,13 @@ def test_cvar_table_shows_the_tail_risk_of_the_current_paper() -> None:
     table = {
         r["parte"]: r for r in portfolio.cvar_table(BUDGET, SCENARIOS, {"carry-h2": 0.5}).to_dicts()
     }
-    assert table["carry-h2"]["con el presupuesto"] == "0.00%"
-    assert table["total (CVaR95)"]["con el presupuesto"] == "-4.00%"  # todo en efectivo
+    assert table["carry-h2"]["con el presupuesto"] == "0,00 %"
+    assert table["total (CVaR95)"]["con el presupuesto"] == "-4,00 %"  # todo en efectivo
     # Con la mitad en el carry, el CVaR es el de esa cartera (la cola incluye las 20 quiebras).
     carry = SCENARIOS["carry-H2"].to_numpy()
     expected = cvar95(0.5 * carry + 0.5 * 0.04)
     assert expected > 0.1  # la quiebra domina la cola
-    assert table["total (CVaR95)"]["con el paper ahora"] == f"{expected:.2%}"
+    assert table["total (CVaR95)"]["con el paper ahora"] == style.pct(expected, 2)
 
 
 def test_cvar_contributions_add_up_to_the_portfolio_cvar() -> None:
@@ -256,10 +255,9 @@ def test_the_portfolio_tab_renders_with_a_live_journal(
     for name in [n for n in os.environ if n.startswith("PQ_")]:
         monkeypatch.delenv(name)
     monkeypatch.setenv("PQ_DATA_DIR", str(lake))
-    at_ = AppTest.from_file(str(APP), default_timeout=60).run()
-    assert not at_.exception
-    tab = at_.tabs[7]
-    assert tab.label == "¿Cómo se reparte? Cartera"
+    script = "from prometheus_platform.api.dashboard import app\napp.render_page('cartera')"
+    tab = AppTest.from_string(script, default_timeout=60).run()  # solo la página (PQ-127)
+    assert not tab.exception
     assert len(tab.dataframe) == 3  # presupuesto, capital por estrategia y CVaR
     assert {m.label for m in tab.metric} == {
         "Tope por exchange",

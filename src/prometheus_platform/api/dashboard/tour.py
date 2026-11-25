@@ -2,7 +2,7 @@
 
 Se activa con ``?modo=feria`` en la URL. El recorrido tiene 7 pasos, uno por sección del pitch
 de 7 minutos (PQ-60): problema → por qué fallan los minoristas → nuestra respuesta → evidencia →
-demo en vivo → viabilidad → cierre. Cada paso dice qué pestaña abrir, qué señalar y qué decir.
+demo en vivo → viabilidad → cierre. Cada paso dice qué página abrir, qué señalar y qué decir.
 
 **Para ajustar el guion** basta con editar ``STEPS``. Los textos no llevan cifras a propósito: las
 muestra el dashboard desde los artefactos y así nunca quedan desactualizadas.
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 FAIR_MODE = "feria"
-# La pestaña en vivo se redibuja sola cada minuto en el modo feria: el runner cicla cada 60 s.
+# La página en vivo se redibuja sola cada minuto en el modo feria: el runner cicla cada 60 s.
 LIVE_REFRESH = timedelta(seconds=60)
 
 # Tipografía para una pantalla grande vista a 2-3 metros. Solo fuentes del sistema.
@@ -39,7 +39,7 @@ button[data-baseweb="tab"] p { font-size: 1.15rem; }
 @dataclass(frozen=True, slots=True)
 class TourStep:
     title: str  # sección del pitch (PQ-60)
-    tab: str | None  # pestaña que se abre; None si no hace falta
+    tab: str | None  # página que se abre (su título); None si no hace falta
     say: str  # la frase para el público
     show: str  # qué señalar en la pantalla
 
@@ -50,7 +50,7 @@ STEPS: tuple[TourStep, ...] = (
         None,
         "Los bots y las plataformas de backtest muestran la curva más bonita: sin costes reales "
         "y sin contar los intentos que salieron mal.",
-        "El título del tablero: cada pestaña responde una pregunta del jurado.",
+        "El menú del tablero: cada página responde una pregunta del jurado.",
     ),
     TourStep(
         "Por qué fallan los minoristas",
@@ -69,8 +69,8 @@ STEPS: tuple[TourStep, ...] = (
     TourStep(
         "La evidencia",
         "¿Qué riesgo hay? Simulación",
-        "Simulamos miles de trayectorias, incluida la quiebra del exchange. El periodo de prueba "
-        "final sigue cerrado hasta verificar las comisiones reales.",
+        "Simulamos miles de trayectorias, incluida la quiebra del exchange. Y abrimos una sola "
+        "vez la prueba final con datos nunca vistos: el carry no la superó, y el tablero lo dice.",
         "La validación del simulador y la probabilidad de quiebra de equilibrio.",
     ),
     TourStep(
@@ -90,9 +90,10 @@ STEPS: tuple[TourStep, ...] = (
     TourStep(
         "Cierre",
         None,
-        "PrometheusQuant dice cuándo una estrategia no sirve. Lo siguiente: el periodo de prueba "
-        "final con comisiones verificadas y más estrategias por el mismo contrato.",
-        "Vuelve a la pestaña en vivo mientras respondes preguntas.",
+        "PrometheusQuant dice cuándo una estrategia no sirve: el carry pasó en desarrollo y "
+        "falló en la prueba final. Lo siguiente: más estrategias por el mismo protocolo, como el "
+        "momentum y Polymarket.",
+        "Vuelve a la página en vivo mientras respondes preguntas.",
     ),
 )
 

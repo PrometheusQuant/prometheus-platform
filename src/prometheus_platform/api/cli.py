@@ -16,6 +16,7 @@ mensuales una vez cerrado el mes.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import subprocess
 import sys
@@ -45,12 +46,16 @@ from prometheus_platform.adapters.trial_ledger import (
     git_author,
     read_rows,
 )
-from prometheus_platform.api import polymarket_cli
+from prometheus_platform.api import polymarket_cli, sentiment_cli
+from prometheus_platform.api.paper import cost_cli
 from prometheus_platform.api.paper.compose import (
+    BROKERS,
+    PAPER_DIR,
     PaperPaths,
     RunnerAlreadyRunningError,
     build,
     build_watchdog,
+    paper_dir,
     single_instance,
 )
 from prometheus_platform.api.paper.runner import RunnerConfig
@@ -88,7 +93,6 @@ SOURCE_NAME = "binance_data_vision"
 
 
 GOLD_DOCS = Path("docs/arquitectura/modelo-gold.md")
-PAPER_DIR = "paper"
 
 
 def _month(value: str) -> date:
@@ -117,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_research(commands)
     _add_operations(commands)
     polymarket_cli.add_parser(commands)
+    sentiment_cli.add_parser(commands)
     return parser
 
 
@@ -184,6 +189,16 @@ def _add_research(commands: Commands) -> None:
         "trend", help="Tendencia (T1 y T2): periodo de desarrollo, las 12 configuraciones (PQ-68)"
     )
     trend.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    momentum = studies.add_parser(
+        "momentum",
+        help="Momentum transversal (X1 y X2): desarrollo, las 6 configuraciones (PQ-114)",
+    )
+    momentum.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    sentimiento = studies.add_parser(
+        "sentimiento",
+        help="Overlay de Fear & Greed sobre el momentum (S1 y S2): desarrollo (PQ-128)",
+    )
+    sentimiento.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
     carry_holdout = studies.add_parser(
         "carry-holdout",
         help="Carry H2: abre el holdout UNA SOLA VEZ con la configuración elegida (PQ-50)",
@@ -228,6 +243,10 @@ def _add_research(commands: Commands) -> None:
     simulate.add_argument("--figures", type=Path, required=True)
     simulate.add_argument("--paths", type=int, default=10_000)
     studies.add_parser(
+        "paper-banda",
+        help="¿Caen los últimos 30 días del paper en la banda p5-p95 del Monte Carlo? (PQ-120)",
+    )
+    studies.add_parser(
         "stats", help="Validación estadística de la optimización: t, ANOVA, Friedman (cap. 7.4)"
     )
     studies.add_parser(
@@ -246,6 +265,21 @@ def _add_research(commands: Commands) -> None:
         "registro", help="Registro de ensayos compartido: N por familia (PQ-112)"
     )
     ledger.add_argument("action", choices=["resumen", "importar-mlflow", "verificar"])
+
+
+def _add_paper_backup_parser(paper_actions: Any) -> None:
+    backup = paper_actions.add_parser(
+        "backup", help="Respaldos cifrados (age) de data/paper y su restauración (PQ-73)"
+    )
+    backup_actions = backup.add_subparsers(dest="backup_action", required=True)
+    keygen = backup_actions.add_parser("keygen", help="Crea el par de claves age (una vez)")
+    keygen.add_argument("--out", type=Path, required=True, help="archivo de la clave privada")
+    create = backup_actions.add_parser("create", help="Cifra data/paper y poda lo viejo")
+    create.add_argument("--out", type=Path, required=True, help="carpeta de los respaldos")
+    restore = backup_actions.add_parser("restore", help="Restaura un respaldo en data/paper")
+    restore.add_argument("archive", type=Path, help="paper-<fecha>.tar.gz.age")
+    restore.add_argument("--identity", type=Path, required=True, help="clave privada age")
+    restore.add_argument("--force", action="store_true", help="reemplaza el diario existente")
 
 
 def _add_operations(commands: Commands) -> None:
@@ -270,7 +304,11 @@ def _add_operations(commands: Commands) -> None:
     kill.add_argument(
         "--strategy", default="", help="solo esa estrategia (p. ej. carry-h2); sin ella, todo"
     )
-    paper_actions.add_parser("status", help="Estado del kill-switch global y por estrategia")
+    status = paper_actions.add_parser(
+        "status", help="Estado del kill-switch global y por estrategia"
+    )
+    for sub in (kill, status):  # cada bróker tiene su carpeta y su kill-switch (PQ-52)
+        sub.add_argument("--broker", choices=list(BROKERS), default="simulado")
     run = paper_actions.add_parser(
         "run", help="Runner del carry H2 con el bróker simulado y datos en vivo (PQ-54)"
     )
@@ -293,6 +331,13 @@ def _add_operations(commands: Commands) -> None:
         help="parte del capital del carry en (0, 1]; el resto queda en efectivo (PQ-83)",
     )
     run.add_argument(
+        "--broker",
+        choices=list(BROKERS),
+        default="simulado",
+        help="binance-demo: órdenes reales con dinero ficticio en Binance Demo (PQ-52), "
+        "con su propia carpeta data/paper-binance-demo",
+    )
+    run.add_argument(
         "--metrics-port",
         type=int,
         default=0,
@@ -313,18 +358,7 @@ def _add_operations(commands: Commands) -> None:
     paper_actions.add_parser(
         "bot", help="Bot de Telegram: /estado, /pnl y /kill desde los chats autorizados (PQ-72)"
     )
-    backup = paper_actions.add_parser(
-        "backup", help="Respaldos cifrados (age) de data/paper y su restauración (PQ-73)"
-    )
-    backup_actions = backup.add_subparsers(dest="backup_action", required=True)
-    keygen = backup_actions.add_parser("keygen", help="Crea el par de claves age (una vez)")
-    keygen.add_argument("--out", type=Path, required=True, help="archivo de la clave privada")
-    create = backup_actions.add_parser("create", help="Cifra data/paper y poda lo viejo")
-    create.add_argument("--out", type=Path, required=True, help="carpeta de los respaldos")
-    restore = backup_actions.add_parser("restore", help="Restaura un respaldo en data/paper")
-    restore.add_argument("archive", type=Path, help="paper-<fecha>.tar.gz.age")
-    restore.add_argument("--identity", type=Path, required=True, help="clave privada age")
-    restore.add_argument("--force", action="store_true", help="reemplaza el diario existente")
+    _add_paper_backup_parser(paper_actions)
     weekly = paper_actions.add_parser(
         "weekly-report", help="Informe semanal del paper trading: PDF y envío a Telegram (PQ-85)"
     )
@@ -335,6 +369,7 @@ def _add_operations(commands: Commands) -> None:
     weekly.add_argument(
         "--send", action="store_true", help="envía el PDF (o, sin --pdf, el resumen) al canal"
     )
+    cost_cli.add_parsers(paper_actions)
 
     _add_monitor_parser(commands)
 
@@ -650,6 +685,76 @@ def _research_polymarket(data_dir: Path, ledger: TrialLedger, *, repeat: bool) -
     return 0
 
 
+def _research_momentum(data_dir: Path, figures: Path | None, ledger: TrialLedger) -> int:
+    from prometheus_platform.research import momentum as mo  # noqa: PLC0415
+    from prometheus_platform.research import momentum_evaluation as me  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_equity,
+        write_momentum_outputs,
+    )
+
+    universe = json.loads(MOMENTUM_UNIVERSE_FILE.read_text(encoding="utf-8"))
+    data = [me.load_market(data_dir / "silver", s) for s in universe["universo"]]
+    costs = mo.main_costs(universe["menor_volumen_10pb"])
+    others = me.other_returns(data_dir / "research")
+    # Las 6 configuraciones se registran (N) antes de evaluar cualquiera de las dos hipótesis.
+    evaluations = me.evaluate_family(data, ledger, costs=costs, others=others)
+    for hypothesis, evaluation in evaluations.items():
+        out = data_dir / "research" / "momentum" / str(hypothesis)
+        path = write_momentum_outputs(evaluation, out)
+        if figures is not None:
+            plot_equity(
+                evaluation,
+                figures / f"{str(hypothesis).lower()}-curvas.png",
+                evaluation.benchmark_returns,
+                benchmark_label="B1 universo a partes iguales",
+            )
+        verdict = "PASA" if evaluation.passed else "NO PASA"
+        print(f"{hypothesis}: elegida={evaluation.selected} gates={verdict} resumen={path}")
+        for gate in evaluation.gates:
+            mark = "OK " if gate.passed else "NO "
+            print(f"  {gate.name} {mark}{gate.criterion}: {gate.value:.4f}")
+    return 0
+
+
+def _research_sentiment(data_dir: Path, figures: Path | None, ledger: TrialLedger) -> int:
+    from prometheus_platform.data_platform.sentiment import read_silver  # noqa: PLC0415
+    from prometheus_platform.research import momentum as mo  # noqa: PLC0415
+    from prometheus_platform.research import momentum_evaluation as me  # noqa: PLC0415
+    from prometheus_platform.research import sentiment_overlay as so  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_equity,
+        write_overlay_outputs,
+    )
+
+    universe = json.loads(MOMENTUM_UNIVERSE_FILE.read_text(encoding="utf-8"))
+    data = [me.load_market(data_dir / "silver", s) for s in universe["universo"]]
+    costs = mo.main_costs(universe["menor_volumen_10pb"])
+    research = data_dir / "research"
+    lookbacks = {h: so.selected_lookback(research, h) for h in so.OVERLAYS.values()}
+    fng = read_silver(data_dir / "silver")
+    # S1 y S2 se registran (N) antes de evaluar cualquiera de los dos.
+    evaluations = so.evaluate(
+        data, ledger, fng, lookbacks=lookbacks, costs=costs, others=me.other_returns(research)
+    )
+    for name, evaluation in evaluations.items():
+        path = write_overlay_outputs(evaluation, research / "sentimiento" / name)
+        if figures is not None:
+            plot_equity(
+                evaluation,
+                figures / f"{name.lower()}-curvas.png",
+                evaluation.base_returns,
+                benchmark_label=f"{evaluation.base_name} sin filtro",
+            )
+        verdict = "PASA" if evaluation.passed else "NO PASA"
+        weeks = evaluation.secondary["semanas_fuera"]
+        print(f"{name}: semanas fuera={weeks:.0f} gates={verdict} resumen={path}")
+        for gate in evaluation.gates:
+            mark = "OK " if gate.passed else "NO "
+            print(f"  {gate.name} {mark}{gate.criterion}: {gate.value:.4f}")
+    return 0
+
+
 def _development_panel(data_dir: Path) -> pl.DataFrame:
     from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
     from prometheus_platform.research.panel import development_only  # noqa: PLC0415
@@ -727,6 +832,33 @@ def _research_simulate(data_dir: Path, figures: Path, paths: int) -> int:
     print(f"resumen={path}")
     for row in [study.historical, *study.validation]:
         print(f"  {row.model}: ciclos/año={row.cycles:.1f} retorno={row.mean_return:.2%}")
+    return 0
+
+
+def _research_paper_band(data_dir: Path) -> int:
+    """Criterio 4 del go/no-go: el retorno de 30 días del paper frente a la banda (PQ-120)."""
+    from prometheus_platform.api.paper.report import build_view  # noqa: PLC0415
+    from prometheus_platform.research.simulation import ReturnBand, check_band  # noqa: PLC0415
+
+    summary = data_dir / "research" / "simulation" / "summary.json"
+    band_data = json.loads(summary.read_text()).get("banda_30_dias") if summary.exists() else None
+    if not band_data:
+        print("ERROR falta la banda de 30 días: corre antes `pq research simulate` (PQ-120).")
+        return 2
+    band = ReturnBand(**band_data)
+    view = build_view(JsonlEventJournal(PaperPaths(data_dir / PAPER_DIR).journal).replay())
+    start = view.valuations[0].occurred_at if view.valuations else None
+    equity = [
+        ((v.occurred_at - start).total_seconds() / 86_400, float(v.equity))
+        for v in view.valuations
+        if start is not None
+    ]
+    result = check_band(band, equity)
+    print(
+        f"banda de {band.days} días (Monte Carlo, H2 sin quiebra): p5 {band.p5:+.4%}, "
+        f"p50 {band.p50:+.4%}, p95 {band.p95:+.4%}"
+    )
+    print(f"veredicto: {result.verdict.upper()} ({result.detail})")
     return 0
 
 
@@ -864,8 +996,14 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
     if args.study == "carry":
         ledger = _ledger(settings, "carry", command)
         return _research_carry(data_dir, args.hypothesis, args.figures, ledger)
-    if args.study == "trend":
-        return _research_trend(data_dir, args.figures, _ledger(settings, "tendencia", command))
+    trend_family = {
+        "trend": _research_trend,
+        "momentum": _research_momentum,
+        "sentimiento": _research_sentiment,
+    }
+    if args.study in trend_family:
+        ledger = _ledger(settings, "tendencia", command)
+        return trend_family[args.study](data_dir, args.figures, ledger)
     holdouts = {"carry-holdout": ("carry", _research_carry_holdout)}
     holdouts["trend-holdout"] = ("tendencia", _research_trend_holdout)
     if args.study in holdouts:
@@ -886,6 +1024,7 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
         "budget": lambda: _research_budget(data_dir),
         "eda": lambda: _research_eda(data_dir, args.figures),
         "simulate": lambda: _research_simulate(data_dir, args.figures, args.paths),
+        "paper-banda": lambda: _research_paper_band(data_dir),
         "momentum-universo": _research_momentum_universe,
     }
     _ledger(settings, "descriptivo", command).log_execution(args.study)
@@ -1122,7 +1261,7 @@ def _paper_run(
     args: argparse.Namespace, settings: Settings, notifier: Notifier | None = None
 ) -> int:
     symbols = tuple(dict.fromkeys(s.strip().upper() for s in args.symbols.split(",") if s.strip()))
-    paths = PaperPaths(settings.data_dir / PAPER_DIR)
+    paths = PaperPaths(paper_dir(settings.data_dir, args.broker))
     with http_client() as client:
         try:
             if not math.isfinite(args.theta) or args.interval <= 0:
@@ -1145,8 +1284,12 @@ def _paper_run(
                     notifier=notifier,
                     exchange_caps=caps,
                     market_data=args.market_data,
+                    broker=args.broker,
                 )
-                print(f"runner de paper: bróker simulado, {','.join(symbols)}, {config.describe()}")
+                print(
+                    f"runner de paper: bróker {args.broker}, {','.join(symbols)}, "
+                    f"{config.describe()}"
+                )
                 metrics = _start_metrics(paths, args.metrics_port)
                 try:
                     healthy = runner.run(
@@ -1209,10 +1352,12 @@ def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | No
         "bot": _paper_bot,
         "backup": _paper_backup,
         "weekly-report": _paper_weekly_report,
+        "costes": cost_cli.costs_report,
+        "muestreo-costes": cost_cli.sample_costs_command,
     }
     if args.action in processes:
         return processes[args.action](args, settings, notifier)
-    paths = PaperPaths(settings.data_dir / PAPER_DIR)
+    paths = PaperPaths(paper_dir(settings.data_dir, args.broker))
     journal = JsonlEventJournal(paths.journal)
     if args.action == "status":
         return _paper_status(paths, journal)
@@ -1376,6 +1521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "monitor": lambda: _monitor_drift(args, settings, notifier),
         "alert": lambda: _alert_test(notifier, settings.environment.value),
         "polymarket": lambda: polymarket_cli.run(args, data_dir, http_client),
+        "sentimiento": lambda: sentiment_cli.run(args, data_dir, http_client),
     }
     return handlers[args.command]()
 
