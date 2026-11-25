@@ -195,6 +195,18 @@ def test_a_delisted_symbol_is_closed_and_never_replaced() -> None:
     assert [s for s, _ in result.delisted] == ["AAA"]
 
 
+def test_a_temporary_data_gap_is_not_a_delisting() -> None:
+    """Tres días sin velas a mitad del periodo (como en Data Vision en 2022) no cierran nada."""
+    data = []
+    for m in universe():
+        gap = (pl.col("open_time") >= MONDAY + timedelta(days=9)) & (
+            pl.col("open_time") < MONDAY + timedelta(days=12)
+        )
+        data.append(mo.SymbolMarket(m.symbol, m.hourly.filter(~gap), m.settlements))
+    result = run(data, mo.MomentumConfig(7))
+    assert result.delisted == []
+
+
 def test_the_development_cannot_read_the_holdout() -> None:
     with pytest.raises(ValueError, match="holdout"):
         mo.simulate(

@@ -18,8 +18,11 @@ Implementa las reglas del [pre-registro](docs/estrategias/03-momentum-transversa
 - **Costes:** comisión taker del perpetuo más el slippage del símbolo, por lado (§6).
 - **Funding:** en cada liquidación con la posición abierta antes de ella, el largo paga y el corto
   cobra ``tasa · nocional``, al `close` de la vela que cierra en la liquidación.
-- **Deslistados (§3.4):** un símbolo con posición que lleva más de un día sin velas se cierra a su
-  último precio, pagando costes. Nunca se sustituye por otro.
+- **Deslistados (§3.4):** un símbolo que **ya no vuelve a tener velas** se cierra a su último
+  precio un día después de la última, pagando costes. Nunca se sustituye por otro. Un hueco
+  temporal de los datos (p. ej. tres días sin velas en Data Vision en 2022) **no** es un
+  deslistado: la posición se mantiene y se valora cuando vuelven las velas. El símbolo sí queda
+  fuera del ranking del lunes si no tuvo precio el día anterior.
 - **Fronteras:** como en la tendencia (KE-014). El desarrollo termina en ``HOLDOUT_START`` y a esa
   hora solo se valora.
 
@@ -47,7 +50,7 @@ DAYS_PER_YEAR = 365
 HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
 EXECUTION_DELAY = HOUR
-STALE_AFTER = DAY  # §3.4: un día sin velas con posición abierta = deslistado
+STALE_AFTER = DAY  # §3.4: un día después de su última vela, el símbolo se da por deslistado
 EVALUATION_START = datetime(2021, 2, 1, tzinfo=HOLDOUT_START.tzinfo)  # §7
 L_GRID = (7, 14, 28)  # §5
 FAMILY = "tendencia"  # §5: el mismo factor que el TSMOM
@@ -147,7 +150,7 @@ class _Book:
     cash: float
     q: dict[str, float] = field(default_factory=dict)
     mark: dict[str, float] = field(default_factory=dict)
-    last_bar: dict[str, datetime] = field(default_factory=dict)
+    last_available: dict[str, datetime] = field(default_factory=dict)  # última vela de la serie
     pending: dict[str, float] = field(default_factory=dict)  # peso objetivo por símbolo
     pending_from: datetime | None = None
 
@@ -186,11 +189,11 @@ class _Book:
         self.cash -= paid
         self.result.funding_pnl -= paid
 
-    def close_stale(self, at: datetime) -> None:
-        """§3.4: cierra al último precio las posiciones de símbolos sin velas desde hace un día."""
+    def close_delisted(self, at: datetime) -> None:
+        """§3.4: cierra al último precio las posiciones de símbolos que ya no vuelven a cotizar."""
         for symbol, qty in list(self.q.items()):
-            seen = self.last_bar.get(symbol)
-            if qty and seen is not None and at - seen > STALE_AFTER:
+            last = self.last_available.get(symbol)
+            if qty and last is not None and at - last > STALE_AFTER:
                 self.trade(symbol, 0.0, self.mark[symbol])
                 self.pending.pop(symbol, None)
                 self.result.delisted.append((symbol, at))
@@ -230,6 +233,17 @@ def _panel(data: Sequence[SymbolMarket], end: datetime) -> pl.DataFrame:
     return pl.concat(frames).sort("open_time", "symbol")
 
 
+def _delisted(panel: pl.DataFrame, end: datetime) -> dict[str, datetime]:
+    """Última vela de las series que terminan antes del final del periodo: dejaron de cotizar.
+
+    Un deslistado se anuncia antes de ocurrir, así que saber que no vuelve no es mirar el futuro.
+    """
+    last_seen = panel.group_by("symbol").agg(pl.col("open_time").max())
+    return {
+        symbol: last for symbol, last in last_seen.iter_rows() if last + HOUR < end - STALE_AFTER
+    }
+
+
 def simulate(  # noqa: PLR0913 - keyword-only; el bucle horario sigue las reglas en orden
     data: Sequence[SymbolMarket],
     *,
@@ -254,6 +268,7 @@ def simulate(  # noqa: PLR0913 - keyword-only; el bucle horario sigue las reglas
     days: list[tuple[datetime, float]] = []
 
     panel = _panel(data, end)
+    book.last_available = _delisted(panel, end)
     hours = panel.partition_by("open_time", maintain_order=True, as_dict=True)
     current = min(o for (o,) in hours) if hours else end
     last = max(o for (o,) in hours) if hours else end
@@ -275,7 +290,6 @@ def simulate(  # noqa: PLR0913 - keyword-only; el bucle horario sigue las reglas
                 book.execute(symbol, px_open)
             if px_close is not None:
                 book.mark_to(symbol, px_close)
-                book.last_bar[symbol] = current
                 day_close[symbol] = px_close
                 traded_today.add(symbol)
         if close_time < end:
@@ -292,7 +306,7 @@ def simulate(  # noqa: PLR0913 - keyword-only; el bucle horario sigue las reglas
             if symbol in day_close:
                 closes[symbol].append(day_close[symbol])  # un día sin velas repite el anterior
         traded_today = set()
-        book.close_stale(close_time)
+        book.close_delisted(close_time)
         if close_time < start:
             continue
         days.append((close_time, book.equity))
