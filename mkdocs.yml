@@ -107,6 +107,7 @@ nav:
       - "Carry · evaluación": estrategias/01-carry/evaluacion.md
       - "Carry · holdout": estrategias/01-carry/holdout.md
       - "Carry · decisión": estrategias/01-carry/decision.md
+      - "Carry · PDCA tras el drift (2026-11)": estrategias/01-carry/pdca-drift-2026-11.md
       - "Tendencia · pre-registro": estrategias/02-tendencia/pre-registro.md
       - "Tendencia · evaluación": estrategias/02-tendencia/evaluacion.md
       - "Tendencia · holdout": estrategias/02-tendencia/holdout.md

@@ -26,4 +26,5 @@ generar un informe ad hoc o automatizar algo del repositorio.
 | `verificar_universo_polymarket.py` | Comprueba con dos consultas a Gamma que el catálogo «cerrado al ingerir» no deja fuera mercados anteriores al corte de evaluación (enmienda 1 de PQ-87, PQ-93) |
 | `verificar_punto_diario.py` | Comprueba en una muestra estratificada que el punto diario del CLOB de Polymarket es el precio de ese instante y no uno posterior (enmienda 1 de PQ-87, PQ-93) |
 | `spike_sentimiento.py` | Mide si el Crypto Fear & Greed Index es point-in-time: historia y huecos de la API de alternative.me, y comparación con las copias de la Wayback Machine para detectar revisiones y el retraso de publicación (spike PQ-103) |
+| `pdca_regimen_funding.py` | Describe el funding anualizado de los cinco símbolos del carry por semestre: mediana y parte por encima de θ = 20 % y por debajo de 0. Es el diagnóstico del ciclo PDCA tras el drift; no es un ensayo (PQ-123) |
 | `powerbi.py` | Genera las consultas de Power Query del modelo gold y calcula los valores de control del dashboard de Power BI (PQ-47) |
