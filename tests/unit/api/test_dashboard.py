@@ -16,6 +16,7 @@ from prometheus_platform.api.dashboard.artifacts import (
     performance_table,
     quality_table,
     scenario_table,
+    strategy_overview,
     transition_table,
     validation_table,
 )
@@ -341,3 +342,43 @@ def test_localize_turns_decimal_points_and_percent_signs_into_spanish() -> None:
     assert style.localize("Deflated Sharpe > 0.95 (N = 29)") == "Deflated Sharpe > 0,95 (N = 29)"
     assert style.localize("Sharpe > B1 (8.75) y CAGR > 4%") == "Sharpe > B1 (8,75) y CAGR > 4 %"
     assert style.localize("H2 · SOL.USDT") == "H2 · SOL.USDT"  # un punto entre letras no cambia
+
+
+def test_overview_shows_the_development_verdicts_of_the_new_strategies(tmp_path: Path) -> None:
+    """PQ-129: momentum, sentimiento y Polymarket salen con su veredicto, no desaparecen."""
+    research = tmp_path / "research"
+    perf = {"sharpe": 0.24, "cagr": 0.0293, "t_stat": 0.4453}
+    for name in ("X1", "X2"):
+        write(
+            research / f"momentum/{name}/summary.json",
+            {"passed": False, "selected_performance": perf},
+        )
+    write(
+        research / "sentimiento/S1/summary.json",
+        {
+            "passed": False,
+            "selected_performance": {"sharpe": 0.48},
+            "secondary": {"sharpe_base": 0.24},
+        },
+    )
+    write(
+        research / "polymarket/P1/summary.json",
+        {"passed": True, "gates": [{"name": "G1", "passed": True}]},
+    )
+    overview = {s.name: s for s in strategy_overview(load_artifacts(tmp_path))}
+
+    momentum = overview["Momentum transversal"]
+    assert (momentum.level, momentum.stage) == ("bad", "Descartada en desarrollo")
+    assert momentum.summary.startswith("Largo/corto: 2,9 % anual; solo largo: 2,9 % anual.")
+    assert "t ≤ 0,45" in momentum.summary
+    assert "0,48 frente a 0,24" in overview["Filtro de sentimiento"].summary
+    polymarket = overview["Polymarket"]
+    assert (polymarket.level, polymarket.stage) == (
+        "warn",
+        "Aprobada en desarrollo · prueba final pendiente",
+    )
+
+
+def test_overview_without_the_new_artifacts_adds_nothing(tmp_path: Path) -> None:
+    names = {s.name for s in strategy_overview(load_artifacts(tmp_path))}
+    assert not names & {"Momentum transversal", "Filtro de sentimiento", "Polymarket"}

@@ -77,6 +77,7 @@ def _tab_data(art: Artifacts) -> None:
 # Insignias de estado: icono propio de Streamlit (funciona sin internet) + texto + color.
 # Descartar una estrategia es el protocolo funcionando, no una alerta: va en gris (hallazgo 4).
 BadgeColor = Literal["green", "orange", "gray"]
+CARDS_PER_ROW = 3
 BADGES: dict[str, tuple[str, BadgeColor]] = {
     "ok": (":material/check_circle:", "green"),
     "warn": (":material/schedule:", "orange"),
@@ -190,18 +191,19 @@ def _tab_home(data_dir: Path, art: Artifacts, max_age_minutes: int) -> None:
     if not overview and not pending:
         st.info("Aún no hay evaluaciones.")
         st.caption("Para el equipo: se generan con `uv run pq research carry` y `trend`.")
-    cards = st.columns(max(len(overview) + len(pending), 1))
-    for column, item in zip(cards, overview, strict=False):
-        card = column.container(border=True)
-        card.markdown(f"**{item.name}**")
-        icon, color = BADGES[item.level]
-        card.badge(item.stage, icon=icon, color=color)
-        card.caption(item.summary)
-    for column, todo in zip(cards[len(overview) :], pending, strict=False):
-        card = column.container(border=True)
-        card.markdown(f"**{todo.name}**")
-        card.badge(todo.stage, icon=":material/pending:", color="blue")
-        card.caption(todo.summary)
+    items: list[tuple[str, str, str, BadgeColor | Literal["blue"], str]] = [
+        (item.name, item.stage, *BADGES[item.level], item.summary) for item in overview
+    ]
+    items += [(t.name, t.stage, ":material/pending:", "blue", t.summary) for t in pending]
+    for row in range(0, len(items), CARDS_PER_ROW):  # en filas de tres (PQ-129)
+        chunk = items[row : row + CARDS_PER_ROW]
+        for column, (name, stage, icon, color, text) in zip(
+            st.columns(CARDS_PER_ROW), chunk, strict=False
+        ):
+            card = column.container(border=True)
+            card.markdown(f"**{name}**")
+            card.badge(stage, icon=icon, color=color)
+            card.caption(text)
     with st.expander("¿Qué significa cada término?"):
         for term, meaning in style.GLOSSARY.items():
             st.markdown(f"**{term}.** {meaning}")
