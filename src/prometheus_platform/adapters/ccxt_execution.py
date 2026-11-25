@@ -200,6 +200,13 @@ class CcxtExecution:
         ticker = self._call(lambda: self._ex.fetch_ticker(self._symbol(instrument)))
         return _dec(ticker["last"])
 
+    def quote(self, instrument: InstrumentId) -> tuple[Decimal, Decimal]:
+        ticker = self._call(lambda: self._ex.fetch_ticker(self._symbol(instrument)))
+        bid, ask = _dec(ticker.get("bid")), _dec(ticker.get("ask"))
+        if bid <= 0 or ask < bid:
+            raise ExecutionError(f"{instrument}: libro inválido (bid {bid}, ask {ask})")
+        return bid, ask
+
     def market_order(
         self, client_order_id: str, instrument: InstrumentId, side: Side, quantity: Decimal
     ) -> ExchangeFill:

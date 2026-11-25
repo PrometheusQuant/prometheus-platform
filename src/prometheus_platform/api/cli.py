@@ -47,6 +47,7 @@ from prometheus_platform.adapters.trial_ledger import (
     read_rows,
 )
 from prometheus_platform.api import polymarket_cli
+from prometheus_platform.api.paper import cost_cli
 from prometheus_platform.api.paper.compose import (
     BROKERS,
     PAPER_DIR,
@@ -344,6 +345,7 @@ def _add_operations(commands: Commands) -> None:
     weekly.add_argument(
         "--send", action="store_true", help="envía el PDF (o, sin --pdf, el resumen) al canal"
     )
+    cost_cli.add_parsers(paper_actions)
 
     _add_monitor_parser(commands)
 
@@ -1216,6 +1218,8 @@ def _paper(args: argparse.Namespace, settings: Settings, notifier: Notifier | No
         "bot": _paper_bot,
         "backup": _paper_backup,
         "weekly-report": _paper_weekly_report,
+        "costes": cost_cli.costs_report,
+        "muestreo-costes": cost_cli.sample_costs_command,
     }
     if args.action in processes:
         return processes[args.action](args, settings, notifier)

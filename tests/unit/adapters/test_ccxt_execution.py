@@ -143,7 +143,7 @@ class FakeExchange:
         return [{"symbol": "SOL/USDT:USDT", "contracts": 1.5, "side": "short"}]
 
     def fetch_ticker(self, symbol: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"last": self.last}
+        return {"last": self.last, "bid": self.last - 0.01, "ask": self.last + 0.01}
 
     def fetch_open_orders(
         self,
@@ -281,6 +281,7 @@ def test_positions_balances_and_funding_come_from_the_exchange() -> None:
     assert gateway.balance("USDT", perp=True) == Decimal(4800)
     assert gateway.balance("USDT", perp=False) == Decimal(5000)
     assert gateway.price(SPOT) == Decimal(100)
+    assert gateway.quote(SPOT) == (Decimal("99.99"), Decimal("100.01"))
     assert gateway.funding_income(PERP, T0 - timedelta(days=1)) == [(T0, Decimal("0.125"))]
 
 
@@ -323,3 +324,10 @@ def test_an_order_without_execution_data_fails_loudly() -> None:
     fake.create_order = no_average  # type: ignore[method-assign]
     with pytest.raises(ExecutionError, match="no informa"):
         gateway.market_order("c15", PERP, Side.SELL, Decimal("0.2"))
+
+
+def test_a_crossed_or_empty_book_is_refused() -> None:
+    fake = FakeExchange()
+    fake.fetch_ticker = lambda symbol, params=None: {"last": 1.0, "bid": 2.0, "ask": 1.0}  # type: ignore[method-assign]
+    with pytest.raises(ExecutionError, match="libro inválido"):
+        make(fake).quote(SPOT)
