@@ -95,5 +95,9 @@ mercados (spike §1), y un solo mes da 22.328 precios.
 - **Comisiones históricas.** Falta verificar las unidades de `takerBaseFee`/`makerBaseFee` y desde
   cuándo está activo `feesEnabled`. El pre-registro permite una enmienda con las comisiones
   verificadas **antes** del primer backtest.
-- **Coincidencia del punto diario con el precio por minuto.** Se comprobó en 14 puntos (pre-registro
-  §4). La comprobación sobre todo el silver necesita la serie por minuto y queda para PQ-93.
+- **Coincidencia del punto diario con el precio por minuto.** Se comprobó sobre una muestra con
+  `scripts/verificar_punto_diario.py` (enmienda 1 de PQ-87): 148 de 148 puntos de 2023-01 a 2025-06
+  coinciden con el precio por minuto del mismo segundo.
+- **Precios solo de lo que la evaluación necesita.** `precios --creados-hasta AAAA-MM-DD` descarga
+  solo los mercados creados hasta ese día. El mes queda **incompleto** (el comando avisa) y para el
+  holdout hay que repetirlo con `--forzar`.

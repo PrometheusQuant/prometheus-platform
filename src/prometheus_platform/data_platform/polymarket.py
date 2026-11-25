@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -50,6 +50,7 @@ DAILY = 1440
 MIN_MARKETS = 5000  # criterio de PQ-92 (y del capítulo 1.5): al menos 5.000 registros
 PLACEHOLDER_PRICE = 0.5
 PLACEHOLDER_AFTER = timedelta(hours=24)
+MAX_OUT_OF_RANGE = 100  # más precios imposibles que esto es un fallo de la fuente (KE-023)
 _TS: pl.DataType = pl.Datetime("ms", "UTC")
 
 
@@ -90,6 +91,54 @@ def _write(path: Path, columns: dict[str, list[str | None]]) -> int:
     pq.write_table(table, tmp, compression="zstd")
     os.replace(tmp, path)
     return table.num_rows
+
+
+MARKET_COLUMNS = ("id", "condition_id", "raw", "request", "fetched_at")
+
+
+def _market_batches(
+    pages: Iterable[RawPage], clock: Clock
+) -> Iterator[dict[str, list[str | None]]]:
+    """Filas del catálogo en lotes de ``BATCH_ROWS``, según llegan las páginas (KE-022).
+
+    ``fetched_at`` es la hora de cada página: con un mes de más de 100.000 mercados la descarga
+    dura muchos minutos, y la hora real de cada dato es la que respeta el point-in-time.
+    """
+    cols: dict[str, list[str | None]] = {k: [] for k in MARKET_COLUMNS}
+    for page in pages:
+        fetched = clock.now().isoformat()
+        for row in page.rows:
+            cols["id"].append(str(row.get("id")))
+            cols["condition_id"].append(row.get("conditionId"))
+            cols["raw"].append(json.dumps(row, ensure_ascii=False, sort_keys=True))
+            cols["request"].append(page.request)
+            cols["fetched_at"].append(fetched)
+        if len(cols["id"]) >= BATCH_ROWS:
+            yield cols
+            cols = {k: [] for k in MARKET_COLUMNS}
+    if cols["id"]:
+        yield cols
+
+
+def _write_stream(
+    path: Path, names: Sequence[str], batches: Iterable[dict[str, list[str | None]]]
+) -> int:
+    """Como ``_write``, pero lote a lote: el archivo final solo aparece si todo el mes llegó."""
+    schema = pa.schema([(n, pa.string()) for n in names])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".parquet.tmp")
+    total = 0
+    try:
+        with pq.ParquetWriter(tmp, schema, compression="zstd") as writer:
+            for cols in batches:
+                table = pa.table({n: pa.array(cols[n], type=pa.string()) for n in names})
+                writer.write_table(table)
+                total += table.num_rows
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, path)
+    return total
 
 
 def _fetch_all[T](
@@ -142,32 +191,20 @@ def ingest_markets(  # noqa: PLR0913 - parámetros de la ingesta, todos con nomb
             continue
         start, end = month_window(month)
         try:
-            pages = source.closed_markets(start, end, min_volume)
+            rows = _write_stream(
+                path,
+                MARKET_COLUMNS,
+                _market_batches(source.closed_markets(start, end, min_volume), clock),
+            )
         except PredictionMarketError as exc:
             report.failed.append(label)
             log.warning(
                 "polymarket_month_failed", dataset="markets", month=f"{month:%Y-%m}", error=str(exc)
             )
             continue
-        fetched = clock.now().isoformat()
-        cols: dict[str, list[str | None]] = {
-            k: [] for k in ("id", "condition_id", "raw", "request", "fetched_at")
-        }
-        for page in pages:
-            for row in page.rows:
-                cols["id"].append(str(row.get("id")))
-                cols["condition_id"].append(row.get("conditionId"))
-                cols["raw"].append(json.dumps(row, ensure_ascii=False, sort_keys=True))
-                cols["request"].append(page.request)
-                cols["fetched_at"].append(fetched)
-        report.rows_written += _write(path, cols)
+        report.rows_written += rows
         report.written.append(label)
-        log.info(
-            "polymarket_month_written",
-            dataset="markets",
-            month=f"{month:%Y-%m}",
-            rows=len(cols["id"]),
-        )
+        log.info("polymarket_month_written", dataset="markets", month=f"{month:%Y-%m}", rows=rows)
     return report
 
 
@@ -304,11 +341,16 @@ def ingest_trades(  # noqa: PLR0913 - parámetros de la ingesta, todos con nombr
     return report
 
 
-def read_bronze(bronze_root: Path, dataset: str, fidelity: int | None = None) -> pl.DataFrame:
+def bronze_files(bronze_root: Path, dataset: str, fidelity: int | None = None) -> list[Path]:
     base = bronze_root / f"source={SOURCE}" / f"dataset={dataset}"
     if fidelity is not None:
         base /= f"fidelity={fidelity}"
-    files = sorted(base.glob("year=*/month=*/*.parquet"))
+    return sorted(base.glob("year=*/month=*/*.parquet"))
+
+
+def read_bronze(bronze_root: Path, dataset: str, fidelity: int | None = None) -> pl.DataFrame:
+    """Todo el dataset en memoria. Para los mercados usar ``build_markets_from_files`` (KE-021)."""
+    files = bronze_files(bronze_root, dataset, fidelity)
     if not files:
         return pl.DataFrame()
     return pl.concat([pl.read_parquet(f) for f in files], how="vertical")
@@ -420,21 +462,51 @@ _MARKET_SCHEMA: dict[str, pl.DataType] = {
 }
 
 
+MARKETS_TABLE = "polymarket/markets"
+BATCH_ROWS = (
+    5000  # filas de bronze por tanda al tipar: el JSON crudo nunca se carga entero (KE-021)
+)
+
+
+def _typed(raws: Iterable[Any], fetched: Iterable[Any]) -> pl.DataFrame:
+    """Una tanda de JSON crudo → catálogo tipado. El crudo se descarta al salir."""
+    records = [_market_record(json.loads(raw), at) for raw, at in zip(raws, fetched, strict=True)]
+    return pl.DataFrame(records, schema=_MARKET_SCHEMA)
+
+
 def build_markets(bronze: pl.DataFrame) -> tuple[pl.DataFrame, QualityReport]:
-    """Catálogo tipado. Un mercado descargado varias veces se queda con la última descarga."""
-    table = "polymarket/markets"
-    report = QualityReport(table=table)
+    """Catálogo tipado desde un bronze ya en memoria (tests y tablas pequeñas)."""
     if bronze.is_empty():
-        raise SilverValidationError(table, "bronze vacío", "no hay mercados ingeridos")
-    records = [
-        _market_record(json.loads(raw), fetched)
-        for raw, fetched in bronze.select("raw", "fetched_at").iter_rows()
-    ]
-    frame = pl.DataFrame(records, schema=_MARKET_SCHEMA)
-    frame = frame.sort("fetched_at").unique(
+        raise SilverValidationError(MARKETS_TABLE, "bronze vacío", "no hay mercados ingeridos")
+    return _check_markets(_typed(bronze["raw"].to_list(), bronze["fetched_at"].to_list()))
+
+
+def build_markets_from_files(files: Iterable[Path]) -> tuple[pl.DataFrame, QualityReport]:
+    """Catálogo tipado leyendo bronze archivo por archivo y por tandas (KE-021).
+
+    Con el catálogo completo (unos 400.000 mercados) cargar el JSON crudo de una vez pedía unos
+    8 GB y tumbó WSL. Así solo vive en memoria una tanda de crudo y el catálogo ya tipado.
+    """
+    parts = []
+    for file in files:
+        parquet = pq.ParquetFile(file)
+        for batch in parquet.iter_batches(batch_size=BATCH_ROWS, columns=["raw", "fetched_at"]):
+            parts.append(
+                _typed(batch.column("raw").to_pylist(), batch.column("fetched_at").to_pylist())
+            )
+    if not parts:
+        raise SilverValidationError(MARKETS_TABLE, "bronze vacío", "no hay mercados ingeridos")
+    return _check_markets(pl.concat(parts, how="vertical"))
+
+
+def _check_markets(typed: pl.DataFrame) -> tuple[pl.DataFrame, QualityReport]:
+    """Deduplica (la descarga más reciente gana), valida e informa. Comparte las dos entradas."""
+    table = MARKETS_TABLE
+    report = QualityReport(table=table)
+    frame = typed.sort("fetched_at").unique(
         subset=["condition_id"], keep="last", maintain_order=True
     )
-    report.duplicates_removed = len(records) - frame.height
+    report.duplicates_removed = typed.height - frame.height
     report.checks.append("un registro por condition_id (la descarga más reciente)")
 
     missing_id = frame.filter(pl.col("condition_id").is_null())
@@ -504,10 +576,14 @@ def build_prices(bronze: pl.DataFrame, markets: pl.DataFrame) -> tuple[pl.DataFr
         )
     report.duplicates_removed = before - frame.height
     report.checks.append("sin duplicados en conflicto")
-    out_of_range = frame.filter((pl.col("raw_price") < 0) | (pl.col("raw_price") > 1))
-    if out_of_range.height:
-        raise SilverValidationError(table, "precios en [0, 1]", f"{out_of_range.height} filas")
-    report.checks.append("precios en [0, 1]")
+    # Un precio fuera de [0, 1] es imposible: se conserva en raw_price y price queda nulo, como
+    # el relleno (KE-023). Muchos a la vez serían un fallo de la fuente, y eso sí frena el silver.
+    out_of_range = (pl.col("raw_price") < 0) | (pl.col("raw_price") > 1)
+    n_out = frame.filter(out_of_range).height
+    if n_out > MAX_OUT_OF_RANGE:
+        raise SilverValidationError(table, "precios en [0, 1]", f"{n_out} filas")
+    frame = frame.with_columns(out_of_range.alias("is_out_of_range"))
+    report.checks.append(f"precios fuera de [0, 1] (precio nulo, raw_price intacto): {n_out}")
 
     frame = frame.sort("token_id", "event_time")
     is_half = pl.col("raw_price") == PLACEHOLDER_PRICE
@@ -519,7 +595,7 @@ def build_prices(bronze: pl.DataFrame, markets: pl.DataFrame) -> tuple[pl.DataFr
     frame = (
         frame.with_columns(placeholder.alias("is_placeholder"))
         .with_columns(
-            pl.when(pl.col("is_placeholder"))
+            pl.when(pl.col("is_placeholder") | pl.col("is_out_of_range"))
             .then(None)
             .otherwise(pl.col("raw_price"))
             .alias("price"),
@@ -561,7 +637,7 @@ def build_prices(bronze: pl.DataFrame, markets: pl.DataFrame) -> tuple[pl.DataFr
         report.last = str(frame["event_time"].max())
     return frame.select(
         "token_id", "condition_id", "outcome_index", "event_time", "knowledge_time",
-        "price", "raw_price", "is_placeholder", "after_close", "source_request",
+        "price", "raw_price", "is_placeholder", "is_out_of_range", "after_close", "source_request",
     ), report  # fmt: skip
 
 
@@ -589,7 +665,7 @@ def silver_dir(data_dir: Path) -> Path:
 
 
 def build_markets_silver(data_dir: Path) -> tuple[pl.DataFrame, QualityReport]:
-    frame, report = build_markets(read_bronze(data_dir / "bronze", "markets"))
+    frame, report = build_markets_from_files(bronze_files(data_dir / "bronze", "markets"))
     write_silver(
         frame, report, silver_dir(data_dir) / "markets.parquet", data_dir / "silver" / "_quality"
     )

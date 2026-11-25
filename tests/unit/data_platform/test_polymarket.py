@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+import pyarrow.parquet as pq
 import pytest
 
+from prometheus_platform.data_platform import polymarket as polymarket_module
 from prometheus_platform.data_platform.polymarket import (
     MIN_MARKETS,
     bronze_path,
@@ -189,6 +192,56 @@ def test_a_failed_month_is_reported_and_not_written(tmp_path: Path) -> None:
     assert not bronze_path(tmp_path, "markets", date(2024, 3, 1)).exists()
 
 
+class StreamingSource(FakeSource):
+    """Entrega el mes página a página y puede caerse a mitad, como el adaptador real (KE-022)."""
+
+    def __init__(self, pages: int, rows: int, *, fail_after: int | None = None) -> None:
+        super().__init__()
+        self.pages, self.rows, self.fail_after = pages, rows, fail_after
+
+    def closed_markets(  # type: ignore[override]
+        self, start: datetime, end: datetime, min_volume: float
+    ) -> Iterator[RawPage]:
+        for n in range(self.pages):
+            if self.fail_after is not None and n == self.fail_after:
+                raise PredictionMarketError("caído a mitad del mes")
+            ids = range(n * self.rows, (n + 1) * self.rows)
+            yield RawPage(
+                f"https://gamma/markets?p={n}", [{"id": i, "conditionId": f"0x{i}"} for i in ids]
+            )
+
+
+def test_a_big_month_is_written_in_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """KE-022: el mes no se junta en memoria; cada tanda es un grupo de filas del Parquet."""
+    monkeypatch.setattr(polymarket_module, "BATCH_ROWS", 250)
+    report = ingest_markets(
+        StreamingSource(pages=10, rows=100),
+        tmp_path,
+        [date(2026, 6, 1)],
+        min_volume=0,
+        clock=FixedClock(),
+    )
+    path = bronze_path(tmp_path, "markets", date(2026, 6, 1))
+    parquet = pq.ParquetFile(path)
+    assert report.rows_written == parquet.metadata.num_rows == 1000
+    assert parquet.metadata.num_row_groups == 4  # 300 + 300 + 300 + 100
+    assert pl.read_parquet(path)["id"].to_list() == [str(i) for i in range(1000)]
+
+
+def test_a_month_that_fails_halfway_leaves_no_file(tmp_path: Path) -> None:
+    report = ingest_markets(
+        StreamingSource(pages=10, rows=100, fail_after=6),
+        tmp_path,
+        [date(2026, 6, 1)],
+        min_volume=0,
+        clock=FixedClock(),
+    )
+    path = bronze_path(tmp_path, "markets", date(2026, 6, 1))
+    assert report.failed == ["markets/2026-06"]
+    assert not path.exists()
+    assert not list(path.parent.glob("*.tmp"))  # tampoco queda el archivo a medias
+
+
 def test_prices_bronze_has_every_outcome_and_is_skipped_when_present(tmp_path: Path) -> None:
     markets, _ = build_markets(bronze_markets(market("1")))
     src = FakeSource(history={"111": [{"t": T0, "p": 0.7}], "222": [{"t": T0, "p": 0.3}]})
@@ -324,7 +377,7 @@ def test_prices_have_knowledge_time_equal_to_the_point() -> None:
     assert row["event_time"] == row["knowledge_time"] == datetime(2024, 3, 1, tzinfo=UTC)
     assert row["price"] == 0.42
     assert row["source_request"] == "https://clob"
-    assert "precios en [0, 1]" in report.checks
+    assert "precios fuera de [0, 1] (precio nulo, raw_price intacto): 0" in report.checks
 
 
 def test_a_half_that_has_not_moved_for_24_hours_is_a_placeholder() -> None:
@@ -358,10 +411,24 @@ def test_identical_duplicates_are_dropped_and_conflicts_fail() -> None:
         build_prices(bronze_prices([("111", "0x1", T0, 0.4), ("111", "0x1", T0, 0.6)]), markets)
 
 
-def test_prices_outside_zero_one_fail() -> None:
+def test_an_impossible_price_is_kept_raw_with_a_null_price() -> None:
+    """KE-023: el CLOB devolvió 1,0025 y -0,0025 en un mercado. No tumba el silver entero."""
     markets, _ = build_markets(bronze_markets(market("1")))
+    prices, report = build_prices(
+        bronze_prices([("111", "0x1", T0, 1.0025), ("112", "0x1", T0, -0.0025)]), markets
+    )
+    assert prices["price"].to_list() == [None, None]
+    assert prices["raw_price"].to_list() == [1.0025, -0.0025]
+    assert prices["is_out_of_range"].all()
+    assert "precios fuera de [0, 1] (precio nulo, raw_price intacto): 2" in report.checks
+
+
+def test_many_impossible_prices_still_stop_the_silver(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(polymarket_module, "MAX_OUT_OF_RANGE", 1)
+    markets, _ = build_markets(bronze_markets(market("1")))
+    rows = [("111", "0x1", T0, 1.2), ("112", "0x1", T0, -0.2)]
     with pytest.raises(SilverValidationError, match="precios"):
-        build_prices(bronze_prices([("111", "0x1", T0, 1.2)]), markets)
+        build_prices(bronze_prices(rows), markets)
 
 
 def test_prices_asof_never_looks_ahead_and_skips_placeholders() -> None:
@@ -428,3 +495,29 @@ def test_report_counts_points_far_from_midnight() -> None:
     points = [("111", "0x1", T0 + 3, 0.4), ("111", "0x1", T0 + DAY + 3600, 0.5)]
     _, report = build_prices(bronze_prices(points), markets)
     assert "puntos a más de 1 min de las 00:00 UTC: 1" in report.checks
+
+
+def test_markets_from_files_streams_in_batches_and_matches_in_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KE-021: tipar por archivos y tandas da lo mismo que cargarlo todo, sin el crudo entero."""
+    from prometheus_platform.data_platform import polymarket as pm  # noqa: PLC0415
+
+    monkeypatch.setattr(pm, "BATCH_ROWS", 1)  # una fila por tanda: fuerza varias tandas
+    src = FakeSource(
+        [market("1"), market("2"), market("3", end="2024-04-02T00:00:00Z", prices='["0", "0"]')]
+    )
+    ingest_markets(
+        src, tmp_path, [date(2024, 3, 1), date(2024, 4, 1)], min_volume=0, clock=FixedClock()
+    )
+    streamed, streamed_report = pm.build_markets_from_files(pm.bronze_files(tmp_path, "markets"))
+    in_memory, memory_report = build_markets(read_bronze(tmp_path, "markets"))
+    assert streamed.equals(in_memory)
+    assert streamed_report.checks == memory_report.checks
+
+
+def test_markets_from_no_files_is_an_error() -> None:
+    from prometheus_platform.data_platform import polymarket as pm  # noqa: PLC0415
+
+    with pytest.raises(SilverValidationError, match="vacío"):
+        pm.build_markets_from_files([])

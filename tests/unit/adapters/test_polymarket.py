@@ -42,7 +42,7 @@ def test_gamma_pages_by_id_with_tags_until_a_short_page(monkeypatch: pytest.Monk
         seen.append(dict(request.url.params))
         return httpx.Response(200, json=pages[len(seen) - 1])
 
-    result = source(handler).closed_markets(JAN, JAN_END, 1000)
+    result = list(source(handler).closed_markets(JAN, JAN_END, 1000))
 
     assert [r["id"] for p in result for r in p.rows] == ["1", "2", "3"]
     assert [s["offset"] for s in seen] == ["0", "2"]
@@ -70,7 +70,7 @@ def test_gamma_splits_a_window_that_exceeds_the_offset_cap(monkeypatch: pytest.M
         full = window == (iso(JAN), iso(JAN_END))
         return httpx.Response(200, json=[{"id": "x"}, {"id": "y"}] if full else [{"id": "z"}])
 
-    result = source(handler).closed_markets(JAN, JAN_END, 0)
+    result = list(source(handler).closed_markets(JAN, JAN_END, 0))
 
     assert windows[0] == (iso(JAN), iso(JAN_END))
     first_half, second_half = windows[1], windows[2]
@@ -81,15 +81,46 @@ def test_gamma_splits_a_window_that_exceeds_the_offset_cap(monkeypatch: pytest.M
     assert [r["id"] for p in result for r in p.rows] == ["z", "z"]
 
 
-def test_gamma_gives_up_when_one_hour_is_still_too_full(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_full_one_hour_window_falls_back_to_the_keyset_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Miles de mercados que vencen a la misma hora: se pagina con after_cursor, sin tope."""
     monkeypatch.setattr(polymarket, "GAMMA_PAGE", 1)
     monkeypatch.setattr(polymarket, "GAMMA_MAX_OFFSET", 0)
+    keyset_params: list[dict[str, str]] = []
+    keyset_pages = [
+        {"markets": [{"id": "a"}], "next_cursor": "c1"},
+        {"markets": [{"id": "b"}], "next_cursor": None},
+    ]
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/markets/keyset":
+            keyset_params.append(dict(request.url.params))
+            return httpx.Response(200, json=keyset_pages[len(keyset_params) - 1])
         return httpx.Response(200, json=[{"id": "x"}])
 
-    with pytest.raises(PredictionMarketError, match="Más de"):
-        source(handler).closed_markets(JAN, JAN + timedelta(minutes=30), 0)
+    start = JAN
+    pages = list(source(handler).closed_markets(start, start + timedelta(minutes=30), 0))
+
+    assert [r["id"] for p in pages for r in p.rows] == ["a", "b"]
+    assert "after_cursor" not in keyset_params[0]
+    assert keyset_params[1]["after_cursor"] == "c1"
+    assert keyset_params[0]["end_date_max"] == iso(start + timedelta(minutes=30))
+    assert keyset_params[0]["include_tag"] == "true"
+
+
+def test_a_keyset_that_never_ends_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(polymarket, "GAMMA_PAGE", 1)
+    monkeypatch.setattr(polymarket, "GAMMA_MAX_OFFSET", 0)
+    monkeypatch.setattr(polymarket, "KEYSET_MAX_PAGES", 3)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/markets/keyset":
+            return httpx.Response(200, json={"markets": [{"id": "a"}], "next_cursor": "c"})
+        return httpx.Response(200, json=[{"id": "x"}])
+
+    with pytest.raises(PredictionMarketError, match="no termina"):
+        list(source(handler).closed_markets(JAN, JAN + timedelta(minutes=30), 0))
 
 
 def test_clob_full_history_uses_interval_max() -> None:
@@ -167,13 +198,13 @@ def test_retries_rate_limits_then_succeeds() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return answers.pop(0)
 
-    assert source(handler, sleeps).closed_markets(JAN, JAN_END, 0)[0].rows == []
+    assert next(iter(source(handler, sleeps).closed_markets(JAN, JAN_END, 0))).rows == []
     assert sleeps == [2.0, 4.0]
 
 
 def test_retries_are_bounded() -> None:
     with pytest.raises(PredictionMarketError, match="tras reintentar"):
-        source(lambda r: httpx.Response(429)).closed_markets(JAN, JAN_END, 0)
+        list(source(lambda r: httpx.Response(429)).closed_markets(JAN, JAN_END, 0))
 
 
 def test_transport_errors_are_retried() -> None:
@@ -185,7 +216,7 @@ def test_transport_errors_are_retried() -> None:
             raise httpx.ConnectError("caído", request=request)
         return httpx.Response(200, json=[])
 
-    assert source(handler).closed_markets(JAN, JAN_END, 0)[0].rows == []
+    assert next(iter(source(handler).closed_markets(JAN, JAN_END, 0))).rows == []
 
 
 def test_client_errors_are_not_retried() -> None:
@@ -196,16 +227,16 @@ def test_client_errors_are_not_retried() -> None:
         return httpx.Response(422, json={"error": "offset too large"})
 
     with pytest.raises(PredictionMarketError, match="HTTP 422"):
-        source(handler).closed_markets(JAN, JAN_END, 0)
+        list(source(handler).closed_markets(JAN, JAN_END, 0))
     assert len(calls) == 1
 
 
 def test_non_json_and_wrong_shapes_are_errors() -> None:
     with pytest.raises(PredictionMarketError, match="JSON"):
-        source(lambda r: httpx.Response(200, text="<html>")).closed_markets(JAN, JAN_END, 0)
+        list(source(lambda r: httpx.Response(200, text="<html>")).closed_markets(JAN, JAN_END, 0))
     with pytest.raises(PredictionMarketError, match="lista"):
-        source(lambda r: httpx.Response(200, json={"a": 1})).closed_markets(JAN, JAN_END, 0)
+        list(source(lambda r: httpx.Response(200, json={"a": 1})).closed_markets(JAN, JAN_END, 0))
     with pytest.raises(PredictionMarketError, match="data"):
         source(lambda r: httpx.Response(200, json=[])).trades("0x1", 1)
     with pytest.raises(ValueError, match="anterior"):
-        source(lambda r: httpx.Response(200, json=[])).closed_markets(JAN_END, JAN, 0)
+        list(source(lambda r: httpx.Response(200, json=[])).closed_markets(JAN_END, JAN, 0))

@@ -26,6 +26,9 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
 | KE-016 | El backtest del carry ejecuta en la vela que abre en *t*, no en *t* + 1 h (enmienda 1.1) | Resuelto (reejecución 2026-11-24, PQ-66) |
 | KE-017 | Los logs no enmascaraban secretos dentro de textos libres | Resuelto |
 | KE-018 | El stream de futuros de Binance abre la conexión pero no envía nada | Resuelto |
+| KE-021 | El silver de mercados de Polymarket cargaba el JSON crudo de todo el catálogo y tumbó WSL | Resuelto (PQ-93) |
+| KE-022 | La descarga del catálogo de Polymarket juntaba el mes entero en memoria: 3,4 GB con 2026-06 | Resuelto (PQ-93) |
+| KE-023 | El silver de precios de Polymarket fallaba entero por un precio imposible (1,0025 y −0,0025) del CLOB | Resuelto (PQ-93) |
 
 ---
 
@@ -241,3 +244,57 @@ marca **Resuelto**, con el PR que lo arregló. No se borra: queda como historia.
   contenedor de la pila (ver «Verificación de la pila» en el
   [runbook de observabilidad](observabilidad.md#verificacion-de-la-pila)). En el servidor no
   hace falta nada. **Workaround documentado.**
+
+### KE-021: el silver de mercados de Polymarket tumbó WSL por falta de memoria
+
+- **Síntoma:** el 2026-11-24, al construir el silver tras ingerir el catálogo completo, WSL2 se
+  cerró de golpe. Se cayeron el runner, el vigilante, el dashboard, el reintento de Oracle y la
+  ingesta.
+- **Causa:** `build_markets` recibía todo el bronze ya cargado (`read_bronze` concatena los 51 meses
+  con el JSON crudo) y además creaba un diccionario de Python por mercado. Midió 20,3 MB por cada
+  1.000 mercados. Con 407.848 mercados eran unos 8 GB, y WSL tiene 5 GB. Ese día además corrían a la
+  vez dos agentes con `make check`.
+- **Solución:**
+    - `build_markets_from_files` lee archivo por archivo, en tandas de 5.000 filas y solo con
+      `raw` y `fetched_at`. Cada tanda se tipa y el crudo se descarta.
+    - Con 281.148 mercados (2026), el pico real es de 1.032 MB y el catálogo tipado ocupa 140 MB.
+    - Un test comprueba que da lo mismo que la versión en memoria.
+
+  **Resuelto.**
+- **Prevención:** no lanzar varios procesos pesados a la vez en la laptop. Para medir el pico de un
+  proceso, usar `resource.getrusage(...).ru_maxrss`; `ulimit -v` corta antes de tiempo, porque
+  polars reserva mucha memoria virtual que no usa.
+
+## KE-022: la descarga del catálogo de Polymarket juntaba el mes entero en memoria
+
+- **Síntoma:** `pq polymarket mercados` para 2026-06 pasa de 3 GB de memoria y sigue subiendo. Con
+  los ~5,8 GB de WSL, un mes más grande lo vuelve a tumbar, como en KE-021.
+- **Causa:** `closed_markets` devolvía la lista de todas las páginas del mes, y `ingest_markets`
+  copiaba cada fila a JSON antes de escribir. Un mes de 2026 tiene más de 110.000 mercados, unos
+  20 MB de JSON por cada 1.000: más de 2 GB solo de texto, más los diccionarios.
+- **Arreglo:**
+    - `closed_markets` es un generador. Retiene solo las páginas de una ventana, como mucho
+      2.100 filas, hasta saber si cabe en el tope de offset de Gamma.
+    - `ingest_markets` escribe el mes por tandas de `BATCH_ROWS` con un `ParquetWriter`, en un
+      `.tmp` que solo se renombra si el mes llega entero.
+    - `fetched_at` pasa a ser la hora de cada página y no la del final del mes. Es más fiel al
+      point-in-time, porque un mes tarda unos 20 minutos en bajar.
+
+  **Resuelto.**
+- **Prevención:** mientras corre una ingesta larga, `~/pq-ingesta/vigilante-memoria.sh` la corta
+  si pasa de 3,8 GB. Repetir un mes cuesta menos que un cierre de WSL.
+
+## KE-023: un precio imposible del CLOB tumbaba todo el silver de precios de Polymarket
+
+- **Síntoma:** `pq polymarket silver` termina con «silver no se construyó: polymarket/prices: falló
+  el check 'precios en [0, 1]': 2 filas».
+- **Causa:** el CLOB devolvió, para un mercado de mayo de 2025, el punto diario del 2025-04-26
+  00:00:06 UTC con precios 1,0025 y −0,0025 en sus dos resultados (suman 1, pero se salen del
+  rango). El check rechazaba la tabla entera por esas dos filas.
+- **Arreglo:** como el relleno de 0,5 (pre-registro §4), el punto se conserva en `raw_price`,
+  `price` queda nulo y la fila lleva `is_out_of_range`. La evaluación ya ignora los precios nulos.
+  Si hay más de `MAX_OUT_OF_RANGE` (100) a la vez, el silver sigue fallando: sería un fallo de la
+  fuente, no un dato suelto. La regla se fijó **antes** de ejecutar la evaluación de PQ-93.
+
+  **Resuelto.**
+- **Prevención:** el informe de calidad cuenta los precios fuera de rango en cada construcción.

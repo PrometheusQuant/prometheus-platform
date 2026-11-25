@@ -114,3 +114,30 @@ def test_bad_month_is_rejected() -> None:
         build_parser().parse_args(
             ["polymarket", "mercados", "--desde", "2024-13", "--hasta", "2024-12"]
         )
+
+
+def test_created_until_keeps_older_markets_and_warns_about_partial_months(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    markets = pl.DataFrame(
+        {
+            "market_id": ["viejo", "nuevo", "solo"],
+            "created_at": [
+                datetime(2025, 6, 1, tzinfo=UTC),
+                datetime(2025, 7, 2, tzinfo=UTC),
+                datetime(2025, 5, 1, tzinfo=UTC),
+            ],
+            "end_date": [
+                datetime(2025, 9, 1, tzinfo=UTC),
+                datetime(2025, 9, 9, tzinfo=UTC),
+                datetime(2025, 10, 1, tzinfo=UTC),
+            ],
+        }
+    )
+    kept = polymarket_cli._created_until(markets, date(2025, 6, 30))
+    assert kept["market_id"].to_list() == ["viejo", "solo"]
+    assert "AVISO meses incompletos (sin los creados después de 2025-06-30): 2025-09" in (
+        capsys.readouterr().out
+    )
