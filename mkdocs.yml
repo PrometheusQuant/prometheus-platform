@@ -112,6 +112,8 @@ nav:
       - "Tendencia · holdout": estrategias/02-tendencia/holdout.md
       - "Tendencia · decisión": estrategias/02-tendencia/decision.md
       - "Momentum transversal · pre-registro": estrategias/03-momentum-transversal/pre-registro.md
+      - "Momentum transversal · evaluación": estrategias/03-momentum-transversal/evaluacion.md
+      - "Momentum transversal · decisión": estrategias/03-momentum-transversal/decision.md
       - "Polymarket · pre-registro": estrategias/04-polymarket/pre-registro.md
       - "Sentimiento · pre-registro": estrategias/05-sentimiento/pre-registro.md
   - Compliance:
