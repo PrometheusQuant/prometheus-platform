@@ -283,6 +283,32 @@ uv run pq paper kill --broker binance-demo --reason "..."   # su propio kill-swi
 - **Si una orden queda por debajo del mínimo** al redondear (`stepSize`; nocional mínimo de 5
   USDT), se rechaza antes de enviarla con `OrderTooSmallError`.
 
+## Bybit testnet: el segundo exchange (PQ-100)
+
+Mismo adaptador (`adapters/ccxt_execution.py`), con otro `Dialect`: `CcxtExecution.bybit_testnet`.
+Las claves van en `PQ_BYBIT_API_KEY` y `PQ_BYBIT_API_SECRET` (solo testnet y **sin permiso de
+retiro**). La cuenta de prueba tiene 10.000 USDT ficticios.
+
+Lo que cambia respecto a Binance, verificado en testnet el 2026-11-25:
+
+- **Solo testnet.** El constructor activa el sandbox y no arranca si alguna URL de la API no
+  contiene `testnet`.
+- **Id de cliente:** `orderLinkId`, sin «.», «:» ni «/». Un id que no cabe se reemplaza por
+  `pq-` y su hash, como en Binance. Con eso se busca la orden si se pierde la respuesta, así que
+  la idempotencia sigue igual.
+- **La orden de mercado responde sin estado.** Se consulta hasta verla ejecutada, y cada consulta
+  lleva `acknowledged`, que CCXT exige porque Bybit solo deja ver las últimas 500 órdenes.
+- **Cuenta unificada:** el saldo del perpetuo no necesita parámetros.
+- **Los precios de testnet no son los del mercado real.** Por ejemplo, SOL cotizaba a 69,5 USDT
+  el 25-nov. Sirve para probar la ejecución, no para medir costes.
+
+**Prueba de integración**, con una ida y vuelta de 0,1 SOL en el perpetuo:
+`PQ_TESTNET_INTEGRATION=1 uv run pytest -m testnet --no-cov`.
+
+**Pendiente (parte 2 de PQ-100):** que el runner opere los dos exchanges a la vez con el tope por
+exchange de `portfolio_risk`. Falta un bróker que reparta las órdenes por `Venue` y los datos de
+mercado de Bybit.
+
 ## Costes reales frente a los supuestos (PQ-95)
 
 ```bash

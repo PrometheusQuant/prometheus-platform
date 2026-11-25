@@ -10,6 +10,7 @@ import ccxt
 import pytest
 
 from prometheus_platform.adapters.ccxt_execution import (
+    BYBIT_TESTNET,
     CLOCK_MARGIN_MS,
     CcxtExecution,
     ExecutionError,
@@ -17,7 +18,7 @@ from prometheus_platform.adapters.ccxt_execution import (
     exchange_order_id,
     require_test_endpoints,
 )
-from prometheus_platform.domain.model import Side
+from prometheus_platform.domain.model import InstrumentId, Side, Venue
 from prometheus_platform.strategies.carry import perp_instrument, spot_instrument
 
 T0 = datetime(2026, 11, 24, 12, tzinfo=UTC)
@@ -344,3 +345,93 @@ def test_a_crossed_or_empty_book_is_refused(book: dict[str, Any]) -> None:
     fake.fetch_order_book = lambda symbol, limit=None, params=None: book  # type: ignore[method-assign]
     with pytest.raises(ExecutionError, match="libro inválido"):
         make(fake).quote(SPOT)
+
+
+# --- Bybit testnet (PQ-100) ----------------------------------------------------------------------
+
+
+class BybitFake(FakeExchange):
+    """Como Bybit: el id de cliente es ``orderLinkId`` y consultar exige ``acknowledged``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ack_perp = True  # la orden de mercado responde sin estado
+        self.lookups: list[dict[str, Any]] = []
+
+    def create_order(  # noqa: PLR0913, PLR0917 - firma de CCXT
+        self,
+        symbol: str,
+        type: str,
+        side: str,
+        amount: Any,
+        price: Any = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        params = dict(params or {})
+        assert "newClientOrderId" not in params  # nada de Binance en Bybit
+        params["newClientOrderId"] = params.pop("orderLinkId")
+        return super().create_order(symbol, type, side, amount, price, params)
+
+    def fetch_order(
+        self,
+        id: str,
+        symbol: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        params = dict(params or {})
+        self.lookups.append(params)
+        if not params.get("acknowledged"):
+            raise ccxt.ArgumentsRequired("bybit fetchOrder() can only access ... acknowledged")
+        link = params.get("orderLinkId")
+        return super().fetch_order(id, symbol, {"origClientOrderId": link} if link else None)
+
+
+def make_bybit(fake: BybitFake) -> CcxtExecution:
+    return CcxtExecution(
+        fake,
+        name="bybit-testnet",
+        clock=Clock(),
+        secrets=(SECRET,),
+        sleep=lambda _: None,
+        dialect=BYBIT_TESTNET,
+    )
+
+
+def test_bybit_uses_order_link_id_and_acknowledged_lookups() -> None:
+    fake = BybitFake()
+    fill = make_bybit(fake).market_order("c20", PERP, Side.SELL, Decimal("0.2"))
+    assert fill.quantity == Decimal("0.2")
+    assert all(p.get("acknowledged") for p in fake.lookups)  # cada consulta lo lleva
+
+
+def test_bybit_finds_a_lost_order_by_its_link_id() -> None:
+    fake = BybitFake()
+    fake.lose_response = ccxt.RequestTimeout("timeout")
+    fill = make_bybit(fake).market_order("c21", PERP, Side.SELL, Decimal("0.2"))
+    assert fake.creates == 1  # encontrada por orderLinkId, no reenviada
+    assert fill.exchange_order_id == "1"
+    assert fake.lookups[0]["orderLinkId"] == "c21"
+
+
+def test_bybit_ids_never_carry_characters_it_refuses() -> None:
+    """Bybit no acepta «.», «:» ni «/» en orderLinkId: esos ids se reemplazan por su hash."""
+    assert exchange_order_id("carry:SOL/USDT", BYBIT_TESTNET.id_pattern).startswith("pq-")
+    assert exchange_order_id("carry-SOLUSDT", BYBIT_TESTNET.id_pattern) == "carry-SOLUSDT"
+    assert exchange_order_id("carry:SOL/USDT") == "carry:SOL/USDT"  # Binance sí los acepta
+
+
+def test_bybit_maps_instruments_to_its_own_venue() -> None:
+    gateway = make_bybit(BybitFake())
+    bybit_perp = InstrumentId("SOLUSDT-PERP", Venue.BYBIT)
+    assert gateway.price(bybit_perp) == Decimal(100)
+    assert gateway.price(PERP) == Decimal(100)  # el mismo símbolo, venga de donde venga
+    assert gateway.balance("USDT", perp=True) == Decimal("5000.0")  # cuenta unificada
+
+
+def test_bybit_testnet_points_only_at_testnet_hosts() -> None:
+    """El constructor real activa el sandbox: ninguna URL de la API apunta a producción."""
+    exchange = ccxt.bybit()
+    exchange.set_sandbox_mode(True)
+    require_test_endpoints(exchange.urls["api"], BYBIT_TESTNET.test_marker)
+    with pytest.raises(ExecutionError, match="fuera del entorno"):
+        require_test_endpoints(ccxt.bybit().urls["api"], BYBIT_TESTNET.test_marker)

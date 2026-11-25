@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     binance_api_key: SecretStr | None = None
     binance_api_secret: SecretStr | None = None
     binance_testnet: bool = True
+    # Bybit testnet (PQ-100): segundo exchange detrás del mismo ExecutionPort. Solo testnet.
+    bybit_api_key: SecretStr | None = None
+    bybit_api_secret: SecretStr | None = None
 
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None

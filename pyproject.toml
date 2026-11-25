@@ -116,6 +116,7 @@ addopts = "-ra --strict-markers --import-mode=importlib --cov=prometheus_platfor
 testpaths = ["tests"]
 markers = [
     "demo: opera en Binance Demo con dinero ficticio; solo con claves y PQ_DEMO_INTEGRATION=1",
+    "testnet: opera en Bybit testnet con dinero ficticio; solo con claves y PQ_TESTNET_INTEGRATION=1",
 ]
 
 [tool.coverage.report]

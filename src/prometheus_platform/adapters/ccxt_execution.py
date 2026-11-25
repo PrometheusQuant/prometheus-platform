@@ -1,12 +1,14 @@
 """Ejecución real con CCXT en entornos de prueba (PQ-52, ADR-0014).
 
-Implementa ``ExecutionPort`` sobre una instancia de CCXT. Hoy se usa con Binance Demo (spot y
-USDⓈ-M); Bybit testnet (PQ-100) será otra instancia con otras URLs.
+Implementa ``ExecutionPort`` sobre una instancia de CCXT: Binance Demo (spot y USDⓈ-M, PQ-52) y
+Bybit testnet (PQ-100). Lo que cambia entre exchanges va en un ``Dialect``: el nombre del id de
+cliente, cómo se busca una orden por ese id, qué ids acepta y el ``Venue``.
 
 Lo que el spike de PQ-51 encontró y aquí se resuelve:
 
 - **Solo entornos de prueba.** El constructor de Binance activa el Demo Trading y comprueba que
-  **todas** las URLs de la API apuntan a ``demo-``; si no, no arranca.
+  **todas** las URLs de la API apuntan a ``demo-``; el de Bybit activa el sandbox y comprueba
+  ``testnet``. Si no, no arrancan.
 - **Reloj.** El reloj de WSL va hasta 1,4 s atrasado y Binance rechaza timestamps adelantados más
   de 1 s. Se sincroniza cada 10 minutos y se resta un margen de 1 s, con ``recvWindow`` de 10 s.
 - **Redondeo.** La cantidad se trunca al ``stepSize`` del par y se rechaza si queda por debajo
@@ -25,6 +27,7 @@ import hashlib
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from functools import partial
@@ -45,7 +48,42 @@ CLOCK_RESYNC = timedelta(minutes=10)
 FILL_POLLS = 10
 POLL_SECONDS = 0.5
 _EXCHANGE_ID = re.compile(r"^[.A-Za-z0-9:/_-]{1,36}$")
+_BYBIT_ID = re.compile(r"^[A-Za-z0-9_-]{1,36}$")
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class Dialect:
+    """Lo que cambia entre exchanges detrás del mismo ``ExecutionPort``."""
+
+    venue: Venue
+    client_id_param: str  # el id de cliente al crear la orden
+    find_params: Callable[[str], dict[str, Any]]  # buscar una orden por ese id
+    id_pattern: re.Pattern[str]  # ids de cliente que acepta tal cual
+    order_params: dict[str, Any] = field(default_factory=dict)  # al consultar una orden por id
+    perp_balance_params: dict[str, Any] = field(default_factory=dict)
+    test_marker: str = ""  # lo que toda URL de la API debe contener
+
+
+BINANCE_DEMO = Dialect(
+    venue=Venue.BINANCE,
+    client_id_param="newClientOrderId",
+    find_params=lambda cid: {"origClientOrderId": cid},
+    id_pattern=_EXCHANGE_ID,
+    perp_balance_params={"type": "future"},
+    test_marker="://demo-",
+)
+# Bybit (verificado en testnet el 2026-11-25): la orden de mercado responde sin estado, así que se
+# consulta hasta verla ejecutada; CCXT exige ``acknowledged`` para consultar órdenes, porque Bybit
+# solo deja ver las últimas 500; el id de cliente es ``orderLinkId`` (sin «.», «:» ni «/»).
+BYBIT_TESTNET = Dialect(
+    venue=Venue.BYBIT,
+    client_id_param="orderLinkId",
+    find_params=lambda cid: {"orderLinkId": cid, "acknowledged": True},
+    id_pattern=_BYBIT_ID,
+    order_params={"acknowledged": True},
+    test_marker="testnet",
+)
 
 
 class ExecutionError(RuntimeError):
@@ -126,9 +164,12 @@ class Exchange(Protocol):
     ) -> list[dict[str, Any]]: ...
 
 
-def exchange_order_id(client_order_id: str) -> str:
-    """Id aceptado por Binance (hasta 36 caracteres de ``[.A-Za-z0-9:/_-]``), determinista."""
-    if _EXCHANGE_ID.match(client_order_id):
+def exchange_order_id(client_order_id: str, pattern: re.Pattern[str] = _EXCHANGE_ID) -> str:
+    """Id aceptado por el exchange (Binance: hasta 36 de ``[.A-Za-z0-9:/_-]``), determinista.
+
+    Si no cabe tal cual, se usa ``pq-`` y 32 caracteres del SHA-256, que valen en los dos.
+    """
+    if pattern.match(client_order_id):
         return client_order_id
     return "pq-" + hashlib.sha256(client_order_id.encode()).hexdigest()[:32]
 
@@ -156,7 +197,7 @@ def _dec(value: Any) -> Decimal:
 class CcxtExecution:
     """``ExecutionPort`` sobre CCXT. Carga los mercados una vez (unos 6,5 s en Binance)."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - keyword-only salvo el exchange
         self,
         exchange: Exchange,
         *,
@@ -164,8 +205,10 @@ class CcxtExecution:
         clock: Clock,
         secrets: Sequence[str] = (),
         sleep: Callable[[float], None] = time.sleep,
+        dialect: Dialect = BINANCE_DEMO,
     ) -> None:
         self.name = name
+        self._dialect = dialect
         self._ex = exchange
         self._clock = clock
         self._secrets = [s for s in secrets if s]
@@ -190,13 +233,42 @@ class CcxtExecution:
             }
         )
         exchange.enable_demo_trading(True)
-        require_test_endpoints(exchange.urls["api"], "://demo-")
-        return cls(exchange, name="binance-demo", clock=clock, secrets=(api_key, api_secret))
+        require_test_endpoints(exchange.urls["api"], BINANCE_DEMO.test_marker)
+        return cls(
+            exchange,
+            name="binance-demo",
+            clock=clock,
+            secrets=(api_key, api_secret),
+            dialect=BINANCE_DEMO,
+        )
+
+    @classmethod
+    def bybit_testnet(cls, api_key: str, api_secret: str, clock: Clock) -> CcxtExecution:
+        exchange = ccxt.bybit(
+            {
+                "apiKey": api_key,
+                "secret": api_secret,
+                "enableRateLimit": True,
+                "options": {
+                    "adjustForTimeDifference": False,  # se sincroniza aquí, con margen
+                    "recvWindow": RECV_WINDOW_MS,
+                },
+            }
+        )
+        exchange.set_sandbox_mode(True)
+        require_test_endpoints(exchange.urls["api"], BYBIT_TESTNET.test_marker)
+        return cls(
+            exchange,
+            name="bybit-testnet",
+            clock=clock,
+            secrets=(api_key, api_secret),
+            dialect=BYBIT_TESTNET,
+        )
 
     # --- ExecutionPort ---------------------------------------------------------------------
 
     def balance(self, asset: str, *, perp: bool) -> Decimal:
-        params = {"type": "future"} if perp else {}
+        params = dict(self._dialect.perp_balance_params) if perp else {}
         raw = self._call(lambda: self._ex.fetch_balance(params))
         return _dec(raw.get(asset, {}).get("free"))
 
@@ -220,7 +292,7 @@ class CcxtExecution:
         symbol = self._symbol(instrument)
         amount = self._round(symbol, quantity)
         self._sync_clock()
-        exchange_id = exchange_order_id(client_order_id)
+        exchange_id = exchange_order_id(client_order_id, self._dialect.id_pattern)
         self._traded.add(instrument)
         order = self._submit_once(symbol, side, amount, exchange_id)
         order = self._wait_closed(symbol, order)
@@ -270,15 +342,16 @@ class CcxtExecution:
         """``SOLUSDT`` → ``SOL/USDT`` y ``SOLUSDT-PERP`` → ``SOL/USDT:USDT``."""
         mapping: dict[InstrumentId, str] = {}
         for market in self._ex.markets.values():
+            venue = self._dialect.venue
             if market.get("spot"):
-                mapping[InstrumentId(market["id"], Venue.BINANCE)] = market["symbol"]
+                mapping[InstrumentId(market["id"], venue)] = market["symbol"]
             elif market.get("swap") and market.get("linear"):
-                mapping[InstrumentId(f"{market['id']}-PERP", Venue.BINANCE)] = market["symbol"]
+                mapping[InstrumentId(f"{market['id']}-PERP", venue)] = market["symbol"]
         return mapping
 
     def _symbol(self, instrument: InstrumentId) -> str:
         try:
-            return self._symbols[InstrumentId(instrument.symbol, Venue.BINANCE)]
+            return self._symbols[InstrumentId(instrument.symbol, self._dialect.venue)]
         except KeyError:
             raise ExecutionError(f"Instrumento sin mercado en {self.name}: {instrument}") from None
 
@@ -295,7 +368,7 @@ class CcxtExecution:
             raise OrderTooSmallError(f"{symbol}: {quantity} queda en {amount} al redondear")
         min_cost = _dec(limits.get("cost", {}).get("min"))
         if min_cost:
-            price = self.price(InstrumentId(self._instrument_of(symbol), Venue.BINANCE))
+            price = self.price(InstrumentId(self._instrument_of(symbol), self._dialect.venue))
             if amount * price < min_cost:
                 raise OrderTooSmallError(
                     f"{symbol}: nocional {amount * price:.2f} por debajo del mínimo {min_cost}"
@@ -319,7 +392,7 @@ class CcxtExecution:
     def _submit_once(
         self, symbol: str, side: Side, amount: Decimal, exchange_id: str
     ) -> dict[str, Any]:
-        params = {"newClientOrderId": exchange_id}
+        params = {self._dialect.client_id_param: exchange_id}
         try:
             return self._ex.create_order(
                 symbol, "market", side.value.lower(), str(amount), None, params
@@ -340,7 +413,7 @@ class CcxtExecution:
 
     def _find(self, symbol: str, exchange_id: str) -> dict[str, Any] | None:
         try:
-            return self._ex.fetch_order("", symbol, {"origClientOrderId": exchange_id})
+            return self._ex.fetch_order("", symbol, self._dialect.find_params(exchange_id))
         except ccxt.OrderNotFound:
             return None
         except ccxt.BaseError as exc:
@@ -354,7 +427,8 @@ class CcxtExecution:
             if order.get("status") in {"canceled", "rejected", "expired"}:
                 raise ExecutionError(f"{symbol}: orden {order.get('id')} {order.get('status')}")
             self._sleep(POLL_SECONDS)
-            order = self._call(partial(self._ex.fetch_order, str(order["id"]), symbol))
+            params = dict(self._dialect.order_params)
+            order = self._call(partial(self._ex.fetch_order, str(order["id"]), symbol, params))
         raise ExecutionError(f"{symbol}: la orden {order.get('id')} no se ejecutó a tiempo")
 
     def _fill(

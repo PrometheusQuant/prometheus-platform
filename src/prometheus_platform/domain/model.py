@@ -24,6 +24,7 @@ class Side(StrEnum):
 
 class Venue(StrEnum):
     BINANCE = "BINANCE"
+    BYBIT = "BYBIT"  # PQ-100: segundo exchange, en testnet
     POLYMARKET = "POLYMARKET"
     PAPER = "PAPER"
 
