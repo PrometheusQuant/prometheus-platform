@@ -278,9 +278,12 @@ def simulate(  # noqa: PLR0913 - keyword-only; el bucle horario sigue las reglas
                 book.last_bar[symbol] = current
                 day_close[symbol] = px_close
                 traded_today.add(symbol)
-            rate = rates[symbol].get(close_time)
-            if rate is not None and book.q.get(symbol) and close_time < end:
-                book.settle(symbol, rate, book.mark[symbol])
+        if close_time < end:
+            # Se liquida aunque falte la vela: a su close o, si no hay, a la última marca.
+            for symbol, qty in book.q.items():
+                rate = rates[symbol].get(close_time)
+                if rate is not None and qty:
+                    book.settle(symbol, rate, book.mark[symbol])
         current = close_time
         if close_time.hour != 0:
             continue
