@@ -39,6 +39,10 @@ class Artifacts:
     trend: dict[str, dict[str, Any]] = field(default_factory=dict)  # T1, T2 y holdout (PQ-68)
     carry_holdout: dict[str, Any] | None = None  # holdout de H2 (PQ-50)
     costs: list[dict[str, Any]] = field(default_factory=list)  # pq paper costes (PQ-95)
+    # Evaluaciones de desarrollo de las estrategias nuevas (PQ-129): X1/X2, S1/S2 y P1/P2.
+    momentum: dict[str, dict[str, Any]] = field(default_factory=dict)
+    sentiment: dict[str, dict[str, Any]] = field(default_factory=dict)
+    polymarket: dict[str, dict[str, Any]] = field(default_factory=dict)
     missing: list[Missing] = field(default_factory=list)
 
 
@@ -48,6 +52,17 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _load_development(art: Artifacts, research: Path) -> None:
+    """Evaluaciones de desarrollo de las estrategias nuevas (PQ-129)."""
+    for attr, sub, names in (
+        ("momentum", "momentum", ("X1", "X2")),
+        ("sentiment", "sentimiento", ("S1", "S2")),
+        ("polymarket", "polymarket", ("P1", "P2")),
+    ):
+        found = {n: s for n in names if (s := _read_json(research / sub / n / "summary.json"))}
+        setattr(art, attr, found)
 
 
 def load_artifacts(data_dir: Path) -> Artifacts:
@@ -90,6 +105,7 @@ def load_artifacts(data_dir: Path) -> Artifacts:
         trend = _read_json(data_dir / "research" / "trend" / name / "summary.json")
         if trend is not None:
             art.trend[name] = trend
+    _load_development(art, data_dir / "research")
     budget_dir = data_dir / "research" / "budget"
     art.budget = _read_json(budget_dir / "summary.json")
     if art.budget is None:
@@ -174,6 +190,74 @@ def strategy_overview(art: Artifacts) -> list[StrategyStatus]:
             else ("bad", "Descartada en desarrollo")
         )
         out.append(StrategyStatus("Tendencia", level, stage, "Ver la evaluación de tendencia."))
+    out.extend(_development_verdicts(art))
+    return out
+
+
+def _development_verdicts(art: Artifacts) -> list[StrategyStatus]:
+    """Estrategias evaluadas solo en el desarrollo (PQ-129): su veredicto, en lenguaje simple."""
+    out: list[StrategyStatus] = []
+    if art.momentum:
+        perf = {n: s.get("selected_performance", {}) for n, s in art.momentum.items()}
+        passed = any(s.get("passed") for s in art.momentum.values())
+        t_max = max(p.get("t_stat", 0.0) for p in perf.values())
+        parts = [
+            f"{label} {style.pct(perf[n].get('cagr'))} anual"
+            for n, label in (("X1", "largo/corto:"), ("X2", "solo largo:"))
+            if n in perf
+        ]
+        out.append(
+            StrategyStatus(
+                "Momentum transversal",
+                "warn" if passed else "bad",
+                "Aprobada en desarrollo · prueba final pendiente"
+                if passed
+                else "Descartada en desarrollo",
+                "Pasó las condiciones mínimas en el desarrollo."
+                if passed
+                else f"{'; '.join(parts).capitalize()}. Ninguna se distingue del azar"
+                f" (t ≤ {style.number(t_max, 2)}; se exigía más de 3).",
+            )
+        )
+    if art.sentiment:
+        best = max(
+            art.sentiment.values(),
+            key=lambda s: s.get("selected_performance", {}).get("sharpe", float("-inf")),
+        )
+        passed = any(s.get("passed") for s in art.sentiment.values())
+        sharpe = best.get("selected_performance", {}).get("sharpe")
+        base = best.get("secondary", {}).get("sharpe_base")
+        out.append(
+            StrategyStatus(
+                "Filtro de sentimiento",
+                "warn" if passed else "bad",
+                "Aprobada en desarrollo · prueba final pendiente"
+                if passed
+                else "Descartada en desarrollo",
+                "Pasó las condiciones mínimas en el desarrollo."
+                if passed
+                else "Quedarse fuera en las semanas de miedo extremo mejoró el momentum (Sharpe"
+                f" {style.number(sharpe)} frente a {style.number(base)}), pero no lo bastante para"
+                " distinguirlo del azar.",
+            )
+        )
+    principal = art.polymarket.get("P1")
+    if principal is not None:
+        passed = bool(principal.get("passed"))
+        failed = [g["name"] for g in principal.get("gates", []) if not g.get("passed")]
+        out.append(
+            StrategyStatus(
+                "Polymarket",
+                "warn" if passed else "bad",
+                "Aprobada en desarrollo · prueba final pendiente"
+                if passed
+                else "Descartada en desarrollo",
+                "Comprar al favorito pasó las condiciones mínimas en el desarrollo."
+                if passed
+                else "Comprar al favorito no pasó las condiciones mínimas en el desarrollo"
+                f" (falló {', '.join(failed) or 'algún gate'}).",
+            )
+        )
     return out
 
 
