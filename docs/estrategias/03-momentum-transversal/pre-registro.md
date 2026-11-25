@@ -137,6 +137,29 @@ números aunque sean malos.
 Las reglas del carry (§10). Antes del primer backtest, una enmienda no suma a N. Después, todo cambio
 es un ensayo nuevo o una hipótesis nueva. Una prueba de humo se registra y suma a N.
 
+### Aclaración 1 (2026-11-25, antes del primer backtest; no suma a N)
+
+Precisa cómo se implementan reglas que el texto no fijaba. No cambia ninguna regla. Se escribió
+después de revisar la **cobertura** de los datos del universo (primera y última vela y huecos por
+símbolo) y **sin ningún retorno** de la estrategia (PQ-114).
+
+1. **Tamaño de los tercios:** con *n* símbolos elegibles, cada tercio tiene `floor(n / 3)`. Con 15
+   elegibles son 5 largos y 5 cortos (las 10 posiciones de §2). Con menos de 3, la cartera queda en
+   efectivo esa semana.
+2. **«Tienen precio ese día» (§4) se lee literal:** entra al ranking del lunes el símbolo con al
+   menos una vela de 1 h el día anterior. Seis símbolos (XRP, LTC, YFI, SUSHI, XLM y GRT) no tienen
+   velas en Data Vision del 2022-02-26 al 2022-02-28. Por eso quedan fuera del rebalanceo del
+   2022-02-28 y sus posiciones se cierran al volver las velas. No se rellena el hueco: el silver
+   no imputa (KE-007). La evaluación informa cuántos lunes tuvieron menos de 15 elegibles.
+3. **Deslistado (§3.4):** solo cuando la serie **termina** (no vuelve a tener velas). El símbolo se
+   cierra a su último precio un día después de la última vela. Un hueco temporal no es un
+   deslistado: la posición se mantiene y se valora cuando vuelven las velas. En el desarrollo
+   ningún símbolo termina; EOSUSDT termina el 2025-05-21, dentro del holdout.
+4. **Señal tras un hueco:** un día sin velas repite el cierre anterior, con la misma convención que
+   la tendencia. Tras un hueco, `ret_L` puede cubrir unos días más que *L*.
+5. **Rotación anual:** el nocional negociado sobre el capital inicial (C = 1), con la misma
+   convención que la tendencia.
+
 ## 11. Declaración de exposición previa
 
 El equipo conoce, como todo el mundo, la trayectoria pública de las criptomonedas grandes entre 2021 y

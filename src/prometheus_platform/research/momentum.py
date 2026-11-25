@@ -139,6 +139,8 @@ class MomentumResult:
     traded_notional: float = 0.0
     rebalances: int = 0
     delisted: list[tuple[str, datetime]] = field(default_factory=list)
+    # Lunes con menos símbolos elegibles que el universo (huecos de datos o listados tardíos).
+    short_mondays: list[tuple[datetime, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -244,6 +246,27 @@ def _delisted(panel: pl.DataFrame, end: datetime) -> dict[str, datetime]:
     }
 
 
+def _rebalance(  # noqa: PLR0913 - el estado del lunes
+    book: _Book,
+    *,
+    closes: Mapping[str, Sequence[float]],
+    eligible: Sequence[str],
+    symbols: Sequence[str],
+    config: MomentumConfig,
+    at: datetime,
+) -> None:
+    """Decisión del lunes: pesos objetivo, ejecutables desde *t* + 1 h."""
+    if book.equity <= 0:
+        book.pending = {}  # sin capital no se opera (como en la tendencia)
+        return
+    if len(eligible) < len(symbols):
+        book.result.short_mondays.append((at, len(eligible)))
+    weights = target_weights(closes, eligible, config)
+    book.pending = {s: weights.get(s, 0.0) for s in symbols if weights.get(s) or book.q.get(s)}
+    book.pending_from = at + EXECUTION_DELAY
+    book.result.rebalances += 1
+
+
 def simulate(  # noqa: PLR0913 - keyword-only; el bucle horario sigue las reglas en orden
     data: Sequence[SymbolMarket],
     *,
@@ -312,10 +335,9 @@ def simulate(  # noqa: PLR0913 - keyword-only; el bucle horario sigue las reglas
         days.append((close_time, book.equity))
         if close_time >= end or close_time.weekday() != MONDAY:
             continue  # en end solo se valora (KE-014)
-        weights = target_weights(closes, eligible, config)
-        book.pending = {s: weights.get(s, 0.0) for s in symbols if weights.get(s) or book.q.get(s)}
-        book.pending_from = close_time + EXECUTION_DELAY
-        result.rebalances += 1
+        _rebalance(
+            book, closes=closes, eligible=eligible, symbols=symbols, config=config, at=close_time
+        )
 
     result.daily_equity = pl.DataFrame(
         {"date": [d for d, _ in days], "equity": [e for _, e in days]},
@@ -386,6 +408,7 @@ def run_and_register(  # noqa: PLR0913 - keyword-only: cada argumento es una dim
                 "costes": result.costs,
                 "rebalanceos": float(result.rebalances),
                 "deslistados": float(len(result.delisted)),
+                "lunes_incompletos": float(len(result.short_mondays)),
             },
             tags={"period": str(period), "costs": costs_label},
         )

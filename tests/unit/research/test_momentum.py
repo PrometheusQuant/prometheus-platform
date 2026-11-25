@@ -195,6 +195,27 @@ def test_a_delisted_symbol_is_closed_and_never_replaced() -> None:
     assert [s for s, _ in result.delisted] == ["AAA"]
 
 
+def test_equity_is_capital_plus_price_plus_funding_minus_costs() -> None:
+    result = run(universe(rate=0.0005), mo.MomentumConfig(7))
+    final = result.daily_equity["equity"][-1]
+    assert final == pytest.approx(
+        1 + result.price_pnl + result.funding_pnl - result.costs, abs=1e-12
+    )
+
+
+def test_a_gap_over_a_sunday_leaves_the_symbol_out_of_that_monday() -> None:
+    """Lectura literal de «tienen precio ese día» (aclaración 1 del pre-registro)."""
+    data = []
+    sunday = MONDAY + timedelta(days=6)  # el domingo antes del segundo lunes
+    gap = (pl.col("open_time") >= sunday) & (pl.col("open_time") < sunday + timedelta(days=1))
+    for m in universe():
+        hourly = m.hourly.filter(~gap) if m.symbol in {"AAA", "BBB"} else m.hourly
+        data.append(mo.SymbolMarket(m.symbol, hourly, m.settlements))
+    result = run(data, mo.MomentumConfig(7))
+    assert result.short_mondays == [(MONDAY + timedelta(days=7), 4)]
+    assert result.delisted == []
+
+
 def test_a_temporary_data_gap_is_not_a_delisting() -> None:
     """Tres días sin velas a mitad del periodo (como en Data Vision en 2022) no cierran nada."""
     data = []
@@ -304,8 +325,9 @@ def test_cpcv_purges_35_days() -> None:
 
 
 def test_worst_month_compounds_the_daily_returns() -> None:
-    dates = [datetime(2024, 1, d, tzinfo=UTC) for d in (1, 2)] + [datetime(2024, 2, 1, tzinfo=UTC)]
-    assert me.worst_month(dates, np.array([-0.1, -0.1, 0.05])) == pytest.approx(-0.19)
+    # Cada fecha es el cierre del día: el 2024-02-01 00:00 cierra el 31 de enero.
+    dates = [datetime(2024, 1, d, tzinfo=UTC) for d in (2, 3)] + [datetime(2024, 2, 1, tzinfo=UTC)]
+    assert me.worst_month(dates, np.array([-0.1, -0.1, 0.05])) == pytest.approx(-0.1495)
 
 
 def test_cli_registers_in_the_ticket_lane_and_writes_both_hypotheses(

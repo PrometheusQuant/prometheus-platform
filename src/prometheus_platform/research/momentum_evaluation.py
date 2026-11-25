@@ -155,8 +155,10 @@ def evaluate_family(  # noqa: PLR0913 - keyword-only salvo los datos
 
 
 def worst_month(dates: Sequence[datetime], returns: np.ndarray) -> float:
+    """Peor mes calendario. Cada fecha es el cierre del día: su retorno es del día anterior."""
     frame = pl.DataFrame({"date": list(dates), "ret": returns})
-    monthly = frame.group_by(pl.col("date").dt.strftime("%Y-%m")).agg(
+    day = pl.col("date") - pl.duration(days=1)
+    monthly = frame.group_by(day.dt.strftime("%Y-%m")).agg(
         ((1 + pl.col("ret")).product() - 1).alias("m")
     )
     worst = monthly["m"].min()
@@ -266,6 +268,7 @@ def _evaluate(  # noqa: PLR0913 - keyword-only salvo los datos de la hipótesis
             "rotacion_anual": metrics["rotacion_anual"],
             "vol_realizada": metrics["vol_realizada"],
             "deslistados": metrics["deslistados"],
+            "lunes_incompletos": metrics["lunes_incompletos"],
         },
         correlations={
             name: correlation(aligned, sel_returns, frame) for name, frame in others.items()
