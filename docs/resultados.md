@@ -7,7 +7,7 @@
     desarrollo y de **paper trading con dinero simulado**; rentabilidades pasadas no
     garantizan las futuras. Nada de esta página es una recomendación de inversión.
 
-*Actualizado: 2026-11-25 12:33 UTC. Cada cifra sale de un artefacto del repositorio; nada se copia a mano.*
+*Actualizado: 2026-11-25 17:14 UTC. Cada cifra sale de un artefacto del repositorio; nada se copia a mano.*
 
 ## ¿Funciona? El carry de funding en el periodo de desarrollo
 
@@ -84,6 +84,17 @@ Todavía no hubo operaciones: la regla de entrada del carry H2 no dio señal en 
 
 ## Cuántas veces probamos
 
-Ensayos registrados: **93** (carry 36, tendencia 12, modelo del funding 45 y otras 0). Ninguna ejecución se descarta: cada una queda en el [registro de ensayos](estrategias/registro-de-ensayos.md). El Deflated Sharpe de cada estrategia descuenta los ensayos de su familia (el N del gate G1).
+Ensayos registrados: **107** (carry 36, tendencia 20, modelo del funding 45 y otras 6). Ninguna ejecución se descarta: cada una queda en el [registro de ensayos](estrategias/registro-de-ensayos.md). El Deflated Sharpe de cada estrategia descuenta los ensayos de su familia (el N del gate G1).
 
-En evaluación con el mismo protocolo: el momentum transversal en perpetuos y el sesgo favorito-longshot en Polymarket.
+## Las que se quedaron en el desarrollo
+
+Se probaron con el mismo protocolo y no pasaron sus condiciones mínimas, así que su prueba final no se abrió. Cada ejecución cuenta en el N de su familia.
+
+| estrategia | resultado | veredicto |
+|---|---|---|
+| Momentum transversal, largo/corto (X1-L28) | 2,9 % anual; t = 0,45 | descartada en el desarrollo |
+| Momentum transversal, solo largo (X2-L28) | -14,0 % anual; t = 0,48 | descartada en el desarrollo |
+| Filtro de miedo extremo sobre el momentum largo/corto (S1) | Sharpe 0,48 frente a 0,24 sin filtro; t = 0,89 | descartada en el desarrollo |
+| Filtro de miedo extremo sobre el momentum solo largo (S2) | Sharpe 0,68 frente a 0,26 sin filtro; t = 1,25 | descartada en el desarrollo |
+| Polymarket, comprar al favorito (fuera de deportes) | -0,59 % por apuesta; t = -2,07 | descartada en el desarrollo |
+| Polymarket, comprar al favorito (deportes, control) | -0,20 % por apuesta; t = -0,43 | descartada en el desarrollo |

@@ -150,7 +150,7 @@
   #grid(
     columns: (1fr, 1fr, 1fr),
     gutter: 12pt,
-    [*Más estrategias por el mismo filtro:* momentum transversal y Polymarket, en evaluación.],
+    [*Tres más, descartadas en el desarrollo:* momentum, sentimiento y Polymarket.],
     [*Ejecución real en Binance Demo*, para medir el slippage verdadero y no suponerlo.],
     [*Repartir el capital entre exchanges*, para que una quiebra no lo borre todo.],
   )
