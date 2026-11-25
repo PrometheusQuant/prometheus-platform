@@ -92,6 +92,9 @@ class MomentumConfig:
     lookback: int
     hypothesis: Hypothesis = Hypothesis.X1
     equal_weight: bool = False  # True: benchmark B1 (todo el universo largo a partes iguales)
+    # Overlay (PQ-128): lunes en que la cartera pasa a efectivo, y el nombre del filtro (S1, S2).
+    out: frozenset[datetime] = field(default=frozenset(), compare=False, repr=False)
+    overlay: str = ""
 
     def __post_init__(self) -> None:
         if self.lookback < 1:
@@ -99,7 +102,10 @@ class MomentumConfig:
 
     @property
     def name(self) -> str:
-        return "B1-universo" if self.equal_weight else f"{self.hypothesis}-L{self.lookback}"
+        if self.equal_weight:
+            return "B1-universo"
+        base = f"{self.hypothesis}-L{self.lookback}"
+        return f"{self.overlay}-{base}" if self.overlay else base
 
     @property
     def is_benchmark(self) -> bool:
@@ -141,6 +147,7 @@ class MomentumResult:
     delisted: list[tuple[str, datetime]] = field(default_factory=list)
     # Lunes con menos símbolos elegibles que el universo (huecos de datos o listados tardíos).
     short_mondays: list[tuple[datetime, int]] = field(default_factory=list)
+    weeks_out: list[datetime] = field(default_factory=list)  # lunes en efectivo por el overlay
 
 
 @dataclass
@@ -261,7 +268,11 @@ def _rebalance(  # noqa: PLR0913 - el estado del lunes
         return
     if len(eligible) < len(symbols):
         book.result.short_mondays.append((at, len(eligible)))
-    weights = target_weights(closes, eligible, config)
+    if at in config.out:
+        weights: dict[str, float] = {}  # overlay: toda la semana en efectivo (PQ-128)
+        book.result.weeks_out.append(at)
+    else:
+        weights = target_weights(closes, eligible, config)
     book.pending = {s: weights.get(s, 0.0) for s in symbols if weights.get(s) or book.q.get(s)}
     book.pending_from = at + EXECUTION_DELAY
     book.result.rebalances += 1
@@ -389,9 +400,13 @@ def run_and_register(  # noqa: PLR0913 - keyword-only: cada argumento es una dim
     years = max(len(returns) / DAYS_PER_YEAR, 1e-9)
     registry.log_trial(
         TrialRecord(
-            hypothesis=str(config.hypothesis),
+            hypothesis=config.overlay or str(config.hypothesis),
             name=config.name,
-            params={"L": str(config.lookback), "universo": str(len(data))},
+            params={
+                "L": str(config.lookback),
+                "universo": str(len(data)),
+                **({"base": str(config.hypothesis)} if config.overlay else {}),
+            },
             metrics={
                 "sharpe": perf.sharpe,
                 "sharpe_daily": perf.sharpe_daily,
@@ -409,6 +424,7 @@ def run_and_register(  # noqa: PLR0913 - keyword-only: cada argumento es una dim
                 "rebalanceos": float(result.rebalances),
                 "deslistados": float(len(result.delisted)),
                 "lunes_incompletos": float(len(result.short_mondays)),
+                "semanas_fuera": float(len(result.weeks_out)),
             },
             tags={"period": str(period), "costs": costs_label},
         )
