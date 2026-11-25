@@ -279,6 +279,55 @@ def _holdout_values(summary: dict[str, Any] | None) -> dict[str, str]:
     }
 
 
+def _verdict(passed: bool) -> str:
+    return "pasa en el desarrollo" if passed else "descartada en el desarrollo"
+
+
+def _development_rows(research: Path) -> list[dict[str, str]]:
+    """Las estrategias que se quedaron en el desarrollo (PQ-114, PQ-128 y PQ-93)."""
+    rows = []
+    for name, label in (
+        ("X1", "Momentum transversal, largo/corto"),
+        ("X2", "Momentum transversal, solo largo"),
+    ):
+        summary = _read_summary(research / "momentum" / name / "summary.json")
+        if summary is not None:
+            perf = summary.get("selected_performance", {})
+            rows.append(
+                {
+                    "estrategia": f"{label} ({summary.get('selected', NA)})",
+                    "resultado": f"{pct(perf.get('cagr'))} anual; t = {num(perf.get('t_stat'))}",
+                    "veredicto": _verdict(bool(summary.get("passed"))),
+                }
+            )
+    for name, base in (("S1", "largo/corto"), ("S2", "solo largo")):
+        summary = _read_summary(research / "sentimiento" / name / "summary.json")
+        if summary is not None:
+            perf = summary.get("selected_performance", {})
+            rows.append(
+                {
+                    "estrategia": f"Filtro de miedo extremo sobre el momentum {base} ({name})",
+                    "resultado": f"Sharpe {num(perf.get('sharpe'))} frente a "
+                    f"{num(summary.get('secondary', {}).get('sharpe_base'))} sin filtro; "
+                    f"t = {num(perf.get('t_stat'))}",
+                    "veredicto": _verdict(bool(summary.get("passed"))),
+                }
+            )
+    for name, label in (("P1", "fuera de deportes"), ("P2", "deportes, control")):
+        summary = _read_summary(research / "polymarket" / name / "summary.json")
+        if summary is not None:
+            principal = summary.get("configuraciones", {}).get(summary.get("principal"), {})
+            rows.append(
+                {
+                    "estrategia": f"Polymarket, comprar al favorito ({label})",
+                    "resultado": f"{pct(principal.get('mean_return'), 2)} por apuesta; "
+                    f"t = {num(principal.get('t_cluster'))}",
+                    "veredicto": _verdict(bool(summary.get("passed"))),
+                }
+            )
+    return rows
+
+
 def _ledger_values(ledger_dir: Path) -> dict[str, str]:
     """N del registro de ensayos compartido (PQ-112): lo que cuenta en el Deflated Sharpe."""
     if not any(ledger_dir.glob("*.jsonl")):
@@ -470,6 +519,7 @@ def build_public_page(data_dir: Path, repo_root: Path, now: datetime) -> str:
     )
     h2_summary = art.carry.get("H2")
     gates = to_markdown(gates_table(h2_summary)) if h2_summary else "*Artefacto no disponible.*\n"
+    development = pl.DataFrame(_development_rows(research))
     finals = pl.DataFrame(
         [
             {
@@ -569,8 +619,11 @@ def build_public_page(data_dir: Path, repo_root: Path, now: datetime) -> str:
             "[registro de ensayos](estrategias/registro-de-ensayos.md). El Deflated Sharpe de cada "
             "estrategia descuenta los ensayos de su familia (el N del gate G1).",
             "",
-            "En evaluación con el mismo protocolo: el momentum transversal en perpetuos y el sesgo "
-            "favorito-longshot en Polymarket.",
+            "## Las que se quedaron en el desarrollo",
             "",
+            "Se probaron con el mismo protocolo y no pasaron sus condiciones mínimas, así que su "
+            "prueba final no se abrió. Cada ejecución cuenta en el N de su familia.",
+            "",
+            to_markdown(development) if not development.is_empty() else "*Sin evaluaciones.*\n",
         ]
     )

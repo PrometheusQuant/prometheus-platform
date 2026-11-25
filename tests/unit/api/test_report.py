@@ -290,3 +290,43 @@ def test_the_final_test_values_say_when_a_strategy_was_discarded() -> None:
         "config": "k9-theta20",
     }
     assert report._holdout_values({**summary, "pasa": True})["veredicto"] == "pasa"
+
+
+def test_development_rows_list_the_strategies_that_stopped_in_development(tmp_path: Path) -> None:
+    """PQ-77: la página lista las estrategias descartadas en el desarrollo, desde sus artefactos."""
+
+    def put(rel: str, data: dict[str, object]) -> None:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    put(
+        "momentum/X1/summary.json",
+        {
+            "selected": "X1-L28",
+            "passed": False,
+            "selected_performance": {"cagr": 0.0293, "t_stat": 0.4453},
+        },
+    )
+    put(
+        "polymarket/P1/summary.json",
+        {
+            "principal": "P1-B80",
+            "passed": False,
+            "configuraciones": {"P1-B80": {"mean_return": -0.0059, "t_cluster": -2.0733}},
+        },
+    )
+    rows = report._development_rows(tmp_path)
+    assert rows == [
+        {
+            "estrategia": "Momentum transversal, largo/corto (X1-L28)",
+            "resultado": "2,9 % anual; t = 0,45",
+            "veredicto": "descartada en el desarrollo",
+        },
+        {
+            "estrategia": "Polymarket, comprar al favorito (fuera de deportes)",
+            "resultado": "-0,59 % por apuesta; t = -2,07",
+            "veredicto": "descartada en el desarrollo",
+        },
+    ]
+    assert report._development_rows(tmp_path / "vacio") == []
