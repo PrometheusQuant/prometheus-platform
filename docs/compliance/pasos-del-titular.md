@@ -15,15 +15,37 @@ escribir **«listo, paso N»** en el chat de Claude: el agente comprueba y conti
 
 | Paso | Qué | Tiempo | Desbloquea |
 |---|---|---|---|
-| [1](#paso-1-comisiones-reales-de-binance-pq-17) | Comisiones reales de Binance, sin operar | 15 min | 5 evaluaciones retenidas (PQ-68, PQ-66, PQ-69, PQ-114, PQ-94), lo que depende de ellas (PQ-82, PQ-101) y el holdout del carry |
-| [2](#paso-2-claves-de-binance-demo-pq-51-pq-52-pq-95) | Claves de Binance Demo | 10 min | PQ-51, PQ-52 y PQ-95 (ejecución en Demo) |
+| [1](#paso-1-comisiones-reales-de-binance-pq-17) | ✓ **Hecho** (23-nov). Comisiones reales de Binance, sin operar | 15 min | 5 evaluaciones retenidas (PQ-68, PQ-66, PQ-69, PQ-114, PQ-94), lo que depende de ellas (PQ-82, PQ-101) y el holdout del carry |
+| [2](#paso-2-claves-de-binance-demo-pq-51-pq-52-pq-95) | ✓ **Hecho** (24-nov). Claves de Binance Demo | 10 min | PQ-51, PQ-52 y PQ-95 (ejecución en Demo) |
 | [3](#paso-3-opcional-clave-de-anthropic-para-pregunta-pq-90) | **Opcional, aplazado:** clave de Anthropic para `/pregunta` | 10 min | El asistente del bot de Telegram (PQ-90) |
 | [4](#paso-4-prueba-de-usabilidad-con-3-personas-pq-76) | Prueba de usabilidad con 3 personas | 1 h y media | PQ-76 (cap. 7.2 del informe) |
-| [5](#paso-5-claves-de-bybit-testnet-pq-100) | Claves de Bybit testnet | 10 min | PQ-100 (segundo exchange en paper) |
+| [5](#paso-5-claves-de-bybit-testnet-pq-100) | ✓ **Hecho**. Claves de Bybit testnet; el adaptador se probó con ellas el 25-nov | 10 min | PQ-100 (segundo exchange en paper) |
 | [6](#paso-6-hacer-publica-la-imagen-del-dashboard-pq-81) | Hacer pública la imagen del dashboard en GHCR | 2 min | El despliegue en la VM sin credenciales (PQ-57) |
 | [7](#paso-7-mantener-la-laptop-encendida) | Mantener la laptop encendida | 5 min | Que el paper trading siga 24/7 mientras no hay VM |
-| [8](#paso-8-opcional-revisar-los-pre-registros) | Opcional: revisar los pre-registros | 20 min | Nada; da tranquilidad antes de las ejecuciones que cuentan en N |
-| [9](#paso-9-verificacion-externa-de-disponibilidad-pq-97) | Cuenta gratuita de Healthchecks.io | 10 min | La alerta si la VM o la laptop dejan de responder (PQ-97) |
+| [8](#paso-8-opcional-revisar-los-pre-registros) | **Ya no aplica:** las evaluaciones se ejecutaron el 23 y el 25-nov | 20 min | Nada; da tranquilidad antes de las ejecuciones que cuentan en N |
+| [9](#paso-9-verificacion-externa-de-disponibilidad-pq-97) | ✓ **Hecho** (23-nov). Cuenta gratuita de Healthchecks.io | 10 min | La alerta si la VM o la laptop dejan de responder (PQ-97) |
+
+| [10 a 16](#sesion-del-25-nov-1900-a-2000-hora-de-bolivia) | **La sesión del 25-nov**: dos decisiones, GitHub for Jira, el QR, el ensayo del pitch y el release | 1 h | PQ-123, PQ-100 (parte 2), PQ-13, PQ-60 y el cierre del Sprint 5 |
+
+## Sesión del 25-nov (19:00 a 20:00, hora de Bolivia)
+
+En este orden: primero lo que se decide en un minuto y desbloquea trabajo del agente, luego lo
+corto y al final el ensayo. Para cada paso, escribe **«listo, paso N»**, o la decisión en una
+línea.
+
+| Paso | Qué | Tiempo | Qué hace el agente después |
+|---|---|---|---|
+| 10 | **Decidir el PDCA del carry (PQ-123).** Lee el diagnóstico y las opciones en el [PR #158](https://github.com/PrometheusQuant/prometheus-platform/pull/158) (archivo `docs/estrategias/01-carry/pdca-drift-2026-11.md`). Responde con una letra: A (archivar con condiciones para retomarlo, recomendada), B, C o D | 5 min | Registra la decisión, añade al monitor la señal de reactivación si eliges A, cierra el issue #120 y fusiona |
+| 11 | **Decidir la parte 2 de Bybit (PQ-100).** ¿El runner debe operar Binance y Bybit a la vez? Su motivo era repartir el riesgo de quiebra del carry, que ya está descartado. Responde «sí» (unas horas de trabajo del agente) o «no, cerrar con la parte 1» | 1 min | Lo programa o cierra PQ-100 |
+| 12 | **Pedir el release a `main`.** Escribe «haz el release». Deja una versión estable para la feria y hace que corra el mutation testing semanal (PQ-121), que GitHub solo lanza desde `main` | 1 min | Abre el PR develop → main con merge commit, fusiona con la CI en verde, etiqueta y hace el back-merge |
+| 13 | **GitHub for Jira (PQ-13).** En Jira: ⚙ → Apps → **GitHub for Jira** → Connect → organización `PrometheusQuant` → Install. Con eso, los commits y PR con `PQ-n` aparecen en cada ticket | 10 min | Comprueba que un ticket muestra sus PR y cierra PQ-13 |
+| 14 | **Probar el QR del póster.** Abre [poster-feria.pdf](../academico/poster-feria.pdf) en la pantalla y escanéalo con el celular: debe abrir la página de resultados | 2 min | Nada, si funciona. Si no, cambia el QR |
+| 15 | **Ensayar el pitch con cronómetro (PQ-60).** Abre el pitch, sigue la diapositiva «guion» y cronometra; la meta es 6 min 50 s. Luego expórtalo a PDF desde el menú del visor | 30 min | Ajusta lo que se pase de tiempo y cierra PQ-60 con el PDF enlazado |
+| 16 | **Cerrar el Sprint 5.** Escribe «cierra el sprint 5» cuando PQ-60 y PQ-13 estén hechos o se puedan pasar al 6 | 1 min | Cierra el Sprint 5 e inicia el 6 en Jira |
+
+**Quedan para otros días:** el video de la demo (PQ-77, 30 a 45 min, con el guion de
+[feria.md](../academico/feria.md)), la prueba con 3 personas (paso 4, PQ-76) y Power BI en Windows
+(PQ-47, juntos).
 
 Sin el paso 1 no se puede correr ninguna evaluación de investigación: cada una cuenta en N y no
 tiene vuelta atrás.
