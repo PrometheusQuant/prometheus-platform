@@ -15,6 +15,8 @@ Cada carpeta sigue el ciclo PDCA y los gates de CRISP-ML(Q):
 
 El commit del `pre-registro.md` es la evidencia fechada de que la hipótesis no se ajustó a los resultados.
 
+Para una estrategia nueva, copia la [plantilla de pre-registro](plantilla-pre-registro.md), que incluye el método de validación de PQ-122.
+
 ## Estado
 
 | Estrategia | Pre-registro | Evaluación | Holdout | Decisión |
