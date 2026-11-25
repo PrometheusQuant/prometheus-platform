@@ -9,7 +9,7 @@ import pytest
 import structlog
 
 from prometheus_platform.adapters.jsonl_journal import JsonlEventJournal
-from prometheus_platform.api import cli
+from prometheus_platform.api import cli, report
 from prometheus_platform.api.report import (
     FIGURES,
     NA,
@@ -189,7 +189,15 @@ def test_conclusion_inputs_come_from_stats_finance_and_the_trial_ledger(tmp_path
     assert values["finanzas"]["van_1000_3a"] == "-315 USD"
     assert values["finanzas"]["equilibrio"] == "28.368 USD"
     assert values["finanzas"]["van_negativo"] == "en todos los casos evaluados"
-    assert values["ensayos"] == {"total": "2", "carry": "1", "modelo": "1"}
+    assert values["ensayos"] == {
+        "total": "2",
+        "carry": "1",
+        "modelo": "1",
+        "tendencia": "0",
+        "otras": "0",
+    }
+    # Sin artefactos de la prueba final, sus valores quedan como «n/d» (PQ-77).
+    assert values["final_carry"]["veredicto"] == "n/d"
 
 
 def test_conclusion_inputs_are_na_without_artifacts(tmp_path: Path) -> None:
@@ -264,3 +272,21 @@ def test_cli_report_public(
     assert cli.main(["report", "public", "--out", str(out)]) == 0
     assert out.read_text(encoding="utf-8").startswith("# Resultados")
     assert "página pública" in capsys.readouterr().out
+
+
+def test_the_final_test_values_say_when_a_strategy_was_discarded() -> None:
+    """PQ-77: el póster y la página pública muestran la prueba final, no «sigue cerrado»."""
+    summary = {
+        "seleccionada": "k9-theta20",
+        "rendimiento": {"cagr": 0.0021578, "sharpe": 1.7327, "max_drawdown": -0.00107},
+        "pasa": False,
+    }
+    values = report._holdout_values(summary)
+    assert values == {
+        "cagr": "0,22 %",
+        "sharpe": "1,73",
+        "max_dd": "-0,1 %",
+        "veredicto": "descartada",
+        "config": "k9-theta20",
+    }
+    assert report._holdout_values({**summary, "pasa": True})["veredicto"] == "pasa"
