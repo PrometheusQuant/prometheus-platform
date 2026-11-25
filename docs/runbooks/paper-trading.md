@@ -299,7 +299,7 @@ PQ_ENVIRONMENT=paper uv run pq paper costes --broker binance-demo
   gris.
 - El muestreo **rechaza SOL, BNB y XRP**, que los opera el runner de Demo en la misma cuenta. Solo
   se pueden incluir con `--incluir-simbolos-del-runner` y con ese runner detenido.
-- Limites del muestreo: de 1 a 10 rondas y de 10 a 1.000 USDT por orden. El perpetuo de BTC exige
+- Límites del muestreo: de 1 a 10 rondas y de 10 a 1.000 USDT por orden. El perpetuo de BTC exige
   al menos 100 USDT por orden: usar 250 deja margen tras el redondeo de la cantidad.
 - Si lo medido es peor que lo supuesto, se abre un ticket de enmienda para los backtests
   siguientes. Los ya evaluados no se tocan. Primer resultado:
