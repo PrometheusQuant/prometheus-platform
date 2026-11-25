@@ -154,6 +154,19 @@ def test_longs_pay_and_shorts_collect_positive_funding() -> None:
     assert paid.funding_pnl < 0  # X2 solo larga: siempre paga con tasa positiva
 
 
+def test_funding_is_settled_even_when_the_bar_is_missing() -> None:
+    """Sin la vela de la liquidación, el funding se cobra igual, a la última marca."""
+    config = mo.MomentumConfig(7, mo.Hypothesis.X2)
+    end = MONDAY + timedelta(days=7)
+    full = mo.simulate(universe(rate=0.001), config=config, costs=COSTS, start=MONDAY, end=end)
+    gapped = []
+    for m in universe(rate=0.001):
+        hourly = m.hourly.filter(pl.col("open_time") != MONDAY + timedelta(days=2, hours=7))
+        gapped.append(mo.SymbolMarket(m.symbol, hourly, m.settlements))
+    holes = mo.simulate(gapped, config=config, costs=COSTS, start=MONDAY, end=end)
+    assert holes.funding_pnl == pytest.approx(full.funding_pnl, rel=0.01)
+
+
 def test_the_decision_does_not_look_ahead() -> None:
     """Cambiar los precios desde el lunes 01:00 no cambia lo que se decidió el lunes a las 00:00."""
     base = universe()
