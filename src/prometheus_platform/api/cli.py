@@ -188,6 +188,11 @@ def _add_research(commands: Commands) -> None:
         "trend", help="Tendencia (T1 y T2): periodo de desarrollo, las 12 configuraciones (PQ-68)"
     )
     trend.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
+    momentum = studies.add_parser(
+        "momentum",
+        help="Momentum transversal (X1 y X2): desarrollo, las 6 configuraciones (PQ-114)",
+    )
+    momentum.add_argument("--figures", type=Path, help="carpeta donde guardar las figuras")
     carry_holdout = studies.add_parser(
         "carry-holdout",
         help="Carry H2: abre el holdout UNA SOLA VEZ con la configuración elegida (PQ-50)",
@@ -634,6 +639,38 @@ def _research_trend(data_dir: Path, figures: Path | None, ledger: TrialLedger) -
     return 0
 
 
+def _research_momentum(data_dir: Path, figures: Path | None, ledger: TrialLedger) -> int:
+    from prometheus_platform.research import momentum as mo  # noqa: PLC0415
+    from prometheus_platform.research import momentum_evaluation as me  # noqa: PLC0415
+    from prometheus_platform.research.reporting import (  # noqa: PLC0415
+        plot_equity,
+        write_momentum_outputs,
+    )
+
+    universe = json.loads(MOMENTUM_UNIVERSE_FILE.read_text(encoding="utf-8"))
+    data = [me.load_market(data_dir / "silver", s) for s in universe["universo"]]
+    costs = mo.main_costs(universe["menor_volumen_10pb"])
+    others = me.other_returns(data_dir / "research")
+    # Las 6 configuraciones se registran (N) antes de evaluar cualquiera de las dos hipótesis.
+    evaluations = me.evaluate_family(data, ledger, costs=costs, others=others)
+    for hypothesis, evaluation in evaluations.items():
+        out = data_dir / "research" / "momentum" / str(hypothesis)
+        path = write_momentum_outputs(evaluation, out)
+        if figures is not None:
+            plot_equity(
+                evaluation,
+                figures / f"{str(hypothesis).lower()}-curvas.png",
+                evaluation.benchmark_returns,
+                benchmark_label="B1 universo a partes iguales",
+            )
+        verdict = "PASA" if evaluation.passed else "NO PASA"
+        print(f"{hypothesis}: elegida={evaluation.selected} gates={verdict} resumen={path}")
+        for gate in evaluation.gates:
+            mark = "OK " if gate.passed else "NO "
+            print(f"  {gate.name} {mark}{gate.criterion}: {gate.value:.4f}")
+    return 0
+
+
 def _development_panel(data_dir: Path) -> pl.DataFrame:
     from prometheus_platform.research import carry_evaluation as ce  # noqa: PLC0415
     from prometheus_platform.research.panel import development_only  # noqa: PLC0415
@@ -875,8 +912,10 @@ def _research(args: argparse.Namespace, settings: Settings, argv: Sequence[str])
     if args.study == "carry":
         ledger = _ledger(settings, "carry", command)
         return _research_carry(data_dir, args.hypothesis, args.figures, ledger)
-    if args.study == "trend":
-        return _research_trend(data_dir, args.figures, _ledger(settings, "tendencia", command))
+    trend_family = {"trend": _research_trend, "momentum": _research_momentum}
+    if args.study in trend_family:
+        ledger = _ledger(settings, "tendencia", command)
+        return trend_family[args.study](data_dir, args.figures, ledger)
     holdouts = {"carry-holdout": ("carry", _research_carry_holdout)}
     holdouts["trend-holdout"] = ("tendencia", _research_trend_holdout)
     if args.study in holdouts:
